@@ -1,209 +1,196 @@
 {% extends "youtube_base.html" %}
-
 {% block title %}Downloading...{% endblock %}
-
 {% block content %}
-<div class="card">
+
+<div class="container py-4">
+  <h4 class="mb-3">Downloading</h4>
+
+  <div class="card mb-3">
     <div class="card-body">
-        <h4 class="card-title">Downloading</h4>
+      <p class="mb-2">
+        <strong>Status:</strong>
+        <span id="taskStatus">⏳ Starting…</span>
+      </p>
 
-        <div class="current-video">
-            <span class="icon" id="currentIcon">⏳</span>
-            <span class="name" id="currentName">Starting…</span>
-        </div>
+      <div class="progress mb-3" style="height: 22px;">
+        <div id="progressBar"
+             class="progress-bar progress-bar-striped progress-bar-animated"
+             role="progressbar"
+             style="width: 0%;"
+             aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">0%</div>
+      </div>
 
-        <div class="progress mb-3" style="height: 22px;">
-            <div id="statusBar" class="progress-bar progress-bar-striped progress-bar-animated"
-                 role="progressbar" style="width: 0%; background: #dc3545;">
-                <span id="statusText">0%</span>
-            </div>
-        </div>
+      <p class="mb-2">
+        <strong>Current:</strong>
+        <span id="currentVideo">—</span>
+      </p>
 
-        <div class="d-flex gap-2 flex-wrap mb-2">
-            <button id="cancelBtn" class="btn btn-danger" onclick="cancelTask()">Cancel</button>
-            <a href="{{ url_for('youtube.index') }}" class="btn btn-secondary">← Back</a>
-        </div>
+      <p class="mb-2">
+        <strong>Items:</strong>
+        <span id="itemsDone">0</span> / <span id="itemsTotal">0</span>
+      </p>
 
-        <div id="resultSection" style="display:none;">
-            <h6 style="margin-top:1rem;">Downloaded files:</h6>
-            <div id="resultGrid" class="result-grid"></div>
-        </div>
+      <div class="d-flex gap-2">
+        <button type="button"
+                class="btn btn-danger"
+                id="cancelBtn"
+                data-task-id="{{ task.id }}">
+          Cancel
+        </button>
+        <a href="{{ url_for('youtube.index') }}" class="btn btn-secondary">
+          ← Back
+        </a>
+      </div>
     </div>
+  </div>
+
+  <h6 class="mt-4">Downloaded files:</h6>
+  <ul id="resultFiles" class="list-group mb-3"></ul>
+</div>
+
+<!-- ================= МОДАЛКА ПОДТВЕРЖДЕНИЯ ОТМЕНЫ ================= -->
+<div class="modal fade" id="cancelModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Отменить загрузку?</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button>
+      </div>
+      <div class="modal-body">
+        <p class="mb-0">
+          Текущая загрузка будет прервана. Уже скачанные файлы останутся на диске.
+        </p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+          Нет
+        </button>
+        <button type="button" class="btn btn-danger" id="cancelConfirmBtn">
+          Да, отменить
+        </button>
+      </div>
+    </div>
+  </div>
 </div>
 {% endblock %}
 
 {% block scripts %}
 <script>
-    const taskId = '{{ task.id }}';
-    let finished = false;
+(function () {
+  'use strict';
 
-    const PREVIEW_SEEK_SECONDS = 6;
+  var cancelBtn        = document.getElementById('cancelBtn');
+  var cancelConfirmBtn = document.getElementById('cancelConfirmBtn');
+  var cancelModalEl    = document.getElementById('cancelModal');
+  var progressBar      = document.getElementById('progressBar');
+  var taskStatus       = document.getElementById('taskStatus');
+  var currentVideo     = document.getElementById('currentVideo');
+  var itemsDone        = document.getElementById('itemsDone');
+  var itemsTotal       = document.getElementById('itemsTotal');
+  var resultFiles      = document.getElementById('resultFiles');
 
-    const currentIcon = document.getElementById('currentIcon');
-    const currentName = document.getElementById('currentName');
-    const statusBar = document.getElementById('statusBar');
-    const statusText = document.getElementById('statusText');
-    const cancelBtn = document.getElementById('cancelBtn');
-    const resultSection = document.getElementById('resultSection');
-    const resultGrid = document.getElementById('resultGrid');
+  if (!cancelBtn || !cancelModalEl) return;
 
-    function progressLabel(s) {
-        if (s.items_total > 1) {
-            const perItem = 1 / s.items_total;
-            const currentFraction = (s.progress_percent || 0) / 100;
-            const overall = Math.min(100, ((s.items_done || 0) + currentFraction) * perItem * 100);
-            return overall.toFixed(1);
+  var taskId = cancelBtn.dataset.taskId;
+  var cancelModal = new bootstrap.Modal(cancelModalEl);
+
+  // --- Открыть модалку по кнопке Cancel ---
+  cancelBtn.addEventListener('click', function () {
+    cancelModal.show();
+  });
+
+  // --- Подтвердить отмену ---
+  cancelConfirmBtn.addEventListener('click', function () {
+    cancelConfirmBtn.disabled = true;
+    cancelConfirmBtn.textContent = 'Отмена...';
+
+    fetch('/youtube/cancel/' + taskId, { method: 'POST' })
+      .then(function (r) { return r.json().catch(function () { return {}; }); })
+      .then(function (data) {
+        cancelModal.hide();
+        if (data && data.success) {
+          taskStatus.textContent = '⏹️ Cancelled by user.';
+          progressBar.classList.remove('progress-bar-animated');
+          progressBar.classList.add('bg-secondary');
+        } else {
+          taskStatus.textContent = '⚠️ ' + (data.error || 'Не удалось отменить');
         }
-        return (s.progress_percent || 0).toFixed(1);
-    }
+      })
+      .catch(function (err) {
+        console.error('cancel error:', err);
+        taskStatus.textContent = '⚠️ Ошибка отмены';
+      })
+      .finally(function () {
+        cancelConfirmBtn.disabled = false;
+        cancelConfirmBtn.textContent = 'Да, отменить';
+      });
+  });
 
-    function seekPreview(videoEl) {
-        try {
-            const dur = videoEl.duration;
-            if (!dur || isNaN(dur)) return;
-            let target = PREVIEW_SEEK_SECONDS;
-            if (dur < PREVIEW_SEEK_SECONDS * 2) {
-                target = dur / 2;
-            }
-            videoEl.currentTime = target;
-        } catch (e) {
+  // --- Опрос состояния задачи каждые 1.5 сек ---
+  function updateUI(state) {
+    if (!state) return;
+
+    var status = state.status || 'unknown';
+    var labels = {
+      'starting': '⏳ Starting…',
+      'running':  '⏳ Running…',
+      'complete': '✅ Done',
+      'error':    '❌ Error',
+      'cancelled':'⏹️ Cancelled'
+    };
+    taskStatus.textContent = labels[status] || status;
+
+    var pct = Math.max(0, Math.min(100, state.progress_percent || 0));
+    progressBar.style.width = pct + '%';
+    progressBar.setAttribute('aria-valuenow', pct);
+    progressBar.textContent = pct.toFixed(1) + '%';
+
+    currentVideo.textContent = state.current_video || '—';
+    itemsDone.textContent  = state.items_done  || 0;
+    itemsTotal.textContent = state.items_total || 0;
+
+    // Файлы
+    resultFiles.innerHTML = '';
+    (state.result_files || []).forEach(function (f) {
+      var li = document.createElement('li');
+      li.className = 'list-group-item d-flex justify-content-between align-items-center';
+
+      var a = document.createElement('a');
+      a.href = '/youtube/media/' + taskId + '/' + encodeURIComponent(f.name);
+      a.textContent = f.name;
+      a.target = '_blank';
+      li.appendChild(a);
+
+      if (f.is_video) {
+        var badge = document.createElement('span');
+        badge.className = 'badge bg-primary rounded-pill';
+        badge.textContent = 'video';
+        li.appendChild(badge);
+      }
+      resultFiles.appendChild(li);
+    });
+
+    if (status === 'complete' || status === 'error' || status === 'cancelled') {
+      progressBar.classList.remove('progress-bar-animated');
+    }
+  }
+
+  function poll() {
+    fetch('/youtube/state/' + taskId)
+      .then(function (r) { return r.json(); })
+      .then(function (state) {
+        updateUI(state);
+        if (state && ['complete', 'error', 'cancelled'].indexOf(state.status) === -1) {
+          setTimeout(poll, 1500);
         }
-    }
+      })
+      .catch(function (err) {
+        console.error('poll error:', err);
+        setTimeout(poll, 3000);
+      });
+  }
 
-    function renderResults(files) {
-        if (!files || !files.length) return;
-        resultSection.style.display = 'block';
-        resultGrid.innerHTML = '';
-        for (const f of files) {
-            const a = document.createElement('a');
-            a.className = 'result-card';
-            a.href = '/youtube/media/' + taskId + '/' + encodeURIComponent(f.name);
-            a.target = '_blank';
-            a.title = f.name;
-
-            const url = a.href;
-            if (f.is_video) {
-                const v = document.createElement('video');
-                v.src = url;
-                v.muted = true;
-                v.playsInline = true;
-                v.preload = 'metadata';
-                v.addEventListener('loadedmetadata', function() {
-                    seekPreview(v);
-                }, { once: true });
-                if (v.readyState >= 1) {
-                    seekPreview(v);
-                }
-                a.appendChild(v);
-            } else {
-                const img = document.createElement('img');
-                img.src = url;
-                img.loading = 'lazy';
-                a.appendChild(img);
-            }
-
-            const overlay = document.createElement('div');
-            overlay.className = 'overlay';
-            overlay.textContent = f.name;
-            a.appendChild(overlay);
-
-            const hint = document.createElement('span');
-            hint.className = 'open-hint';
-            hint.textContent = '↗ Open';
-            a.appendChild(hint);
-
-            resultGrid.appendChild(a);
-        }
-    }
-
-    function setStatus(s) {
-        const label = progressLabel(s);
-        statusBar.style.width = label + '%';
-        statusText.textContent = label + '%';
-
-        if (s.status === 'running' || s.status === 'starting') {
-            statusBar.style.background = '#dc3545';
-            statusBar.classList.add('progress-bar-animated');
-            currentIcon.textContent = '⏳';
-            if (s.current_video) {
-                currentName.textContent = s.current_video;
-            } else if (s.items_total > 1) {
-                currentName.textContent = 'Collecting playlist… (' + s.items_total + ' items)';
-            } else {
-                currentName.textContent = 'Starting…';
-            }
-            return;
-        }
-
-        statusBar.classList.remove('progress-bar-animated');
-        cancelBtn.disabled = true;
-
-        if (s.status === 'complete') {
-            statusBar.style.background = '#28a745';
-            statusBar.style.width = '100%';
-            statusText.textContent = '✅ Done';
-            currentIcon.textContent = '✅';
-            if (s.result_files && s.result_files.length) {
-                currentName.textContent = 'Downloaded ' + s.result_files.length + ' file(s)';
-            } else {
-                currentName.textContent = 'Done';
-            }
-            renderResults(s.result_files || []);
-        } else if (s.status === 'cancelled') {
-            statusBar.style.background = '#ffc107';
-            currentIcon.textContent = '⏹';
-            currentName.textContent = 'Cancelled';
-            renderResults(s.result_files || []);
-            resultSection.style.display = 'block';
-        } else if (s.status === 'error') {
-            statusBar.style.background = '#dc3545';
-            statusBar.style.width = '100%';
-            statusText.textContent = '❌ Error';
-            currentIcon.textContent = '❌';
-            currentName.textContent = 'Error (code ' + (s.returncode != null ? s.returncode : '?') + ')';
-            renderResults(s.result_files || []);
-        }
-    }
-
-    let resultFilesCount = 0;
-
-    async function poll() {
-        if (finished) return;
-        try {
-            const r = await fetch('/youtube/state/' + taskId);
-            if (!r.ok) {
-                currentName.textContent = 'Task not found';
-                finished = true;
-                return;
-            }
-            const s = await r.json();
-            setStatus(s);
-
-            if (s.result_files && s.result_files.length > resultFilesCount) {
-                resultFilesCount = s.result_files.length;
-                renderResults(s.result_files);
-            }
-
-            if (s.status === 'complete' ||
-                s.status === 'error' ||
-                s.status === 'cancelled') {
-                finished = true;
-                return;
-            }
-        } catch (e) {
-            console.error(e);
-        }
-        setTimeout(poll, 800);
-    }
-
-    async function cancelTask() {
-        if (!confirm('Cancel this download?')) return;
-        cancelBtn.disabled = true;
-        try {
-            await fetch('/youtube/cancel/' + taskId, { method: 'POST' });
-        } catch (e) { console.error(e); }
-    }
-
-    poll();
+  poll();
+})();
 </script>
 {% endblock %}
