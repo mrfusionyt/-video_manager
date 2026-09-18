@@ -1,4 +1,17 @@
+"""
+Точка входа VideoManager.
 
+Только:
+  • создание Flask-приложения
+  • инициализация БД
+  • регистрация blueprint'ов addon'ов (instagram, youtube)
+  • template_filter + context_processor
+  • регистрация всех вьюх через views.register_all(app)
+
+Сами роуты вынесены в пакет views/.
+Конфиг — в config.py.
+Помощники — в helpers/.
+"""
 from flask import Flask, request
 
 from models import (
