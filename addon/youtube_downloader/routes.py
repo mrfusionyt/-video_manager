@@ -92,15 +92,12 @@ def media(task_id, filename):
     if not save_dir or not os.path.isdir(save_dir):
         abort(404)
 
-    # Декодируем имя файла из URL
     decoded = unquote(filename)
 
-    # 1) Прямой путь
     full = os.path.join(save_dir, decoded)
     if os.path.isfile(full):
         return send_from_directory(save_dir, decoded)
 
-    # 2) Поиск по basename (учитываем эмодзи и пробелы)
     basename = os.path.basename(decoded)
     for root, dirs, files in os.walk(save_dir):
         for fn in files:
@@ -108,7 +105,6 @@ def media(task_id, filename):
                 rel = os.path.relpath(os.path.join(root, fn), save_dir)
                 return send_from_directory(save_dir, rel)
 
-    # 3) Нормализация Unicode (NFC/NFD)
     import unicodedata
     basename_nfc = unicodedata.normalize('NFC', basename)
     basename_nfd = unicodedata.normalize('NFD', basename)

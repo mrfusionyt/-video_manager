@@ -1,60 +1,60 @@
 """
 Точка входа VideoManager.
-
-Только:
-  • создание Flask-приложения
-  • инициализация БД
-  • регистрация blueprint'ов addon'ов (instagram, youtube)
-  • template_filter + context_processor
-  • регистрация всех вьюх через views.register_all(app)
-
-Сами роуты вынесены в пакет views/.
-Конфиг — в config.py.
-Помощники — в helpers/.
 """
-from flask import Flask, request
+import os
+import sys
 
-from models import (
-    init_db,
-    get_categories,
-    get_all_videos,
-    get_libraries,
-)
+from flask import Flask, request, send_from_directory
+
+def resource_path(relative_path: str) -> str:
+    if hasattr(sys, "_MEIPASS"):
+        return os.path.join(sys._MEIPASS, relative_path)
+    return os.path.join(os.path.abspath(os.path.dirname(__file__)), relative_path)
+
+if getattr(sys, "frozen", False):
+    BASE_DIR = os.path.dirname(sys.executable)
+else:
+    BASE_DIR = os.path.abspath(os.path.dirname(__file__))
+
+from models import init_db, get_categories, get_all_videos, get_libraries
 from artists import init_artists_db, get_all_artists
 from scanner import scan_libraries
 from config import app_config, DARK_MODE, MODE_LABELS
 from helpers.profiles import get_current_profile, profile_to_mode
-
-# addon-ы
 from addon.instagram_downloader import instagram_bp, set_post_download_hook
 from addon.youtube_downloader import youtube_bp
-
-# все вьюхи
 from views import register_all
 
-
-app = Flask(__name__)
+app = Flask(
+    __name__,
+    template_folder=resource_path("templates"),
+    static_folder=resource_path("static"),
+    static_url_path="/static",
+)
 app.secret_key = 'change-me-to-a-random-secret-key'
+app.config["BASE_DIR"] = BASE_DIR
+app.config["IMAGE_DIR"] = resource_path("image")
+app.config["DOP_DIR"] = resource_path("_dop")
 
-# Инициализация БД
+# Deno для yt-dlp: добавляем _dop в PATH при старте
+os.environ["PATH"] = app.config["DOP_DIR"] + os.pathsep + os.environ.get("PATH", "")
+
 init_db()
 init_artists_db()
 
-# Регистрация blueprint'ов addon'ов
 app.register_blueprint(instagram_bp)
 app.register_blueprint(youtube_bp)
-
-# После скачивания из Instagram — пере-сканируем библиотеки
 set_post_download_hook(scan_libraries)
-
-# Регистрация всех вьюх (routes) из пакета views/
 register_all(app)
 
 
-# ---------- Jinja-фильтр ----------
+@app.route("/image/<path:filename>")
+def image_files(filename):
+    return send_from_directory(app.config["IMAGE_DIR"], filename)
+
+
 @app.template_filter('mode_name')
 def mode_name_filter(mode):
-    """Переводит числовой mode в человекочитаемое имя профиля."""
     try:
         m = int(mode)
     except (TypeError, ValueError):
@@ -62,7 +62,6 @@ def mode_name_filter(mode):
     return MODE_LABELS.get(m, str(mode))
 
 
-# ---------- Context processor ----------
 @app.context_processor
 def inject_globals():
     current_profile = get_current_profile()
@@ -88,7 +87,6 @@ def inject_globals():
         except Exception as e:
             print(f"[sidebar] get_all_artists error: {e}")
             artists_sidebar = []
-
         if request.endpoint == 'artist_view':
             try:
                 selected_artist_id = int((request.view_args or {}).get('artist_id', 0))

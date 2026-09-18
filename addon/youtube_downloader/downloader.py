@@ -8,33 +8,118 @@ import threading
 import subprocess
 from datetime import datetime
 
+
 TASKS = {}
 _lock = threading.Lock()
 
 
-def _find_ffmpeg_dir():
-    candidates = [
-        # _dop в корне проекта (addon/youtube_downloader → ../.. → корень)
-        os.path.normpath(os.path.join(
-            os.path.dirname(os.path.abspath(__file__)), '..', '..', '_dop'
-        )),
-        # _dop рядом с модулем (fallback)
-        os.path.normpath(os.path.join(
-            os.path.dirname(os.path.abspath(__file__)), '_dop'
-        )),
-        # PyInstaller
-        os.path.normpath(os.path.join(
-            getattr(sys, '_MEIPASS', ''), '_dop'
-        )),
-    ]
+# ===================================================================
+#         ПУТИ К _dop (ffmpeg, ffprobe, deno, yt-dlp, cookies)
+# ===================================================================
+def _dop_dir():
+    meipass = getattr(sys, '_MEIPASS', None)
+
+    candidates = []
+    if meipass:
+        candidates.append(os.path.join(meipass, '_dop'))
+
+    candidates.append(os.path.normpath(os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), '..', '..', '_dop'
+    )))
+    candidates.append(os.path.normpath(os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), '_dop'
+    )))
+
     for p in candidates:
         if p and os.path.isfile(os.path.join(p, 'ffmpeg.exe')):
-            return p
+            return os.path.abspath(p)
+    for p in candidates:
+        if p and os.path.isdir(p):
+            return os.path.abspath(p)
     return None
 
 
-FFMPEG_DIR = _find_ffmpeg_dir()
+DOP_DIR = _dop_dir()
+
+FFMPEG_DIR = None
+if DOP_DIR:
+    _ff = os.path.join(DOP_DIR, 'ffmpeg.exe')
+    if os.path.isfile(_ff):
+        FFMPEG_DIR = DOP_DIR
+
+DENO_PATH = None
+if DOP_DIR:
+    _dn = os.path.join(DOP_DIR, 'deno.exe')
+    if os.path.isfile(_dn):
+        DENO_PATH = _dn
+
+YTDLP_EXE = None
+if DOP_DIR:
+    _yd = os.path.join(DOP_DIR, 'yt-dlp.exe')
+    if os.path.isfile(_yd):
+        YTDLP_EXE = _yd
+
+COOKIES_FILE = None
+_cookie_candidates = []
+if DOP_DIR:
+    _cookie_candidates.append(os.path.join(DOP_DIR, 'cookies.txt'))
+_cookie_candidates.append(os.path.normpath(os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), '..', '..', 'cookies.txt'
+)))
+_cookie_candidates.append(os.path.normpath(os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), 'cookies.txt'
+)))
+for _c in _cookie_candidates:
+    if os.path.isfile(_c):
+        COOKIES_FILE = _c
+        break
+
+if DOP_DIR:
+    os.environ['PATH'] = DOP_DIR + os.pathsep + os.environ.get('PATH', '')
+
 PYTHON_EXE = sys.executable
+IS_FROZEN = getattr(sys, 'frozen', False)
+
+print(f"[downloader] _dop dir = {DOP_DIR}")
+print(f"[downloader] ffmpeg   = {FFMPEG_DIR}")
+print(f"[downloader] deno     = {DENO_PATH}")
+print(f"[downloader] yt-dlp   = {YTDLP_EXE or '(нет в _dop)'}")
+print(f"[downloader] cookies  = {COOKIES_FILE or '(нет)'}")
+print(f"[downloader] frozen   = {IS_FROZEN}")
+print(f"[downloader] mode     = "
+      f"{'EXE (standalone yt-dlp.exe)' if IS_FROZEN else 'dev (python -m yt_dlp)'}")
+
+if not FFMPEG_DIR:
+    print("[downloader] ⚠️ ffmpeg.exe не найден в _dop.")
+if IS_FROZEN and not YTDLP_EXE:
+    print("[downloader] ⚠️ ВНИМАНИЕ: yt-dlp.exe не найден в _dop.")
+
+
+# -------------------------------------------------------------------
+#   Окружение для дочерних процессов (UTF-8)
+# -------------------------------------------------------------------
+def _sp_env():
+    env = os.environ.copy()
+    env['PYTHONIOENCODING'] = 'utf-8'
+    env['PYTHONUTF8'] = '1'
+    env['PYTHONLEGACYWINDOWSSTDIO'] = '0'
+    return env
+
+
+def _ytdlp_base_cmd():
+    """
+    dev  → python -m yt_dlp (curl_cffi из venv)
+    EXE  → standalone yt-dlp.exe из _dop
+    """
+    if IS_FROZEN and YTDLP_EXE:
+        return [YTDLP_EXE]
+    return [sys.executable, '-m', 'yt_dlp']
+
+
+def _cookie_args():
+    if COOKIES_FILE:
+        return ['--cookies', COOKIES_FILE]
+    return []
 
 
 # ===================================================================
@@ -176,15 +261,23 @@ _ITEM_RE = re.compile(r'\[download\]\s+Downloading (?:item|video)\s+(\d+)\s+of\s
 def _register_file(t, path):
     if not path:
         return
+    if '\ufffd' in path or '\x00' in path:
+        return
+
     save_dir = t['save_dir']
     try:
+        save_abs = os.path.abspath(save_dir)
         if os.path.isabs(path):
-            rel = os.path.relpath(path, save_dir)
+            full = os.path.abspath(os.path.normpath(path))
         else:
-            rel = path
+            full = os.path.abspath(os.path.normpath(os.path.join(save_abs, path)))
+        rel = os.path.relpath(full, save_abs)
         rel = rel.replace('\\', '/')
     except Exception:
-        rel = os.path.basename(path)
+        return
+
+    if rel.startswith('..') or '/..' in rel or rel == '.':
+        return
 
     ext = os.path.splitext(rel)[1].lower()
     if ext not in ('.mp4', '.mkv', '.webm', '.mov', '.m4v',
@@ -272,10 +365,12 @@ def _scan_new_files(task_id):
 
 
 # ===================================================================
-#                     ОПРЕДЕЛЕНИЕ ИМЕНИ КАНАЛА
+#                     ИМЯ КАНАЛА
 # ===================================================================
 def _sanitize_name(name):
     if not name:
+        return None
+    if '\ufffd' in name:
         return None
     name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', '_', name)
     name = name.strip().strip('.')
@@ -285,9 +380,38 @@ def _sanitize_name(name):
     return name or None
 
 
+def _base_yt_dlp_args():
+    """
+    Минимум флагов. yt-dlp сам выберет рабочий клиент YouTube
+    (обычно visionos), которому не нужны ни Deno, ни cookies.
+    Cookies добавляются только если файл реально есть.
+    """
+    return _cookie_args()
+
+
+def _format_spec():
+    if not FFMPEG_DIR:
+        return 'best[ext=mp4][acodec!=none]/best[acodec!=none]/best'
+    return (
+        'bestvideo*+bestaudio/'
+        'best[ext=mp4][acodec!=none]/'
+        'best[acodec!=none]/'
+        'best'
+    )
+
+
+def _quality_args():
+    return [
+        '--format-sort', 'res,fps,vbr,abr',
+        '--merge-output-format', 'mp4',
+        '--no-keep-fragments',
+    ]
+
+
 def _try_get_channel_name(url):
     cmd = [
-        PYTHON_EXE, '-m', 'yt_dlp',
+        *_ytdlp_base_cmd(),
+        *_base_yt_dlp_args(),
         '--skip-download',
         '--playlist-end', '1',
         '--no-warnings',
@@ -300,8 +424,9 @@ def _try_get_channel_name(url):
     ]
     try:
         result = subprocess.run(
-            cmd, capture_output=True, text=True, encoding='utf-8',
-            errors='replace', timeout=90,
+            cmd, capture_output=True, text=True,
+            encoding='utf-8', errors='replace',
+            env=_sp_env(), timeout=120,
         )
     except subprocess.TimeoutExpired:
         print(f"[youtube] channel name: timeout for {url}")
@@ -311,7 +436,8 @@ def _try_get_channel_name(url):
         return None
 
     if result.returncode != 0:
-        print(f"[youtube] channel name rc={result.returncode}: {result.stderr[:200]}")
+        print(f"[youtube] channel name rc={result.returncode}: "
+              f"{(result.stderr or '')[:200]}")
         return None
 
     for line in result.stdout.splitlines():
@@ -351,7 +477,7 @@ def _apply_channel_folder(task_id, url, mode, base_save_dir):
 
     folder = _sanitize_name(channel_name)
     if not folder:
-        _append_log(task_id, '⚠️ Channel name is invalid after sanitizing — using base folder')
+        _append_log(task_id, '⚠️ Channel name is invalid — using base folder')
         return base_save_dir
 
     new_save_dir = os.path.join(base_save_dir, folder)
@@ -371,14 +497,15 @@ def _apply_channel_folder(task_id, url, mode, base_save_dir):
 
 
 # ===================================================================
-#                     СБОР URL SHORTS
+#                     SHORTS
 # ===================================================================
 def _collect_shorts_urls(channel_url):
     if '/shorts' not in channel_url:
         channel_url = channel_url.rstrip('/') + '/shorts'
 
     cmd = [
-        PYTHON_EXE, '-m', 'yt_dlp',
+        *_ytdlp_base_cmd(),
+        *_base_yt_dlp_args(),
         '--flat-playlist',
         '--dump-json',
         '--no-warnings',
@@ -389,15 +516,16 @@ def _collect_shorts_urls(channel_url):
     print(f"[youtube] collecting shorts: {' '.join(cmd)}")
     try:
         result = subprocess.run(
-            cmd, capture_output=True, text=True, encoding='utf-8',
-            errors='replace', timeout=120,
+            cmd, capture_output=True, text=True,
+            encoding='utf-8', errors='replace',
+            env=_sp_env(), timeout=180,
         )
     except subprocess.TimeoutExpired:
         print("[youtube] shorts collection timed out")
         return []
 
     if result.returncode != 0:
-        print(f"[youtube] shorts collection failed: {result.stderr[:300]}")
+        print(f"[youtube] shorts collection failed: {(result.stderr or '')[:300]}")
         return []
 
     urls = []
@@ -418,20 +546,16 @@ def _collect_shorts_urls(channel_url):
 
 
 # ===================================================================
-#                     СБОРКА КОМАНД YT-DLP
+#                     КОМАНДЫ YT-DLP
 # ===================================================================
 def _build_command_single(url, save_dir):
-    output_template = os.path.join(save_dir, '%(id)s.%(ext)s')
-
-    if FFMPEG_DIR:
-        format_spec = 'bestvideo+bestaudio/best'
-    else:
-        format_spec = 'best[ext=mp4]'
+    output_template = os.path.join(save_dir, '%(title).200B [%(id)s].%(ext)s')
 
     cmd = [
-        PYTHON_EXE, '-m', 'yt_dlp',
-        '-f', format_spec,
-        '--merge-output-format', 'mp4',
+        *_ytdlp_base_cmd(),
+        *_base_yt_dlp_args(),
+        *_quality_args(),
+        '-f', _format_spec(),
         '--output', output_template,
         '--no-warnings',
         '--newline',
@@ -444,17 +568,13 @@ def _build_command_single(url, save_dir):
 
 
 def _build_command_playlist(url, save_dir, mode):
-    output_template = os.path.join(save_dir, '%(id)s.%(ext)s')
-
-    if FFMPEG_DIR:
-        format_spec = 'bestvideo+bestaudio/best'
-    else:
-        format_spec = 'best[ext=mp4]'
+    output_template = os.path.join(save_dir, '%(title).200B [%(id)s].%(ext)s')
 
     cmd = [
-        PYTHON_EXE, '-m', 'yt_dlp',
-        '-f', format_spec,
-        '--merge-output-format', 'mp4',
+        *_ytdlp_base_cmd(),
+        *_base_yt_dlp_args(),
+        *_quality_args(),
+        '-f', _format_spec(),
         '--output', output_template,
         '--no-warnings',
         '--newline',
@@ -467,7 +587,7 @@ def _build_command_playlist(url, save_dir, mode):
 
 
 # ===================================================================
-#                     ОСНОВНОЙ ЗАПУСК
+#                     ЗАПУСК
 # ===================================================================
 def _append_log(task_id, line):
     with _lock:
@@ -514,7 +634,7 @@ def _run_download(task_id):
         proc = subprocess.Popen(
             cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             text=True, encoding='utf-8', errors='replace',
-            bufsize=1, cwd=save_dir,
+            bufsize=1, cwd=save_dir, env=_sp_env(),
         )
         with _lock:
             TASKS[task_id]['process'] = proc
@@ -573,7 +693,7 @@ def _run_channel_shorts(task_id, url, save_dir):
 
     urls = _collect_shorts_urls(url)
     if not urls:
-        _append_log(task_id, '❌ No shorts URLs found. Channel may be private or YouTube blocked the request.')
+        _append_log(task_id, '❌ No shorts URLs found.')
         with _lock:
             TASKS[task_id]['status'] = 'error'
             TASKS[task_id]['finished_at'] = datetime.now().isoformat(timespec='seconds')
@@ -593,9 +713,7 @@ def _run_channel_shorts(task_id, url, save_dir):
         if name:
             folder = _sanitize_name(name)
             if folder:
-                new_save_dir = os.path.join(
-                    os.path.dirname(save_dir), folder
-                )
+                new_save_dir = os.path.join(os.path.dirname(save_dir), folder)
                 try:
                     os.makedirs(new_save_dir, exist_ok=True)
                     with _lock:
@@ -623,7 +741,7 @@ def _run_channel_shorts(task_id, url, save_dir):
             proc = subprocess.Popen(
                 cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 text=True, encoding='utf-8', errors='replace',
-                bufsize=1, cwd=save_dir,
+                bufsize=1, cwd=save_dir, env=_sp_env(),
             )
             with _lock:
                 TASKS[task_id]['process'] = proc
