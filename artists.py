@@ -149,6 +149,29 @@ def get_artist_video_ids(artist_id):
     return [r['video_id'] for r in rows]
 
 
+def get_all_assigned_video_ids(mode=None):
+    """
+    Возвращает set() ID всех видео, привязанных к ЛЮБОМУ артисту.
+
+    Если mode задан — учитываются только артисты этого профиля.
+    Если mode=None — вообще все привязки.
+    """
+    conn = get_conn()
+    c = conn.cursor()
+    if mode is None:
+        c.execute("SELECT DISTINCT video_id FROM video_artists")
+    else:
+        c.execute("""
+            SELECT DISTINCT va.video_id
+            FROM video_artists va
+            JOIN artists a ON a.id = va.artist_id
+            WHERE a.mode = ?
+        """, (mode,))
+    rows = c.fetchall()
+    conn.close()
+    return {r['video_id'] for r in rows}
+
+
 def add_video_to_artist(artist_id, video_id):
     conn = get_conn()
     c = conn.cursor()

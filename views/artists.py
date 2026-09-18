@@ -23,6 +23,7 @@ from artists import (
     rename_artist,
     set_artist_cover,
     get_artist_video_ids,
+    get_all_assigned_video_ids,
     add_video_to_artist,
     remove_video_from_artist,
 )
@@ -123,6 +124,7 @@ def register(app):
         if not artist:
             abort(404)
 
+        # Видео текущего артиста (для основного грида)
         video_ids = get_artist_video_ids(artist_id)
         videos = []
         for vid in video_ids:
@@ -132,9 +134,11 @@ def register(app):
 
         videos.sort(key=lambda x: x.get('added', ''), reverse=True)
 
+        # Видео, доступные для добавления: всё, что НЕ привязано
+        # ни к одному артисту этого профиля (включая текущего).
         all_videos = get_all_videos(mode=current_mode)
-        added_ids = set(video_ids)
-        available = [v for v in all_videos if v['id'] not in added_ids]
+        assigned_ids = get_all_assigned_video_ids(mode=current_mode)
+        available = [v for v in all_videos if v['id'] not in assigned_ids]
 
         return render_template('artist.html',
                                artist=artist,
