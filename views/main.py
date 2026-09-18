@@ -32,6 +32,14 @@ from db.thumbnails import (
     generate_thumbnail,
 )
 
+# Top-level artists.py — для назначения артистов из папок
+from artists import (
+    get_all_artists,
+    get_all_assigned_video_ids,
+    add_video_to_artist,
+    add_artist,
+)
+
 
 def register(app):
 
@@ -85,7 +93,7 @@ def register(app):
                                    search=search,
                                    folder=folder)
 
-        # ---------- Python fallback (categories / нестандартный sort) ----------
+        # ---------- Python fallback ----------
         search_lc = search.lower()
         if search_lc:
             videos = get_all_videos(mode=None)
@@ -137,7 +145,6 @@ def register(app):
         if folder:
             folder = os.path.normpath(folder)
 
-        # SQL path
         if not category_ids:
             sql_result = query_videos_paged(
                 mode=current_mode,
@@ -161,7 +168,6 @@ def register(app):
                     'has_more': page < total_pages
                 })
 
-        # Python fallback
         search_lc = search.lower()
         videos = get_all_videos(mode=None) if search_lc else get_all_videos(mode=current_mode)
         if folder:
@@ -239,7 +245,13 @@ def register(app):
             videos = get_videos_by_folder(folder['path'], limit=1, mode=current_mode)
             folder['preview'] = videos[0] if videos else None
 
-        return render_template('folders.html', folders=folders_list, selected_library=library_id)
+        # Список артистов текущего профиля — для модалки «Назначить артиста»
+        artists = get_all_artists(mode=current_mode)
+
+        return render_template('folders.html',
+                               folders=folders_list,
+                               selected_library=library_id,
+                               artists=artists)
 
     @app.route('/folder_videos')
     def folder_videos():
@@ -292,3 +304,74 @@ def register(app):
             app_config['last_folder'] = folder
             save_config(app_config)
         return redirect(url_for('index'))
+
+    # =============================================================
+    #        НАЗНАЧЕНИЕ АРТИСТА ИЗ ПАПКИ
+    # =============================================================
+    @app.route('/folders/assign_artist', methods=['POST'])
+    def folders_assign_artist():
+        """
+        Привязывает все видео папки к указанным артистам.
+        Ожидает JSON:
+            {
+              folder_path: "...",
+              artist_ids: [1, 2, 3],
+              only_unassigned: true|false
+            }
+        """
+        data = request.get_json() or {}
+        folder_path = data.get('folder_path')
+        artist_ids = data.get('artist_ids') or []
+        only_unassigned = bool(data.get('only_unassigned', True))
+
+        if not folder_path:
+            return jsonify({'success': False, 'error': 'folder_path required'}), 400
+        if not artist_ids:
+            return jsonify({'success': False, 'error': 'artist_ids required'}), 400
+
+        try:
+            artist_ids = [int(a) for a in artist_ids]
+        except (TypeError, ValueError):
+            return jsonify({'success': False, 'error': 'invalid artist_ids'}), 400
+
+        current_profile = get_current_profile()
+        current_mode = profile_to_mode(current_profile)
+
+        videos = get_videos_by_folder(folder_path, limit=None, mode=current_mode)
+        if not videos:
+            return jsonify({'success': True, 'assigned': 0, 'ops': 0})
+
+        if only_unassigned:
+            assigned_ids = get_all_assigned_video_ids(mode=current_mode)
+            videos = [v for v in videos if v['id'] not in assigned_ids]
+
+        ops = 0
+        for v in videos:
+            for aid in artist_ids:
+                try:
+                    if add_video_to_artist(aid, v['id']):
+                        ops += 1
+                except Exception as e:
+                    print(f"[folders_assign_artist] error: {e}")
+
+        return jsonify({'success': True, 'assigned': len(videos), 'ops': ops})
+
+    @app.route('/folders/create_artist', methods=['POST'])
+    def folders_create_artist():
+        """
+        Создаёт артиста в текущем профиле.
+        Ожидает JSON: { name: "..." }
+        """
+        data = request.get_json() or {}
+        name = (data.get('name') or '').strip()
+        if not name:
+            return jsonify({'success': False, 'error': 'name required'}), 400
+
+        current_profile = get_current_profile()
+        current_mode = profile_to_mode(current_profile)
+
+        artist_id = add_artist(name, mode=current_mode)
+        if not artist_id:
+            return jsonify({'success': False, 'error': 'Cannot create artist'}), 400
+
+        return jsonify({'success': True, 'artist_id': artist_id, 'name': name})

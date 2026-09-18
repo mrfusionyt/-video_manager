@@ -10,13 +10,24 @@
 <div class="folder-grid">
     {% for folder in folders %}
     <div class="folder-card" data-folder-path="{{ folder.path }}" data-folder-name="{{ folder.name }}">
+
         <button type="button"
                 class="cover-btn"
                 title="Set cover"
+                style="right: 44px;"
                 data-folder-path="{{ folder.path }}"
                 data-folder-name="{{ folder.name }}"
                 onclick="event.stopPropagation(); openCoverModal(this.dataset.folderPath, this.dataset.folderName)">
             <img src="{{ url_for('serve_image', filename='pencil.png') }}" alt="Set cover">
+        </button>
+
+        <button type="button"
+                class="cover-btn assign-btn"
+                title="Assign artist"
+                data-folder-path="{{ folder.path }}"
+                data-folder-name="{{ folder.name }}"
+                onclick="event.stopPropagation(); openAssignArtistModal(this.dataset.folderPath, this.dataset.folderName)">
+            <img src="{{ url_for('serve_image', filename='star.png') }}" alt="Assign artist">
         </button>
 
         <div class="preview-wrapper">
@@ -71,12 +82,84 @@
         </div>
     </div>
 </div>
+
+<!-- МОДАЛКА НАЗНАЧЕНИЯ АРТИСТА -->
+<div class="modal fade" id="assignArtistModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-content edit-modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">
+                    Назначить артиста для папки <span id="assignFolderName"></span>
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+
+                <ul class="nav nav-tabs mb-3" role="tablist">
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link active" id="tabExistingBtn"
+                                data-bs-toggle="tab" data-bs-target="#tabExisting"
+                                type="button" role="tab">
+                            Существующие артисты
+                        </button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="tabNewBtn"
+                                data-bs-toggle="tab" data-bs-target="#tabNew"
+                                type="button" role="tab">
+                            Создать нового
+                        </button>
+                    </li>
+                </ul>
+
+                <div class="tab-content">
+                    <div class="tab-pane fade show active" id="tabExisting" role="tabpanel">
+                        <div id="artistCheckboxList" class="artist-checkbox-list">
+                            <div class="text-muted">Загрузка…</div>
+                        </div>
+                    </div>
+                    <div class="tab-pane fade" id="tabNew" role="tabpanel">
+                        <div class="mb-2">
+                            <input type="text"
+                                   class="form-control"
+                                   id="newArtistName"
+                                   placeholder="Имя нового артиста"
+                                   autocomplete="off">
+                        </div>
+                        <button type="button" class="btn btn-secondary" id="createArtistBtn">
+                            Создать и выбрать
+                        </button>
+                    </div>
+                </div>
+
+                <div class="form-check mt-3">
+                    <input class="form-check-input" type="checkbox" id="onlyUnassignedChk" checked>
+                    <label class="form-check-label" for="onlyUnassignedChk">
+                        Только видео без артиста
+                    </label>
+                </div>
+
+                <div class="small-muted mt-2">
+                    Видео из этой папки, у которых уже есть артист, будут пропущены,
+                    если галочка выше установлена.
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+                <button type="button" class="btn btn-primary" id="assignArtistBtn" disabled>
+                    Назначить
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
 <script>
 window.FOLDERS_CONFIG = {
-    currentProfile: {{ current_profile|tojson }}
+    currentProfile: {{ current_profile|tojson }},
+    artists: {{ artists|tojson }}
 };
 </script>
 <script src="{{ url_for('static', filename='js/folders.js') }}"></script>
