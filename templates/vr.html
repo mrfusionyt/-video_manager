@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>VR Плеер - {{ video.filename }}</title>
+    <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+    <style>
+        * { margin:0; padding:0; box-sizing:border-box; }
+        body { overflow:hidden; background:#000; color:#fff; font-family:-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; touch-action:none; }
+        #controls { position:absolute; bottom:20px; left:0; right:0; display:flex; flex-wrap:wrap; justify-content:center; align-items:center; gap:8px 12px; padding:12px 20px; background:rgba(0,0,0,0.75); backdrop-filter:blur(4px); border-radius:12px; margin:0 20px; z-index:10; pointer-events:auto; font-size:14px; }
+        #controls button, #controls select, #controls input { background:#333; color:#eee; border:1px solid #555; padding:6px 14px; border-radius:6px; cursor:pointer; font-size:14px; white-space:nowrap; }
+        #controls button:hover { background:#444; }
+        #controls .vr-btn { background:#dc3545; border-color:#dc3545; font-weight:bold; }
+        #controls .vr-btn.active { background:#44b444; border-color:#44b444; }
+        #controls .speed-btn { padding:4px 8px; font-size:12px; background:#2a2a2a; }
+        #controls .speed-btn.active { background:#dc3545; border-color:#dc3545; }
+        #progress-container { display:flex; align-items:center; gap:10px; flex:1; min-width:150px; }
+        #progress-bar { flex:1; height:4px; background:#555; border-radius:2px; cursor:pointer; position:relative; }
+        #progress-fill { height:100%; width:0%; background:#dc3545; border-radius:2px; }
+        #time-display { font-size:13px; color:#aaa; min-width:80px; text-align:center; }
+        #volume-slider { width:80px; accent-color:#dc3545; background:#333; }
+        #close-btn { position:fixed; top:20px; right:20px; z-index:200; background:rgba(0,0,0,0.6); color:#fff; border:1px solid rgba(255,255,255,0.3); border-radius:30px; padding:8px 16px; font-size:14px; cursor:pointer; backdrop-filter:blur(4px); transition:0.2s; }
+        #close-btn:hover { background:rgba(220, 53, 69, 0.6); }
+        #recenter-btn { position:fixed; bottom:80px; left:50%; transform:translateX(-50%); z-index:15; background:rgba(220, 53, 69, 0.9); color:#fff; border:2px solid #fff; border-radius:30px; padding:10px 24px; font-size:16px; cursor:pointer; backdrop-filter:blur(4px); transition:0.2s; display:none; font-weight:bold; box-shadow: 0 0 20px rgba(220, 53, 69, 0.5); }
+        #recenter-btn:hover { background:rgba(220, 53, 69, 1); transform:translateX(-50%) scale(1.05); }
+        @media (max-width:600px) {
+            #controls { flex-direction:column; align-items:stretch; gap:6px; margin:0 10px; padding:10px; }
+            #progress-container { min-width:unset; }
+            #volume-slider { width:100%; }
+            #close-btn { top:10px; right:10px; padding:6px 12px; font-size:12px; }
+            #recenter-btn { bottom:100px; padding:8px 20px; font-size:14px; }
+        }
+    </style>
+</head>
+<body>
+    <a-scene id="scene"
+             vr-mode-ui="enabled: true"
+             renderer="antialias: true"
+             device-orientation-permission-ui="enabled: true"
+             webxr="referenceSpaceType: local">
+
+        <a-camera id="camera"
+                  look-controls="magicWindowTrackingEnabled: true; touchEnabled: true"
+                  wasd-controls-enabled="false">
+            <a-cursor></a-cursor>
+        </a-camera>
+
+        <a-videosphere id="videoSphere"
+                       src="#video"
+                       rotation="0 0 0"
+                       radius="100"
+                       segments-height="64"
+                       segments-width="64"
+                       material="shader: flat; color: #ffffff;">
+        </a-videosphere>
+
+        <video id="video"
+               src="/video/{{ video.id }}"
+               autoplay
+               loop
+               muted
+               playsinline
+               crossorigin="anonymous"
+               style="display:none;">
+        </video>
+    </a-scene>
+
+    <div id="controls">
+        <button id="playBtn">⏸</button>
+        <div id="progress-container">
+            <div id="progress-bar"><div id="progress-fill"></div></div>
+            <span id="time-display">0:00 / 0:00</span>
+        </div>
+        <button id="muteBtn">🔊</button>
+        <input type="range" id="volume-slider" min="0" max="1" step="0.05" value="1">
+
+        <select id="projectionSelect">
+            <option value="180">180°</option>
+            <option value="360" selected>360°</option>
+        </select>
+
+        <div class="speed-control" style="display:flex;gap:4px;flex-wrap:wrap;">
+            <span style="color:#888;font-size:12px;align-self:center;">Speed</span>
+            <button class="speed-btn" data-speed="0.5">0.5x</button>
+            <button class="speed-btn" data-speed="0.75">0.75x</button>
+            <button class="speed-btn active" data-speed="1.0">1x</button>
+            <button class="speed-btn" data-speed="1.25">1.25x</button>
+            <button class="speed-btn" data-speed="1.5">1.5x</button>
+            <button class="speed-btn" data-speed="2.0">2x</button>
+        </div>
+
+        <button id="vrBtn" class="vr-btn">VR</button>
+    </div>
+
+    <button id="recenter-btn">⟲ Центрировать</button>
+    <button id="close-btn">✕ Закрыть</button>
+
+    <script>
+        (function() {
+            'use strict';
+
+            const scene = document.getElementById('scene');
+            const videoSphere = document.getElementById('videoSphere');
+            const videoElement = document.getElementById('video');
+            const playBtn = document.getElementById('playBtn');
+            const progressFill = document.getElementById('progress-fill');
+            const timeDisplay = document.getElementById('time-display');
+            const muteBtn = document.getElementById('muteBtn');
+            const volumeSlider = document.getElementById('volume-slider');
+            const projectionSelect = document.getElementById('projectionSelect');
+            const vrBtn = document.getElementById('vrBtn');
+            const speedBtns = document.querySelectorAll('.speed-btn');
+            const progressBar = document.getElementById('progress-bar');
+            const recenterBtn = document.getElementById('recenter-btn');
+            const closeBtn = document.getElementById('close-btn');
+
+            let isVR = false;
+            let isPlaying = true;
+
+            const videoId = {{ video.id }};
+            const STORAGE_KEY = 'vr_state_' + videoId;
+
+            function getProfile() {
+                const params = new URLSearchParams(window.location.search);
+                return params.get('profile') || 'female';
+            }
+
+            closeBtn.addEventListener('click', function() {
+                const profile = getProfile();
+                window.location.href = '/watch/' + videoId + '?profile=' + profile;
+            });
+
+            function loadState() {
+                try {
+                    const raw = localStorage.getItem(STORAGE_KEY);
+                    if (raw) return JSON.parse(raw);
+                } catch (e) {}
+                return null;
+            }
+
+            function saveState() {
+                const state = {
+                    time: videoElement.currentTime || 0,
+                    paused: videoElement.paused,
+                    speed: videoElement.playbackRate || 1,
+                    volume: videoElement.volume || 1,
+                    muted: videoElement.muted,
+                    loop: videoElement.loop,
+                    projection: projectionSelect.value
+                };
+                try {
+                    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+                } catch (e) {}
+            }
+
+            function applyState(state) {
+                if (!state) return;
+                if (state.speed !== undefined) {
+                    videoElement.playbackRate = state.speed;
+                    speedBtns.forEach(btn => {
+                        btn.classList.toggle('active', parseFloat(btn.dataset.speed) === state.speed);
+                    });
+                }
+                if (state.volume !== undefined) {
+                    videoElement.volume = state.volume;
+                    volumeSlider.value = state.volume;
+                }
+                if (state.muted !== undefined) {
+                    videoElement.muted = state.muted;
+                    muteBtn.textContent = state.muted ? '🔇' : '🔊';
+                }
+                if (state.loop !== undefined) {
+                    videoElement.loop = state.loop;
+                }
+                if (state.projection) {
+                    projectionSelect.value = state.projection;
+                    updateProjection();
+                }
+                if (state.time !== undefined) {
+                    videoElement.addEventListener('loadedmetadata', function onMeta() {
+                        videoElement.removeEventListener('loadedmetadata', onMeta);
+                        videoElement.currentTime = Math.min(state.time, videoElement.duration || 0);
+                        if (state.paused) {
+                            videoElement.pause();
+                            playBtn.textContent = '▶';
+                        } else {
+                            videoElement.play().catch(() => {});
+                            playBtn.textContent = '⏸';
+                        }
+                    }, { once: true });
+                }
+            }
+
+            function requestGyroPermission() {
+                if (typeof DeviceOrientationEvent !== 'undefined' &&
+                    typeof DeviceOrientationEvent.requestPermission === 'function') {
+                    DeviceOrientationEvent.requestPermission()
+                        .then(response => {
+                            if (response === 'granted') {
+                                window.addEventListener('deviceorientation', () => {});
+                            }
+                        })
+                        .catch(() => {});
+                } else {
+                    window.addEventListener('deviceorientation', () => {});
+                }
+            }
+
+            function togglePlay() {
+                if (videoElement.paused) {
+                    videoElement.play().catch(() => {});
+                    playBtn.textContent = '⏸';
+                } else {
+                    videoElement.pause();
+                    playBtn.textContent = '▶';
+                }
+                saveState();
+            }
+
+            function updateProgress() {
+                if (videoElement.duration) {
+                    const pct = (videoElement.currentTime / videoElement.duration) * 100;
+                    progressFill.style.width = pct + '%';
+                    const cur = formatTime(videoElement.currentTime);
+                    const dur = formatTime(videoElement.duration);
+                    timeDisplay.textContent = `${cur} / ${dur}`;
+                }
+                saveState();
+            }
+
+            function formatTime(t) {
+                const m = Math.floor(t / 60);
+                const s = Math.floor(t % 60);
+                return `${m}:${s.toString().padStart(2, '0')}`;
+            }
+
+            function updateProjection() {
+                const phiLength = projectionSelect.value === '180' ? 180 : 360;
+                videoSphere.setAttribute('geometry', {
+                    primitive: 'sphere',
+                    radius: 100,
+                    segmentsWidth: 64,
+                    segmentsHeight: 64,
+                    phiLength: phiLength
+                });
+                saveState();
+            }
+
+            function recenterCamera() {
+                const camera = document.getElementById('camera');
+                if (camera) camera.setAttribute('rotation', '0 0 0');
+            }
+
+            function toggleVR() {
+                if (isVR) {
+                    if (scene.exitVR) scene.exitVR().catch(() => {});
+                } else {
+                    requestGyroPermission();
+                    if (scene.enterVR) {
+                        scene.enterVR().catch(err => {
+                            console.warn('VR failed:', err);
+                            scene.setAttribute('vr-mode-ui', 'enabled: true');
+                        });
+                    }
+                }
+            }
+
+            playBtn.addEventListener('click', togglePlay);
+            videoElement.addEventListener('play', () => { playBtn.textContent = '⏸'; });
+            videoElement.addEventListener('pause', () => { playBtn.textContent = '▶'; });
+            videoElement.addEventListener('ratechange', saveState);
+            videoElement.addEventListener('volumechange', saveState);
+
+            progressBar.addEventListener('click', (e) => {
+                if (!videoElement.duration) return;
+                const rect = progressBar.getBoundingClientRect();
+                const pct = (e.clientX - rect.left) / rect.width;
+                videoElement.currentTime = pct * videoElement.duration;
+                saveState();
+            });
+
+            muteBtn.addEventListener('click', () => {
+                videoElement.muted = !videoElement.muted;
+                muteBtn.textContent = videoElement.muted ? '🔇' : '🔊';
+                volumeSlider.value = videoElement.muted ? 0 : (videoElement.volume || 1);
+                saveState();
+            });
+
+            volumeSlider.addEventListener('input', function() {
+                const val = parseFloat(this.value);
+                videoElement.volume = val;
+                videoElement.muted = (val === 0);
+                muteBtn.textContent = videoElement.muted ? '🔇' : '🔊';
+                saveState();
+            });
+
+            projectionSelect.addEventListener('change', updateProjection);
+            vrBtn.addEventListener('click', toggleVR);
+            recenterBtn.addEventListener('click', recenterCamera);
+
+            speedBtns.forEach(btn => {
+                btn.addEventListener('click', function() {
+                    const speed = parseFloat(this.dataset.speed);
+                    videoElement.playbackRate = speed;
+                    speedBtns.forEach(b => b.classList.remove('active'));
+                    this.classList.add('active');
+                    saveState();
+                });
+            });
+
+            setInterval(updateProgress, 500);
+
+            function onFirstInteraction() {
+                requestGyroPermission();
+                if (videoElement.paused && isPlaying) {
+                    videoElement.play().catch(() => {});
+                }
+                document.removeEventListener('click', onFirstInteraction);
+                document.removeEventListener('touchstart', onFirstInteraction);
+            }
+            document.addEventListener('click', onFirstInteraction);
+            document.addEventListener('touchstart', onFirstInteraction);
+
+            const savedState = loadState();
+            if (savedState && savedState.projection) {
+                projectionSelect.value = savedState.projection;
+            }
+            updateProjection();
+            applyState(savedState);
+
+            if (!savedState || savedState.volume === undefined) {
+                videoElement.volume = 1.0;
+                volumeSlider.value = 1.0;
+            }
+
+            setTimeout(() => {
+                if (videoElement.paused && !savedState?.paused) {
+                    videoElement.play().catch(() => {});
+                }
+            }, 200);
+
+            recenterBtn.style.display = 'none';
+
+            scene.addEventListener('enter-vr', () => {
+                isVR = true;
+                vrBtn.textContent = 'VR ON';
+                vrBtn.classList.add('active');
+                recenterBtn.style.display = 'block';
+                setTimeout(recenterCamera, 500);
+            });
+            scene.addEventListener('exit-vr', () => {
+                isVR = false;
+                vrBtn.textContent = 'VR';
+                vrBtn.classList.remove('active');
+                recenterBtn.style.display = 'none';
+            });
+
+            console.log('VR плеер загружен');
+        })();
+    </script>
+</body>
+</html>

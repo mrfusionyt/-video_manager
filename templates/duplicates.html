@@ -1,0 +1,228 @@
+{% extends "base.html" %}
+
+{% block title %}Duplicates{% endblock %}
+{% block page_title %}Duplicates{% endblock %}
+
+{% block content %}
+<div class="mb-3">
+    <div class="d-flex align-items-center gap-2 flex-wrap">
+        <a href="{{ url_for('settings', tab='libraries', profile=current_profile) }}" class="btn-add">← Back to Settings</a>
+        <button id="refreshDuplicates" class="btn-add">Refresh</button>
+    </div>
+</div>
+
+<div class="mb-3">
+    <form method="post" action="{{ url_for('settings') }}" id="duplicateScanForm">
+        <input type="hidden" name="action" value="start_duplicate_scan">
+        <div class="mb-2">
+            <label class="form-label">Media types to scan:</label>
+            <div class="form-check form-check-inline">
+                <input class="form-check-input" type="checkbox" name="media_types" value="video" checked id="media_video">
+                <label class="form-check-label" for="media_video">Video</label>
+            </div>
+            <div class="form-check form-check-inline">
+                <input class="form-check-input" type="checkbox" name="media_types" value="image" checked id="media_image">
+                <label class="form-check-label" for="media_image">Image</label>
+            </div>
+        </div>
+        <button type="submit" class="btn-add">Find Duplicates</button>
+    </form>
+</div>
+
+{% if duplicates %}
+    <div class="stats-box">
+        <div class="stats-item">
+            <span class="label">Total duplicate files</span>
+            <span class="value">{{ total_files }}</span>
+        </div>
+        <div class="stats-item">
+            <span class="label">Will be kept (best quality)</span>
+            <span class="value green">{{ total_keep }}</span>
+        </div>
+        <div class="stats-item">
+            <span class="label">Will be moved</span>
+            <span class="value red">{{ total_move }}</span>
+        </div>
+        <div class="stats-item">
+            <span class="label">Size to keep</span>
+            <span class="value green">{{ (total_size_keep / (1024**2))|round(2) }} MB</span>
+        </div>
+        <div class="stats-item">
+            <span class="label">Size to move</span>
+            <span class="value red">{{ (total_size_move / (1024**2))|round(2) }} MB</span>
+        </div>
+        <div class="stats-item">
+            <span class="label">Space saved</span>
+            <span class="value" style="color: #17a2b8;">{{ (total_size_move / (1024**2))|round(2) }} MB</span>
+        </div>
+    </div>
+    <div class="mb-3">
+        <button id="moveAllBtn" class="btn-move-all">Move All Duplicates</button>
+        <span id="status-all" class="status-msg"></span>
+    </div>
+{% endif %}
+
+<div id="progressContainer" class="dup-progress" style="display:none;">
+    <div class="dup-progress-bar">
+        <div id="progressFill" class="dup-progress-fill" style="width:0%;"></div>
+    </div>
+    <div id="progressText" class="dup-progress-text">Initializing...</div>
+</div>
+
+{% if duplicates %}
+    <h5>Found {{ duplicates|length }} groups</h5>
+    <div id="duplicateGroups">
+        {% for group in duplicates %}
+            {% set best = group|sort(attribute='size', reverse=True)|first %}
+            <div class="duplicate-group" id="group-{{ loop.index0 }}">
+                <div class="group-title">
+                    Group #{{ loop.index }} ({{ group|length }} files)
+                    <button class="btn-move-group" data-group-index="{{ loop.index0 }}">Move duplicates (keep best)</button>
+                    <span class="status-msg" id="status-{{ loop.index0 }}"></span>
+                </div>
+                {% for video in group %}
+                    <div class="duplicate-file {% if video.id == best.id %}best-video{% endif %}">
+                        <div class="duplicate-preview-container">
+                            {% set preview_url = url_for('video_file', video_id=video.id) %}
+                            {% set ext = video.filename.split('.')[-1].lower() %}
+                            {% if ext in ['mp4', 'avi', 'mkv', 'mov', 'wmv', 'flv', 'webm', 'm4v'] %}
+                                <video class="duplicate-preview" muted playsinline preload="metadata">
+                                    <source src="{{ preview_url }}" type="video/mp4">
+                                </video>
+                            {% elif ext in ['jpg', 'jpeg', 'png', 'bmp', 'gif', 'tiff', 'webp'] %}
+                                <img class="duplicate-preview" src="{{ preview_url }}" alt="preview">
+                            {% else %}
+                                <div class="duplicate-preview" style="display:flex;align-items:center;justify-content:center;color:#888;">?</div>
+                            {% endif %}
+                        </div>
+                        <div class="duplicate-info">
+                            <div class="filename">
+                                {{ video.filename }}
+                                {% if video.mode %}
+                                    <span class="badge bg-danger ms-1">{{ video.mode | mode_name }}</span>
+                                {% endif %}
+                                {% if video.id == best.id %}<span style="color:#dc3545;">★ Best</span>{% endif %}
+                            </div>
+                            <div class="size">{{ (video.size / (1024**2))|round(2) }} MB</div>
+                        </div>
+                        <div>
+                            <a href="{{ url_for('watch', video_id=video.id, profile=current_profile) }}" class="btn btn-sm btn-outline-secondary">Watch</a>
+                        </div>
+                    </div>
+                {% endfor %}
+            </div>
+        {% endfor %}
+    </div>
+{% else %}
+    <p class="text-muted">No duplicates found. Click "Find Duplicates" to start scanning.</p>
+{% endif %}
+
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const urlParams = new URLSearchParams(window.location.search);
+        const taskId = urlParams.get('task_id');
+        if (taskId) {
+            startProgressMonitoring(taskId);
+        }
+
+        document.getElementById('refreshDuplicates')?.addEventListener('click', function() {
+            location.reload();
+        });
+
+        function startProgressMonitoring(taskId) {
+            const progressContainer = document.getElementById('progressContainer');
+            const progressFill = document.getElementById('progressFill');
+            const progressText = document.getElementById('progressText');
+            progressContainer.style.display = 'block';
+
+            const eventSource = new EventSource('/progress/' + taskId);
+            eventSource.onmessage = function(event) {
+                const data = JSON.parse(event.data);
+                if (data.status === 'complete') {
+                    progressFill.style.width = '100%';
+                    progressText.textContent = '✅ ' + data.message;
+                    eventSource.close();
+                    const url = new URL(window.location.href);
+                    url.searchParams.delete('task_id');
+                    setTimeout(() => window.location.href = url.toString(), 1000);
+                } else if (data.status === 'error') {
+                    progressFill.style.width = '100%';
+                    progressFill.style.background = '#dc3545';
+                    progressText.textContent = '❌ Error: ' + data.message;
+                    eventSource.close();
+                    const url = new URL(window.location.href);
+                    url.searchParams.delete('task_id');
+                    setTimeout(() => window.location.href = url.toString(), 1000);
+                } else if (data.status === 'scanning') {
+                    progressFill.style.width = data.progress + '%';
+                    progressText.textContent = data.message + ' (' + data.progress + '%)';
+                } else {
+                    progressText.textContent = data.message || 'Unknown status';
+                }
+            };
+            eventSource.onerror = function() {
+                progressText.textContent = 'Connection lost. Please refresh the page.';
+                eventSource.close();
+                const url = new URL(window.location.href);
+                url.searchParams.delete('task_id');
+                setTimeout(() => window.location.href = url.toString(), 1000);
+            };
+        }
+
+        const moveBtns = document.querySelectorAll('.btn-move-group');
+        moveBtns.forEach(btn => {
+            btn.addEventListener('click', function() {
+                const groupIndex = this.dataset.groupIndex;
+                const statusSpan = document.getElementById('status-' + groupIndex);
+                statusSpan.textContent = 'Moving...';
+                fetch('/move_duplicates', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ group_index: parseInt(groupIndex) })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        statusSpan.textContent = data.message;
+                        const groupDiv = document.getElementById('group-' + groupIndex);
+                        if (groupDiv) groupDiv.style.display = 'none';
+                        setTimeout(() => location.reload(), 1000);
+                    } else {
+                        statusSpan.textContent = 'Error: ' + data.message;
+                    }
+                })
+                .catch(err => {
+                    statusSpan.textContent = 'Error: ' + err;
+                });
+            });
+        });
+
+        const moveAllBtn = document.getElementById('moveAllBtn');
+        const statusAll = document.getElementById('status-all');
+        if (moveAllBtn) {
+            moveAllBtn.addEventListener('click', function() {
+                statusAll.textContent = 'Moving all groups...';
+                fetch('/move_all_duplicates', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        statusAll.textContent = data.message;
+                        document.querySelectorAll('.duplicate-group').forEach(el => {
+                            el.style.display = 'none';
+                        });
+                        setTimeout(() => location.reload(), 1000);
+                    } else {
+                        statusAll.textContent = 'Error: ' + data.message;
+                    }
+                })
+                .catch(err => {
+                    statusAll.textContent = 'Error: ' + err;
+                });
+            });
+        }
+    });
+</script>
+{% endblock %}

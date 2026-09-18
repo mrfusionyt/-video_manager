@@ -1,0 +1,48 @@
+{% for video in videos %}
+<div class="col-md-4 col-sm-6 col-6 mb-3 video-card" 
+     data-video-id="{{ video.id }}" 
+     onclick="window.location.href='/watch/{{ video.id }}?profile={{ current_profile }}'">
+    <div class="card h-100">
+        <div class="video-wrapper">
+            <img class="video-thumbnail"
+                 src="{{ url_for('thumbnail', video_id=video.id) }}"
+                 alt="{{ video.filename }}"
+                 loading="lazy"
+                 decoding="async"
+                 data-video-src="{{ url_for('video_file', video_id=video.id) }}">
+        </div>
+        <div class="card-body">
+            <h5 class="card-title" title="{{ video.filename }}">
+                {{ video.filename.rsplit('.', 1)[0] if '.' in video.filename else video.filename }}
+                {% if video.mode %}
+                    <span class="badge bg-danger ms-1">{{ video.mode | mode_name }}</span>
+                {% endif %}
+            </h5>
+            <p class="card-text">
+                <small class="text-muted">
+                    Added: {{ video.added[:10] if video.added else '—' }}
+                    {% if video.duration and video.duration > 0 %}
+                        • <span style="color: #dc3545;">{{ (video.duration // 60) }}:{{ '%02d' % (video.duration % 60) }}</span>
+                    {% endif %}
+                </small><br>
+                <small>
+                    Categories:
+                    {% if video.categories %}
+                        {% for cat in video.categories %}
+                            <span class="badge bg-primary">{{ cat.name }}</span>
+                        {% endfor %}
+                    {% else %}
+                        <span class="badge bg-secondary">none</span>
+                    {% endif %}
+                </small>
+            </p>
+            <div class="stars">
+                {% set rating = video.rating|default(0)|int %}
+                {% for i in range(1, 6) %}
+                    {% if i <= rating %}★{% else %}<span class="empty">☆</span>{% endif %}
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endfor %}

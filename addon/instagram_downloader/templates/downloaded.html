@@ -1,0 +1,203 @@
+{% extends "instagram_base.html" %}
+
+{% block title %}Downloaded Files{% endblock %}
+
+{% block content %}
+
+{% macro file_card(item, task_id) %}
+<div class="col-4 mb-3 file-col">
+    <div class="file-card">
+        {% if item.filename %}
+            {% set tail = item.filename.split('/')[-1] %}
+            {% set ext = tail.rsplit('.', 1)[-1].lower() if '.' in tail else '' %}
+            {% if ext in ['mp4', 'mov', 'webm', 'mkv', 'm4v'] %}
+                <video src="{{ url_for('instagram.media', task_id=task_id, filename=item.filename) }}"
+                       muted playsinline preload="metadata"
+                       class="preview-media"
+                       onerror="this.style.display='none'; this.parentElement.classList.add('preview-error');"></video>
+            {% elif ext in ['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp', 'tiff'] %}
+                <img src="{{ url_for('instagram.media', task_id=task_id, filename=item.filename) }}"
+                     alt="{{ tail }}" class="preview-media" loading="lazy"
+                     onerror="this.style.display='none'; this.parentElement.classList.add('preview-error');">
+            {% else %}
+                <div class="placeholder">?</div>
+            {% endif %}
+        {% else %}
+            <div class="placeholder" title="Download failed">❌</div>
+        {% endif %}
+
+        <div class="file-overlay">
+            <span class="badge-type {% if item.type == 'Reel' %}reel{% endif %}">{{ item.type }}</span>
+            <span class="file-idx">#{{ item.idx }}</span>
+        </div>
+    </div>
+</div>
+{% endmacro %}
+
+<div class="downloaded-header">
+    <h4>Downloaded Files</h4>
+    <div class="downloaded-actions">
+        <button class="btn-action" onclick="rescanTask()">Rescan</button>
+        <a href="{{ url_for('instagram.index') }}" class="btn-action">← Back</a>
+    </div>
+</div>
+
+<div class="downloaded-header">
+    <span class="meta">Total: <strong id="totalCount">{{ total }}</strong> items</span>
+    <span class="meta" id="rescanStatus"></span>
+</div>
+
+{% if files %}
+    <div class="row" id="filesGrid">
+        {% for item in files[:items_per_page] %}
+            {% set tail = item.filename.split('/')[-1] if item.filename else '' %}
+            {% set ext = tail.rsplit('.', 1)[-1].lower() if '.' in tail else '' %}
+            <div class="col-4 mb-3 file-col">
+                <div class="file-card" data-idx="{{ item.idx }}">
+                    {% if item.filename %}
+                        {% if ext in ['mp4', 'mov', 'webm', 'mkv', 'm4v'] %}
+                            <video src="{{ url_for('instagram.media', task_id=task_id, filename=tail) }}"
+                                   muted playsinline preload="metadata"
+                                   class="preview-media"
+                                   onerror="this.parentElement.classList.add('preview-error'); this.style.display='none';"></video>
+                        {% elif ext in ['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp', 'tiff'] %}
+                            <img src="{{ url_for('instagram.media', task_id=task_id, filename=tail) }}"
+                                 alt="{{ tail }}" class="preview-media" loading="lazy"
+                                 onerror="this.parentElement.classList.add('preview-error'); this.style.display='none';">
+                        {% else %}
+                            <div class="placeholder">?</div>
+                        {% endif %}
+                    {% else %}
+                        <div class="placeholder" title="Download failed">❌</div>
+                    {% endif %}
+                    <div class="file-overlay">
+                        <span class="badge-type {% if item.type == 'Reel' %}reel{% endif %}">
+                            {{ item.type }}
+                        </span>
+                        <span class="file-idx">#{{ item.idx }}</span>
+                    </div>
+                </div>
+            </div>
+        {% endfor %}
+    </div>
+
+    <div class="load-more-wrap">
+        <button id="loadMoreBtn" class="btn-load-more"
+                {% if total <= items_per_page %}style="display:none;"{% endif %}>
+            Load more
+        </button>
+    </div>
+{% else %}
+    <div class="empty-msg">
+        <p>No downloaded files.</p>
+        <p class="text-muted" style="font-size:0.85rem;">
+            If files exist on disk — click "Rescan".
+        </p>
+    </div>
+{% endif %}
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const taskId = '{{ task_id }}';
+    const perPage = {{ items_per_page }};
+    let currentPage = 1;
+    let loading = false;
+
+    function makeCard(item) {
+        const col = document.createElement('div');
+        col.className = 'col-4 mb-3 file-col';
+
+        const card = document.createElement('div');
+        card.className = 'file-card';
+        card.dataset.idx = item.idx;
+
+        let mediaHtml = '';
+        if (item.filename) {
+            const tail = item.filename.split('/').pop();
+            const ext = tail.includes('.') ? tail.split('.').pop().toLowerCase() : '';
+            const url = '/instagram/media/' + taskId + '/' + encodeURIComponent(tail);
+            if (['mp4', 'mov', 'webm', 'mkv', 'm4v'].includes(ext)) {
+                mediaHtml = '<video src="' + url + '" muted playsinline preload="metadata" class="preview-media" ' +
+                            'onerror="this.parentElement.classList.add(\'preview-error\'); this.style.display=\'none\';"></video>';
+            } else if (['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp', 'tiff'].includes(ext)) {
+                mediaHtml = '<img src="' + url + '" alt="" class="preview-media" loading="lazy" ' +
+                            'onerror="this.parentElement.classList.add(\'preview-error\'); this.style.display=\'none\';">';
+            } else {
+                mediaHtml = '<div class="placeholder">?</div>';
+            }
+        } else {
+            mediaHtml = '<div class="placeholder" title="Download failed">❌</div>';
+        }
+
+        const isReel = item.type === 'Reel';
+        const typeClass = 'badge-type' + (isReel ? ' reel' : '');
+        const overlay = '<div class="file-overlay">' +
+                            '<span class="' + typeClass + '">' + item.type + '</span>' +
+                            '<span class="file-idx">#' + item.idx + '</span>' +
+                        '</div>';
+
+        card.innerHTML = mediaHtml + overlay;
+        col.appendChild(card);
+        return col;
+    }
+
+    document.addEventListener('DOMContentLoaded', function() {
+        const btn = document.getElementById('loadMoreBtn');
+        if (!btn) return;
+
+        btn.addEventListener('click', async function() {
+            if (loading) return;
+            loading = true;
+            btn.disabled = true;
+            btn.textContent = 'Loading...';
+
+            try {
+                const nextPage = currentPage + 1;
+                const r = await fetch('/instagram/downloaded/' + taskId + '/page/' + nextPage);
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                const data = await r.json();
+
+                const grid = document.getElementById('filesGrid');
+                data.items.forEach(item => {
+                    grid.appendChild(makeCard(item));
+                });
+
+                currentPage = data.page;
+                if (!data.has_more) {
+                    btn.style.display = 'none';
+                } else {
+                    btn.disabled = false;
+                    btn.textContent = 'Load more';
+                }
+            } catch (e) {
+                console.error(e);
+                btn.textContent = 'Error. Retry';
+                btn.disabled = false;
+            } finally {
+                loading = false;
+            }
+        });
+    });
+
+    async function rescanTask() {
+        const status = document.getElementById('rescanStatus');
+        status.textContent = 'Rescanning…';
+        try {
+            const r = await fetch('/instagram/rescan/' + taskId, { method: 'POST' });
+            const data = await r.json();
+            if (data.success) {
+                status.textContent = '✅ Added: ' + data.added + ' (total: ' + data.total + ')';
+                if (data.added > 0) {
+                    setTimeout(() => location.reload(), 800);
+                }
+            } else {
+                status.textContent = '❌ ' + (data.error || 'error');
+            }
+        } catch (e) {
+            status.textContent = '❌ ' + e;
+        }
+    }
+</script>
+{% endblock %}

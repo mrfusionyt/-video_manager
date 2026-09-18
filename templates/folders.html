@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+
+{% block title %}Folders{% endblock %}
+{% block page_title %}
+    Folders
+    <span class="text-muted ms-2" style="font-size:0.8rem;">{{ folders|length }} folders</span>
+{% endblock %}
+
+{% block content %}
+<div class="folder-grid">
+    {% for folder in folders %}
+    <div class="folder-card" data-folder-path="{{ folder.path }}" data-folder-name="{{ folder.name }}">
+        <button type="button"
+                class="cover-btn"
+                title="Set cover"
+                data-folder-path="{{ folder.path }}"
+                data-folder-name="{{ folder.name }}"
+                onclick="event.stopPropagation(); openCoverModal(this.dataset.folderPath, this.dataset.folderName)">
+            <img src="{{ url_for('serve_image', filename='pencil.png') }}" alt="Set cover">
+        </button>
+
+        <div class="preview-wrapper">
+            {% if folder.preview %}
+                {% set preview = folder.preview %}
+                {% set ext = preview.filename.split('.')[-1].lower() %}
+                {% if ext in ['mp4', 'avi', 'mkv', 'mov', 'wmv', 'flv', 'webm', 'm4v'] %}
+                    <img class="video-thumbnail"
+                         src="{{ url_for('thumbnail', video_id=preview.id) }}"
+                         alt="{{ folder.name }}"
+                         loading="lazy"
+                         decoding="async"
+                         data-video-src="{{ url_for('video_file', video_id=preview.id) }}">
+                {% elif ext in ['jpg', 'jpeg', 'png', 'bmp', 'gif', 'tiff', 'webp'] %}
+                    <img src="{{ url_for('video_file', video_id=preview.id) }}" alt="{{ folder.name }}">
+                {% else %}
+                    <div class="placeholder">📁</div>
+                {% endif %}
+            {% else %}
+                <div class="placeholder">📁</div>
+            {% endif %}
+        </div>
+        <div class="card-body">
+            <div class="card-title" title="{{ folder.path }}">{{ folder.name }}</div>
+            <div class="card-text">{{ folder.video_count }} videos</div>
+        </div>
+    </div>
+    {% else %}
+    <div class="col-12 text-center text-muted">
+        <p>No folders found. Add some videos and scan libraries.</p>
+    </div>
+    {% endfor %}
+</div>
+
+<!-- МОДАЛКА ВЫБОРА ОБЛОЖКИ -->
+<div class="modal fade" id="coverModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-content edit-modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Set cover for <span id="coverFolderName"></span></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div id="coverVideosGrid" class="cover-grid">
+                    <div class="no-videos-msg">Loading…</div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" id="selectCoverBtn" disabled>Select</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+window.FOLDERS_CONFIG = {
+    currentProfile: {{ current_profile|tojson }}
+};
+</script>
+<script src="{{ url_for('static', filename='js/folders.js') }}"></script>
+{% endblock %}

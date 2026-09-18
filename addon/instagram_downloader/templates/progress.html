@@ -1,0 +1,120 @@
+{% extends "instagram_base.html" %}
+
+{% block title %}Downloading...{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div class="card-body">
+        <h4 class="card-title">Downloading…</h4>
+        <p class="text-muted" id="profileInfo">
+            {% if task %}{{ task.profile_name }} — {{ task.profile_url }}{% endif %}
+        </p>
+
+        <div class="progress mb-3" style="height: 24px;">
+            <div id="progressBar" class="progress-bar"
+                 role="progressbar" style="width: 0%; background: #dc3545;">0%</div>
+        </div>
+
+        <p id="statusMsg" class="text-muted">Initializing…</p>
+
+        <div class="mt-3">
+            <h6>Files:</h6>
+            <ul id="filesList" class="list-unstyled"
+                style="max-height: 320px; overflow-y: auto; font-size: 0.85rem;"></ul>
+        </div>
+
+        <div class="mt-3 d-flex gap-2 flex-wrap">
+            <button id="cancelBtn" class="btn btn-danger">Cancel</button>
+            <a href="{{ url_for('instagram.index') }}" class="btn btn-secondary">← Back</a>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function() {
+    const taskId = '{{ task_id }}';
+    const progressBar = document.getElementById('progressBar');
+    const statusMsg = document.getElementById('statusMsg');
+    const filesList = document.getElementById('filesList');
+    const cancelBtn = document.getElementById('cancelBtn');
+
+    const ICON_AUTH = '{{ url_for("serve_image", filename="autor.png") }}';
+    const ICON_SEARCH = '{{ url_for("serve_image", filename="search.png") }}';
+
+    let finished = false;
+
+    function renderMessage(msg) {
+        if (!msg) return '';
+        let html = msg
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+
+        html = html.replace(/\[AUTH\]/g,
+            `<img src="${ICON_AUTH}" class="status-icon" alt="">`);
+        html = html.replace(/\[SEARCH\]/g,
+            `<img src="${ICON_SEARCH}" class="status-icon" alt="">`);
+        return html;
+    }
+
+    async function poll() {
+        if (finished) return;
+        try {
+            const r = await fetch('/instagram/progress_data/' + taskId);
+            if (!r.ok) {
+                if (r.status === 404) {
+                    statusMsg.textContent = 'Task not found';
+                    finished = true;
+                }
+                return;
+            }
+            const data = await r.json();
+            const pct = data.progress || 0;
+            progressBar.style.width = pct + '%';
+            progressBar.textContent = pct + '%';
+            statusMsg.innerHTML = renderMessage(data.message || data.status || '…');
+
+            if (data.files && data.files.length) {
+                filesList.innerHTML = '';
+                data.files.slice(-80).forEach(f => {
+                    const li = document.createElement('li');
+                    li.textContent = f;
+                    li.style.color = f.includes('failed') ? '#dc3545' : '#b0b0b0';
+                    filesList.appendChild(li);
+                });
+                filesList.scrollTop = filesList.scrollHeight;
+            }
+
+            if (data.status === 'complete' || data.status === 'cancelled') {
+                finished = true;
+                setTimeout(() => {
+                    window.location.href = '/instagram/downloaded/' + taskId;
+                }, 800);
+                return;
+            }
+            if (data.status === 'error') {
+                finished = true;
+                progressBar.style.background = '#dc3545';
+                statusMsg.innerHTML = renderMessage(data.message || 'Error');
+                return;
+            }
+        } catch (e) {
+            console.error(e);
+        }
+        setTimeout(poll, 1000);
+    }
+
+    cancelBtn.addEventListener('click', async function() {
+        if (!confirm('Cancel download?')) return;
+        cancelBtn.disabled = true;
+        try {
+            await fetch('/instagram/cancel/' + taskId, { method: 'POST' });
+        } catch (e) { console.error(e); }
+    });
+
+    poll();
+})();
+</script>
+{% endblock %}

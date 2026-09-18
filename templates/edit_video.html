@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+
+{% block title %}Edit Video: {{ video.filename }}{% endblock %}
+{% block page_title %}
+    Edit: {{ video.filename.rsplit('.', 1)[0] if '.' in video.filename else video.filename }}
+    {% if video.mode %}
+        <span class="badge bg-danger ms-2">{{ video.mode | mode_name }}</span>
+    {% endif %}
+{% endblock %}
+
+{% block content %}
+<div class="edit-container">
+    <form method="post">
+        <div class="category-grid">
+            {% for cat in all_categories %}
+            <div class="form-check">
+                <input class="form-check-input" type="checkbox" name="categories" value="{{ cat.id }}"
+                       id="cat_{{ cat.id }}"
+                       {% if cat.id in video.categories|map(attribute='id') %}checked{% endif %}>
+                <label class="form-check-label" for="cat_{{ cat.id }}">{{ cat.name }}</label>
+            </div>
+            {% endfor %}
+        </div>
+        <div class="mt-3">
+            <button type="submit" class="btn-add">Save</button>
+            <a href="{{ url_for('watch', video_id=video.id, profile=current_profile) }}" class="btn-secondary">Cancel</a>
+        </div>
+    </form>
+</div>
+{% endblock %}

@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}Instagram Downloader{% endblock %}</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/instagram.css') }}">
+</head>
+<body>
+<div class="top-bar">
+    <a href="{{ url_for('instagram.index') }}" class="brand">
+        <img src="{{ url_for('serve_image', filename='instagram.png') }}" alt="">
+        Instagram Downloader
+    </a>
+    <div class="nav-links">
+        <a href="{{ url_for('instagram.index') }}" class="btn-icon" title="Download">
+            <img src="{{ url_for('serve_image', filename='download.png') }}" alt="Download">
+        </a>
+        <a href="{{ url_for('index') }}" class="btn-icon" title="Video Manager">
+            <img src="{{ url_for('serve_image', filename='video.png') }}" alt="Video Manager">
+        </a>
+    </div>
+</div>
+
+<div class="main-content">
+    {% block content %}{% endblock %}
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

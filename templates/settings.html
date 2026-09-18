@@ -1,0 +1,285 @@
+{% extends "base.html" %}
+
+{% block title %}Settings{% endblock %}
+
+{% block content %}
+{% if tab == 'libraries' %}
+    <div class="settings-section">
+        <div class="action-row">
+            <form method="post" id="addLibraryForm" class="flex-form">
+                <input type="hidden" name="action" value="add_library">
+                <input type="text" name="path" id="libraryPath" class="form-control form-control-dark" placeholder="Enter full path to video folder (e.g., C:\Users\...)" value="">
+                <button type="button" class="btn-paste" id="pasteBtn">Paste</button>
+                <button type="submit" class="btn-add">Add</button>
+            </form>
+            <form method="post" class="scan-form" id="scanForm">
+                <input type="hidden" name="action" value="scan">
+                <button type="submit" class="btn-add" id="scanBtn" {% if scan_running %}disabled{% endif %}>
+                    {% if scan_running %}Scanning…{% else %}Scan{% endif %}
+                </button>
+            </form>
+        </div>
+
+        <div id="scanProgressContainer" class="dup-progress" style="display:none;">
+            <div class="dup-progress-bar">
+                <div id="scanProgressFill" class="dup-progress-fill" style="width:0%;"></div>
+            </div>
+            <div id="scanProgressText" class="dup-progress-text">Initializing...</div>
+        </div>
+
+        {% if all_libraries %}
+        <div class="table-responsive">
+            <table class="table table-dark-custom table-hover">
+                <thead><tr><th style="width:40px;">#</th><th>Name</th><th>Path</th><th>Profile</th><th style="width:60px;">Delete</th></tr></thead>
+                <tbody>
+                    {% for lib in all_libraries %}
+                    <tr>
+                        <td>{{ loop.index }}</td>
+                        <td>{{ lib.name }}</td>
+                        <td><code>{{ lib.path }}</code></td>
+                        <td>{{ lib.mode | mode_name }}</td>
+                        <td>
+                            <form method="post" style="display:inline;">
+                                <input type="hidden" name="action" value="delete_library">
+                                <input type="hidden" name="library_id" value="{{ lib.id }}">
+                                <button type="submit" class="btn-delete" title="Delete library">✕</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p class="text-muted">No libraries added.</p>
+        {% endif %}
+    </div>
+
+{% elif tab == 'categories' %}
+    <div class="settings-section">
+        <div class="mb-3">
+            <form method="post">
+                <input type="hidden" name="action" value="import_categories">
+                <div class="mb-2">
+                    <label class="form-label text-muted small">Enter category names (one per line):</label>
+                    <textarea name="categories_text" class="form-control form-control-dark" placeholder="Horror&#10;Comedy&#10;Documentary"></textarea>
+                </div>
+                <button type="submit" class="btn-import">Import Categories</button>
+            </form>
+        </div>
+        <div class="mb-3">
+            <form method="post" onsubmit="return confirm('Delete ALL categories for selected profile? This cannot be undone.');">
+                <input type="hidden" name="action" value="delete_all_categories">
+                <button type="submit" class="btn-danger-custom">Delete All Categories</button>
+            </form>
+        </div>
+        {% if all_categories %}
+        <div class="table-responsive">
+            <table class="table table-dark-custom table-hover" id="categoriesTable">
+                <thead><tr><th style="width:40px;">#</th><th>Name</th><th>Profile</th><th style="width:60px;">Delete</th></tr></thead>
+                <tbody>
+                    {% for cat in all_categories %}
+                        {% if loop.index0 < 10 %}
+                            <tr>
+                                <td>{{ loop.index }}</td>
+                                <td>{{ cat.name }}</td>
+                                <td>{{ cat.mode | mode_name }}</td>
+                                <td>
+                                    <form method="post" style="display:inline;">
+                                        <input type="hidden" name="action" value="delete_category">
+                                        <input type="hidden" name="category_id" value="{{ cat.id }}">
+                                        <button type="submit" class="btn-delete" title="Delete category">✕</button>
+                                    </form>
+                                </td>
+                            </tr>
+                        {% else %}
+                            <tr class="category-extra-settings" style="display:none;">
+                                <td>{{ loop.index }}</td>
+                                <td>{{ cat.name }}</td>
+                                <td>{{ cat.mode | mode_name }}</td>
+                                <td>
+                                    <form method="post" style="display:inline;">
+                                        <input type="hidden" name="action" value="delete_category">
+                                        <input type="hidden" name="category_id" value="{{ cat.id }}">
+                                        <button type="submit" class="btn-delete" title="Delete category">✕</button>
+                                    </form>
+                                </td>
+                            </tr>
+                        {% endif %}
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% if all_categories|length > 10 %}
+                <div class="mt-2">
+                    <a href="#" class="btn btn-outline-secondary btn-sm" id="toggleCategoriesSettingsBtn">Show All</a>
+                </div>
+            {% endif %}
+        </div>
+        {% else %}
+        <p class="text-muted">No categories yet.</p>
+        {% endif %}
+    </div>
+
+{% elif tab == 'network' %}
+    <div class="settings-section">
+        <h5>Static IP</h5>
+        <form method="post">
+            <input type="hidden" name="action" value="save_ip">
+            <div class="mb-3">
+                <label for="static_ip" class="form-label">Enter static IP address (e.g., 192.168.1.100):</label>
+                <input type="text" class="form-control form-control-dark" id="static_ip" name="static_ip" 
+                       placeholder="192.168.1.100" value="{{ app_config.get('static_ip', '') }}">
+            </div>
+            <button type="submit" class="btn-add">Save IP</button>
+        </form>
+        <div class="mt-3">
+            <p class="text-muted small">
+                Current IP: <code>{{ app_config.get('static_ip', 'not set') }}</code>
+                <br>Restart the server after changing if you use it for binding.
+            </p>
+        </div>
+    </div>
+
+{% elif tab == 'duplicates' %}
+    <div class="settings-section">
+        <h5>Duplicate Finder</h5>
+        <div class="mb-3">
+            <form method="post" action="{{ url_for('settings') }}" id="duplicateScanForm">
+                <input type="hidden" name="action" value="start_duplicate_scan">
+                <div class="mb-2">
+                    <label class="form-label">Media types to scan:</label>
+                    <div class="form-check form-check-inline">
+                        <input class="form-check-input" type="checkbox" name="media_types" value="video" checked id="media_video">
+                        <label class="form-check-label" for="media_video">Video</label>
+                    </div>
+                    <div class="form-check form-check-inline">
+                        <input class="form-check-input" type="checkbox" name="media_types" value="image" checked id="media_image">
+                        <label class="form-check-label" for="media_image">Image</label>
+                    </div>
+                </div>
+                <button type="submit" class="btn-add">Find Duplicates</button>
+            </form>
+        </div>
+        <div class="mt-3">
+            <a href="{{ url_for('settings', tab='duplicates', profile=current_profile) }}" class="btn-add">Go to Duplicates</a>
+        </div>
+    </div>
+{% endif %}
+
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const pasteBtn = document.getElementById('pasteBtn');
+        const pathInput = document.getElementById('libraryPath');
+        if (pasteBtn && pathInput) {
+            pasteBtn.addEventListener('click', async function() {
+                try {
+                    const text = await navigator.clipboard.readText();
+                    if (text) {
+                        pathInput.value = text;
+                    } else {
+                        alert('Clipboard is empty or contains non-text data.');
+                    }
+                } catch (err) {
+                    alert('Unable to access clipboard. Please paste manually (Ctrl+V).');
+                }
+            });
+        }
+
+        const toggleBtn = document.getElementById('toggleCategoriesSettingsBtn');
+        if (toggleBtn) {
+            toggleBtn.addEventListener('click', function(e) {
+                e.preventDefault();
+                const extras = document.querySelectorAll('.category-extra-settings');
+                let show = false;
+                if (extras.length > 0 && extras[0].style.display === 'none') {
+                    show = true;
+                }
+                extras.forEach(el => {
+                    el.style.display = show ? 'table-row' : 'none';
+                });
+                this.textContent = show ? 'Hide' : 'Show All';
+            });
+        }
+
+        // ---------- Async scan: отслеживание прогресса ----------
+        const urlParams = new URLSearchParams(window.location.search);
+        const taskId = urlParams.get('task_id');
+        const scanBtn = document.getElementById('scanBtn');
+        const scanForm = document.getElementById('scanForm');
+
+        // При отправке формы скана — блокируем кнопку сразу
+        if (scanForm) {
+            scanForm.addEventListener('submit', function() {
+                if (scanBtn) {
+                    scanBtn.disabled = true;
+                    scanBtn.textContent = 'Scanning…';
+                }
+                const progressContainer = document.getElementById('scanProgressContainer');
+                if (progressContainer) progressContainer.style.display = 'block';
+                const progressText = document.getElementById('scanProgressText');
+                if (progressText) progressText.textContent = 'Starting scan...';
+            });
+        }
+
+        if (taskId && scanBtn) {
+            startScanProgress(taskId);
+        }
+
+        function startScanProgress(taskId) {
+            const progressContainer = document.getElementById('scanProgressContainer');
+            const progressFill = document.getElementById('scanProgressFill');
+            const progressText = document.getElementById('scanProgressText');
+            if (!progressContainer) return;
+            progressContainer.style.display = 'block';
+
+            const es = new EventSource('/scan_progress/' + taskId);
+
+            es.onmessage = function(event) {
+                let data;
+                try { data = JSON.parse(event.data); } catch (e) { return; }
+
+                if (data.status === 'complete') {
+                    progressFill.style.width = '100%';
+                    progressText.textContent = '✅ ' + (data.message || 'Done');
+                    es.close();
+                    setTimeout(() => {
+                        const url = new URL(window.location.href);
+                        url.searchParams.delete('task_id');
+                        window.location.href = url.toString();
+                    }, 900);
+                } else if (data.status === 'error') {
+                    progressFill.style.width = '100%';
+                    progressFill.style.background = '#dc3545';
+                    progressText.textContent = '❌ ' + (data.message || 'Error');
+                    es.close();
+                    if (scanBtn) {
+                        scanBtn.disabled = false;
+                        scanBtn.textContent = 'Scan';
+                    }
+                } else if (data.status === 'scanning') {
+                    const pct = data.progress || 0;
+                    progressFill.style.width = pct + '%';
+                    const processed = data.processed || 0;
+                    const total = data.total || 0;
+                    const msg = data.message || '';
+                    progressText.textContent = total > 0
+                        ? `${pct}% — ${processed}/${total} — ${msg}`
+                        : msg;
+                } else if (data.status === 'not_found') {
+                    progressText.textContent = 'Progress lost. Refresh the page.';
+                    es.close();
+                }
+            };
+
+            es.onerror = function() {
+                progressText.textContent = 'Connection lost. Refresh the page.';
+                es.close();
+                if (scanBtn) {
+                    scanBtn.disabled = false;
+                    scanBtn.textContent = 'Scan';
+                }
+            };
+        }
+    });
+</script>
+{% endblock %}

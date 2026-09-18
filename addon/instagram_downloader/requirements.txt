@@ -1,0 +1,5 @@
+Flask==2.3.2
+instagrapi
+browser-cookie3
+pywin32; sys_platform == "win32"
+yt-dlp

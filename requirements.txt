@@ -1,0 +1,7 @@
+opencv-python
+pillow
+imagehash
+yt-dlp
+Flask==2.3.2
+instagrapi
+playwright

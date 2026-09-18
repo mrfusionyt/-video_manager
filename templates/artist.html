@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+
+{% block title %}{{ artist.name }}{% endblock %}
+{% block page_title %}{{ artist.name }}{% endblock %}
+
+{% block content %}
+<div class="artist-info">
+    <div>
+        <h4>{{ artist.name }}</h4>
+        <div class="meta">{{ videos|length }} video(s) in this artist</div>
+    </div>
+    <div class="actions">
+        <button class="btn-artist" onclick="openAddVideos()">+ Add videos</button>
+        <a class="btn-artist secondary" href="{{ url_for('artists_page', profile=current_profile) }}">← All artists</a>
+    </div>
+</div>
+
+{% if videos %}
+<div class="row g-3" id="videoGrid">
+    {% for v in videos %}
+    <div class="col-md-3 col-sm-4 col-6" id="vtile-{{ v.id }}">
+        <div class="video-tile"
+             data-video-id="{{ v.id }}"
+             data-video-name="{{ v.filename|e }}"
+             onclick="window.location.href='/watch/{{ v.id }}?profile={{ current_profile }}'">
+            {% set ext = v.filename.split('.')[-1].lower() %}
+            {% if ext in ['mp4', 'mov', 'webm', 'mkv', 'm4v'] %}
+                <img class="video-thumbnail"
+                     src="{{ url_for('thumbnail', video_id=v.id) }}"
+                     alt="{{ v.filename }}"
+                     loading="lazy"
+                     decoding="async"
+                     data-video-src="{{ url_for('video_file', video_id=v.id) }}">
+            {% else %}
+                <img src="{{ url_for('video_file', video_id=v.id) }}" alt="{{ v.filename }}">
+            {% endif %}
+            <div class="vname" title="{{ v.filename }}">
+                {{ v.filename.rsplit('.', 1)[0] if '.' in v.filename else v.filename }}
+            </div>
+            <button type="button" class="vremove delete-btn" title="Remove from artist"
+                    onclick="event.stopPropagation(); openRemoveVideoModal({{ v.id }});">
+                <img src="{{ url_for('serve_image', filename='close.png') }}" alt="Remove">
+            </button>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<div class="empty-msg">
+    <p>No videos in this artist yet.</p>
+    <p class="text-muted" style="font-size:0.85rem;">
+        Click "+ Add videos" to assign videos.
+    </p>
+</div>
+{% endif %}
+
+<!-- МОДАЛКА ДОБАВЛЕНИЯ ВИДЕО -->
+<div class="modal fade" id="addVideosModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-centered">
+        <div class="modal-content edit-modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Add videos to "{{ artist.name }}"</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                {% if available_videos %}
+                <div class="available-list" id="availableList">
+                    {% for v in available_videos %}
+                    <div class="avail-item" data-video-id="{{ v.id }}">
+                        {% set ext = v.filename.split('.')[-1].lower() %}
+                        {% if ext in ['mp4', 'mov', 'webm', 'mkv', 'm4v'] %}
+                            <img src="{{ url_for('thumbnail', video_id=v.id) }}"
+                                 alt=""
+                                 loading="lazy"
+                                 style="width:100%; height:100%; object-fit:cover; display:block;">
+                        {% else %}
+                            <img src="{{ url_for('video_file', video_id=v.id) }}" alt="">
+                        {% endif %}
+                        <div class="aname" title="{{ v.filename }}">{{ v.filename }}</div>
+                        <div class="check">✓</div>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <p class="text-muted">All videos of this profile are already added to this artist.</p>
+                {% endif %}
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" id="saveAddBtn" disabled>Add selected</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- МОДАЛКА ПОДТВЕРЖДЕНИЯ УДАЛЕНИЯ ВИДЕО -->
+<div class="modal fade" id="removeVideoModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content edit-modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Remove video from artist</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="delete-warning">
+                    <div class="warn-icon">!</div>
+                    <div class="warn-text">
+                        <div>
+                            Remove
+                            <span class="video-name-strong" id="removeVideoName">this video</span>
+                            from <strong>{{ artist.name }}</strong>?
+                        </div>
+                        <div class="small-muted">
+                            The video itself is not deleted — only the link to this artist.
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" id="confirmRemoveVideoBtn">Remove</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+window.ARTIST_CONFIG = {
+    artistId: {{ artist.id }},
+    currentProfile: {{ current_profile|tojson }}
+};
+</script>
+<script src="{{ url_for('static', filename='js/artist.js') }}"></script>
+{% endblock %}

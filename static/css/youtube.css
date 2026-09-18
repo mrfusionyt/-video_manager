@@ -1,0 +1,110 @@
+/* ============================================================
+   youtube.css — стили для YouTube Downloader
+   ============================================================ */
+
+:root {
+    --radius: 6px;
+    --radius-pill: 999px;
+
+    --bg-app: #121212;
+    --bg-surface: #1e1e1e;
+    --bg-elevated: #2c2c2c;
+    --bg-input: #2c2c2c;
+    --bg-btn: #444;
+    --bg-btn-hover: #555;
+
+    --border: #2c2c2c;
+    --border-strong: #444;
+
+    --text-primary: #e0e0e0;
+    --text-secondary: #b0b0b0;
+    --text-muted: #888;
+
+    --red: #dc3545;
+    --red-hover: #c82333;
+
+    --green: #28a745;
+
+    --shadow-card: 0 2px 8px rgba(0,0,0,0.5);
+    --shadow-modal: 0 8px 32px rgba(0,0,0,0.75);
+
+    --app-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --tr: 0.2s ease;
+}
+
+body { background: var(--bg-app); color: var(--text-primary); padding-top: 70px; font-family: var(--app-font); }
+
+.top-bar { position: fixed; top: 0; left: 0; right: 0; z-index: 1000; background: var(--bg-surface); border-bottom: 1px solid var(--border); padding: 0 1.5rem; height: 60px; display: flex; align-items: center; justify-content: space-between; }
+.top-bar .brand { color: var(--text-primary); text-decoration: none; font-weight: bold; font-size: 1.05rem; display: flex; align-items: center; gap: 0.6rem; }
+.top-bar .brand img { width: 36px; height: 36px; object-fit: contain; display: block; }
+.top-bar .brand:hover { color: #fff; }
+.top-bar .nav-links { display: flex; gap: 0.5rem; align-items: center; }
+.top-bar .nav-links a { color: var(--text-secondary); text-decoration: none; padding: 0.35rem 0.9rem; border-radius: var(--radius); border: none; background: transparent; font-size: 0.9rem; transition: background var(--tr), color var(--tr); }
+.top-bar .nav-links a:hover { background: rgba(255,255,255,0.08); color: #fff; }
+.top-bar .nav-links a.active { background: var(--red); color: #fff; }
+.top-bar .nav-links a.btn-icon { background: transparent; padding: 0; width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; border-radius: var(--radius); }
+.top-bar .nav-links a.btn-icon:hover { background: rgba(255,255,255,0.08); }
+.top-bar .nav-links a.btn-icon img { width: 100%; height: 100%; object-fit: contain; display: block; }
+
+.main-content { padding: 1.5rem; max-width: 1100px; margin: 0 auto; }
+
+.card { background: var(--bg-surface); border: none; box-shadow: var(--shadow-card); color: var(--text-primary); border-radius: var(--radius); }
+.card-body { color: var(--text-primary); }
+.card-title { color: var(--text-primary); }
+
+.text-muted { color: var(--text-muted) !important; }
+
+.form-control, .form-select { background: var(--bg-input); border: 1px solid var(--border-strong); color: var(--text-primary); border-radius: var(--radius); }
+.form-control:focus, .form-select:focus { background: var(--bg-input); color: var(--text-primary); border-color: var(--red); box-shadow: none; }
+.form-control::placeholder { color: var(--text-muted); }
+.form-check-label { color: var(--text-primary); }
+.form-check-input:checked { background-color: var(--red); border-color: var(--red); }
+.form-check-input:focus { border-color: var(--red); box-shadow: 0 0 0 .25rem rgba(220,53,69,.25); }
+
+.btn-primary { background: var(--red); border-color: var(--red); border-radius: var(--radius); }
+.btn-primary:hover { background: var(--red-hover); border-color: var(--red-hover); }
+.btn-secondary { background: var(--bg-btn); border-color: var(--bg-btn); color: var(--text-primary); border-radius: var(--radius); }
+.btn-secondary:hover { background: var(--bg-btn-hover); border-color: var(--bg-btn-hover); color: #fff; }
+.btn-danger { background: var(--red); border-color: var(--red); border-radius: var(--radius); }
+.btn-danger:hover { background: var(--red-hover); }
+
+.alert-danger { background: #3a1e1e; color: var(--red); border-color: #5a2a2a; border-radius: var(--radius); }
+.alert-info { background: #1e2a3a; color: #b0d0ff; border-color: #2a4a6a; border-radius: var(--radius); }
+
+.list-group-item { background: var(--bg-surface); color: var(--text-primary); border-color: var(--border); }
+.list-group-item:hover { background: var(--bg-elevated); color: #fff; }
+.list-group-item-action { color: var(--text-primary); }
+.list-group-item:first-child { border-top-left-radius: var(--radius); border-top-right-radius: var(--radius); }
+.list-group-item:last-child { border-bottom-left-radius: var(--radius); border-bottom-right-radius: var(--radius); }
+
+.badge.bg-success { background: var(--green) !important; }
+.badge.bg-danger { background: var(--red) !important; }
+.badge.bg-warning { background: #ffc107 !important; color: #000 !important; }
+.badge.bg-secondary { background: var(--bg-btn-hover) !important; }
+
+hr { border-color: var(--border); opacity: 1; }
+
+.progress { background: var(--bg-elevated); border-radius: var(--radius); }
+.progress-bar { border-radius: var(--radius); }
+
+/* Модалки */
+.modal-content { background: var(--bg-surface); color: var(--text-primary); border: none; border-radius: var(--radius); box-shadow: var(--shadow-modal); }
+.modal-header, .modal-footer { border-color: var(--border); padding: 1rem; }
+.modal-header .btn-close { filter: invert(1); opacity: 0.8; }
+.modal-header .btn-close:hover { opacity: 1; }
+.modal-body { padding: 1rem; }
+
+/* Progress page */
+.current-video { font-size: 1rem; color: var(--text-primary); padding: 0.6rem 0.9rem; background: var(--bg-elevated); border-radius: var(--radius); margin-bottom: 1rem; word-break: break-all; min-height: 42px; display: flex; align-items: center; gap: 0.5rem; }
+.current-video .icon { font-size: 1.1rem; flex-shrink: 0; }
+.current-video .name { flex: 1; }
+
+.result-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 0.75rem; margin-top: 1rem; }
+.result-card { position: relative; background: var(--bg-surface); border-radius: var(--radius); overflow: hidden; border: 1px solid var(--border); aspect-ratio: 16 / 9; cursor: pointer; transition: transform var(--tr), border-color var(--tr); text-decoration: none; }
+.result-card:hover { transform: translateY(-2px); border-color: var(--red); }
+.result-card video, .result-card img { width: 100%; height: 100%; object-fit: cover; display: block; background: #000; }
+.result-card .overlay { position: absolute; bottom: 0; left: 0; right: 0; background: linear-gradient(transparent, rgba(0,0,0,0.85)); color: #fff; padding: 1.5rem 0.6rem 0.5rem; font-size: 0.8rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; }
+.result-card .open-hint { position: absolute; top: 6px; right: 6px; background: rgba(0,0,0,0.7); color: #fff; padding: 2px 8px; border-radius: var(--radius); font-size: 0.7rem; opacity: 0; transition: opacity var(--tr); pointer-events: none; }
+.result-card:hover .open-hint { opacity: 1; }
+
+.empty-result { color: var(--text-muted); font-size: 0.9rem; margin-top: 1rem; }

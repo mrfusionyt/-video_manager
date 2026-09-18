@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+
+{% block title %}Home{% endblock %}
+{% block page_title %}
+    My Videos
+    <div class="d-inline-flex align-items-center gap-2">
+        <form class="d-flex" method="get" action="{{ url_for('index') }}" style="margin-right: 8px;">
+            <input class="form-control form-control-sm" type="search" name="search" placeholder="Search..." 
+                   value="{{ search or '' }}" aria-label="Search" style="width: 180px;">
+            <input type="hidden" name="profile" value="{{ current_profile }}">
+            <button class="btn btn-outline-secondary btn-sm" type="submit">Go</button>
+        </form>
+        <button class="btn btn-filter btn-sm" data-bs-toggle="modal" data-bs-target="#filterModal">
+            Filters
+        </button>
+        <div class="dropdown d-inline">
+            {% set sort_labels = {
+                'date': 'Date',
+                'rating': 'Rating',
+                'duration_asc': 'Duration ↑',
+                'duration_desc': 'Duration ↓',
+                'orientation_vertical_first': 'Vertical First',
+                'orientation_horizontal_first': 'Horizontal First',
+                'top10': 'Top 10',
+                'top50': 'Top 50',
+                'top100': 'Top 100'
+            } %}
+            <button class="btn btn-secondary btn-sm dropdown-toggle" type="button" id="sortDropdown" data-bs-toggle="dropdown" aria-expanded="false">
+                Sort by: {{ sort_labels.get(sort, 'Date') }}
+            </button>
+            <ul class="dropdown-menu dropdown-menu-dark" aria-labelledby="sortDropdown">
+                <li><a class="dropdown-item {% if sort == 'date' %}active{% endif %}" href="#" data-sort="date">By Date</a></li>
+                <li><a class="dropdown-item {% if sort == 'rating' %}active{% endif %}" href="#" data-sort="rating">By Rating</a></li>
+                <li><hr class="dropdown-divider"></li>
+                <li><a class="dropdown-item {% if sort == 'duration_asc' %}active{% endif %}" href="#" data-sort="duration_asc">Duration (short first)</a></li>
+                <li><a class="dropdown-item {% if sort == 'duration_desc' %}active{% endif %}" href="#" data-sort="duration_desc">Duration (long first)</a></li>
+                <li><hr class="dropdown-divider"></li>
+                <li><a class="dropdown-item {% if sort == 'orientation_vertical_first' %}active{% endif %}" href="#" data-sort="orientation_vertical_first">Vertical First</a></li>
+                <li><a class="dropdown-item {% if sort == 'orientation_horizontal_first' %}active{% endif %}" href="#" data-sort="orientation_horizontal_first">Horizontal First</a></li>
+                <li><hr class="dropdown-divider"></li>
+                <li><a class="dropdown-item {% if sort == 'top10' %}active{% endif %}" href="#" data-sort="top10">Top 10</a></li>
+                <li><a class="dropdown-item {% if sort == 'top50' %}active{% endif %}" href="#" data-sort="top50">Top 50</a></li>
+                <li><a class="dropdown-item {% if sort == 'top100' %}active{% endif %}" href="#" data-sort="top100">Top 100</a></li>
+            </ul>
+        </div>
+    </div>
+{% endblock %}
+
+{% block content %}
+{% if selected_categories %}
+<div class="mb-3">
+    <span class="text-muted me-2">Active filters:</span>
+    {% for cat in all_categories %}
+        {% if cat.id in selected_categories %}
+        <span class="filter-badge">
+            {{ cat.name }}
+            {% set remaining = selected_categories | reject('eq', cat.id) | list %}
+            <a href="{{ url_for('index', category=remaining) if remaining else url_for('index') }}" 
+               class="remove-filter" title="Remove filter">✕</a>
+        </span>
+        {% endif %}
+    {% endfor %}
+    <a href="{{ url_for('index') }}" class="btn btn-outline-secondary btn-sm ms-2">Clear All</a>
+</div>
+{% endif %}
+
+<div class="row" id="videoGrid">
+    {% include '_video_cards.html' with context %}
+</div>
+
+<div id="moreContainer" class="text-center mt-3" {% if page >= total_pages or sort in ['top10','top50','top100'] %}style="display:none;"{% endif %}>
+    <button id="moreBtn" class="btn btn-more">More</button>
+</div>
+
+<div id="paginationContainer" class="mt-3">
+    {% if total_pages > 1 and sort not in ['top10','top50','top100'] %}
+    <nav aria-label="Page navigation">
+        <ul class="pagination justify-content-center" id="paginationList">
+            {% if page > 1 %}
+            <li class="page-item">
+                <a class="page-link" href="{{ url_for('index', page=page-1, category=selected_categories, sort=sort, search=search, folder=folder, profile=current_profile) }}">Previous</a>
+            </li>
+            {% endif %}
+            {% for p in range(1, total_pages+1) %}
+                {% if p == page %}
+                    <li class="page-item active"><span class="page-link">{{ p }}</span></li>
+                {% else %}
+                    <li class="page-item"><a class="page-link" href="{{ url_for('index', page=p, category=selected_categories, sort=sort, search=search, folder=folder, profile=current_profile) }}">{{ p }}</a></li>
+                {% endif %}
+            {% endfor %}
+            {% if page < total_pages %}
+            <li class="page-item">
+                <a class="page-link" href="{{ url_for('index', page=page+1, category=selected_categories, sort=sort, search=search, folder=folder, profile=current_profile) }}">Next</a>
+            </li>
+            {% endif %}
+        </ul>
+    </nav>
+    {% endif %}
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+window.INDEX_CONFIG = {
+    page: {{ page|default(1) }},
+    totalPages: {{ total_pages|default(1) }},
+    selectedCategories: {{ selected_categories|tojson }},
+    sort: {{ sort|tojson }},
+    search: {{ search|tojson }},
+    folder: {{ folder|tojson }},
+    profile: {{ current_profile|tojson }}
+};
+</script>
+<script src="{{ url_for('static', filename='js/index.js') }}"></script>
+{% endblock %}

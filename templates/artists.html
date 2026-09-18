@@ -1,0 +1,137 @@
+{% extends "base.html" %}
+
+{% block title %}Artists{% endblock %}
+{% block page_title %}Artists{% endblock %}
+
+{% block content %}
+<div class="artists-header">
+    <h4>Artists <span class="text-muted" style="font-size:0.9rem;">({{ artists|length }})</span></h4>
+    <form class="add-artist-form" method="post" action="{{ url_for('artists_add', profile=current_profile) }}">
+        <input type="text" name="name" placeholder="New artist name" required autocomplete="off">
+        <button type="submit">Add artist</button>
+    </form>
+</div>
+
+{% if artists %}
+<div class="row g-2">
+    {% for artist in artists %}
+    <div class="col-md-2 col-sm-3 col-4">
+        <div class="artist-card"
+             data-artist-id="{{ artist.id }}"
+             data-artist-name="{{ artist.name|e }}"
+             data-cover-video-id="{{ artist.cover_video_id or '' }}"
+             onclick="goToArtist({{ artist.id }})">
+            {% if artist.preview %}
+                {% set ext = artist.preview.filename.split('.')[-1].lower() %}
+                {% if ext in ['mp4', 'mov', 'webm', 'mkv', 'm4v'] %}
+                    <img class="preview video-thumbnail"
+                         src="{{ url_for('thumbnail', video_id=artist.preview.id) }}"
+                         alt="{{ artist.name }}"
+                         loading="lazy"
+                         decoding="async"
+                         data-video-src="{{ url_for('video_file', video_id=artist.preview.id) }}">
+                {% else %}
+                    <img src="{{ url_for('video_file', video_id=artist.preview.id) }}"
+                         alt="{{ artist.name }}" class="preview">
+                {% endif %}
+            {% else %}
+                <div class="placeholder">🎤</div>
+            {% endif %}
+
+            <div class="overlay">
+                <div class="name" title="{{ artist.name }}">{{ artist.name }}</div>
+                <div class="count">{{ artist.video_count }} video(s)</div>
+            </div>
+
+            <div class="actions" onclick="event.stopPropagation();">
+                <button type="button" class="icon-btn edit-btn"
+                        title="Edit"
+                        onclick="openEditModal({{ artist.id }})">
+                    <img src="{{ url_for('serve_image', filename='pencil.png') }}" alt="Edit">
+                </button>
+                <button type="button" class="icon-btn delete-btn"
+                        title="Delete"
+                        onclick="openDeleteModal({{ artist.id }})">
+                    <img src="{{ url_for('serve_image', filename='close.png') }}" alt="Delete">
+                </button>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<div class="empty-msg">
+    <p>No artists yet.</p>
+    <p class="text-muted" style="font-size:0.85rem;">
+        Add your first artist using the field above.
+    </p>
+</div>
+{% endif %}
+
+<!-- МОДАЛКА РЕДАКТИРОВАНИЯ АРТИСТА -->
+<div class="modal fade" id="editArtistModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-content edit-modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">✎ Edit artist</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <label for="editArtistName" class="form-label">Name</label>
+                    <input type="text" class="form-control" id="editArtistName" placeholder="Artist name">
+                </div>
+                <div class="mb-2">
+                    <label class="form-label">Cover</label>
+                    <div id="coverPicker" class="cover-picker">
+                        <div class="no-covers-msg">Loading…</div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" id="saveEditBtn">Save</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- МОДАЛКА ПОДТВЕРЖДЕНИЯ УДАЛЕНИЯ -->
+<div class="modal fade" id="deleteArtistModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content edit-modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Delete artist</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="delete-warning">
+                    <div class="warn-icon">!</div>
+                    <div class="warn-text">
+                        <div>
+                            Are you sure you want to delete
+                            <span class="artist-name-strong" id="deleteArtistName">this artist</span>?
+                        </div>
+                        <div class="small-muted">
+                            This action cannot be undone. Videos are not deleted — only the artist record.
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" id="confirmDeleteArtistBtn">Delete</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+window.ARTISTS_CONFIG = {
+    currentProfile: {{ current_profile|tojson }}
+};
+</script>
+<script src="{{ url_for('static', filename='js/artists_page.js') }}"></script>
+{% endblock %}
