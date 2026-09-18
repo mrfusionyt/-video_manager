@@ -3,6 +3,7 @@
    • Клик по карточке — переход в папку
    • Модалка установки обложки папки
    • Модалка назначения артиста для всей папки
+   • Универсальная Bootstrap-модалка уведомлений (вместо alert)
    Конфиг: window.FOLDERS_CONFIG
    ============================================================ */
 (function () {
@@ -21,8 +22,47 @@
     var assignFolderPath     = null;
     var assignFolderName     = null;
 
+    var notifyModalInstance  = null;
+    var notifyOkCallback     = null;
+
     /* ============================================================
-       МОДАЛКА ОБЛОЖКИ (без изменений)
+       УВЕДОМЛЕНИЯ (замена alert)
+       ============================================================ */
+    function showNotify(title, message, type, onOk) {
+        // type: 'success' | 'error' | 'info'
+        type = type || 'info';
+
+        document.getElementById('notifyTitle').textContent = title;
+
+        var msgEl = document.getElementById('notifyMessage');
+        if (msgEl) msgEl.textContent = message || '';
+
+        var iconEl = document.getElementById('notifyIcon');
+        if (iconEl) {
+            iconEl.className = 'notify-icon ' + type;
+            if (type === 'success')      iconEl.textContent = '✓';
+            else if (type === 'error')   iconEl.textContent = '!';
+            else                          iconEl.textContent = 'i';
+        }
+
+        notifyOkCallback = (typeof onOk === 'function') ? onOk : null;
+
+        var el = document.getElementById('notifyModal');
+        if (!el) {
+            // fallback, если модалки нет в шаблоне
+            window.alert(title + '\n\n' + (message || ''));
+            if (notifyOkCallback) notifyOkCallback();
+            return;
+        }
+
+        if (!notifyModalInstance) {
+            notifyModalInstance = new bootstrap.Modal(el);
+        }
+        notifyModalInstance.show();
+    }
+
+    /* ============================================================
+       МОДАЛКА ОБЛОЖКИ
        ============================================================ */
     function openCoverModal(folderPath, folderName) {
         currentFolderPath = folderPath;
@@ -123,7 +163,7 @@
 
     function setCover(folderPath, videoId) {
         if (!folderPath || !videoId) {
-            alert('Please select a video first.');
+            showNotify('Обложка', 'Сначала выберите видео.', 'info');
             return;
         }
 
@@ -145,14 +185,14 @@
                     if (coverModalInstance) coverModalInstance.hide();
                     location.reload();
                 } else {
-                    alert('Failed to set cover: ' + (data.error || 'Unknown error'));
+                    showNotify('Ошибка', 'Не удалось установить обложку: ' + (data.error || 'Unknown'), 'error');
                     selectBtn.disabled = false;
                     selectBtn.textContent = 'Select';
                 }
             })
             .catch(function (err) {
                 console.error('Error setting cover:', err);
-                alert('Network error');
+                showNotify('Ошибка сети', 'Проверьте соединение и попробуйте снова.', 'error');
                 selectBtn.disabled = false;
                 selectBtn.textContent = 'Select';
             });
@@ -170,6 +210,7 @@
             container.innerHTML =
                 '<div class="text-muted">Артистов пока нет. ' +
                 'Создайте первого на вкладке «Создать нового».</div>';
+            updateAssignBtn();
             return;
         }
 
@@ -253,19 +294,25 @@
         })
             .then(function (r) { return r.json(); })
             .then(function (d) {
+                if (assignModalInstance) assignModalInstance.hide();
+
                 if (d.success) {
-                    if (assignModalInstance) assignModalInstance.hide();
-                    alert('Назначено: ' + (d.assigned || 0) + ' видео');
-                    location.reload();
+                    var n = d.assigned || 0;
+                    var msg = (n > 0)
+                        ? ('Назначено: ' + n + ' видео.')
+                        : 'Нет видео для назначения (все уже привязаны к артистам).';
+                    showNotify('Готово', msg, 'success', function () {
+                        location.reload();
+                    });
                 } else {
-                    alert('Ошибка: ' + (d.error || 'Unknown'));
+                    showNotify('Ошибка', d.error || 'Не удалось назначить артиста.', 'error');
                     btn.disabled = false;
                     updateAssignBtn();
                 }
             })
             .catch(function (err) {
                 console.error('assign_artist error:', err);
-                alert('Network error');
+                showNotify('Ошибка сети', 'Проверьте соединение и попробуйте снова.', 'error');
                 btn.disabled = false;
                 updateAssignBtn();
             });
@@ -274,7 +321,7 @@
     function createArtistAndSelect() {
         var name = document.getElementById('newArtistName').value.trim();
         if (!name) {
-            alert('Введите имя артиста');
+            showNotify('Внимание', 'Введите имя артиста.', 'info');
             return;
         }
 
@@ -308,12 +355,12 @@
 
                     document.getElementById('newArtistName').value = '';
                 } else {
-                    alert('Ошибка: ' + (d.error || 'Unknown'));
+                    showNotify('Ошибка', d.error || 'Не удалось создать артиста.', 'error');
                 }
             })
             .catch(function (err) {
                 console.error('create_artist error:', err);
-                alert('Network error');
+                showNotify('Ошибка сети', 'Проверьте соединение и попробуйте снова.', 'error');
             })
             .finally(function () {
                 btn.disabled = false;
@@ -328,7 +375,7 @@
         // Клик по карточке — переход в папку (исключая кнопки)
         document.querySelectorAll('.folder-card').forEach(function (card) {
             card.addEventListener('click', function (e) {
-                if (e.target.closest('.cover-btn')) return;
+                if (e.target.closest('.cover-btn'))  return;
                 if (e.target.closest('.assign-btn')) return;
                 var folderPath = this.dataset.folderPath;
                 if (folderPath) {
@@ -371,9 +418,21 @@
                 }
             });
         }
+
+        // Возможность передать callback при закрытии notifyModal
+        var notifyEl = document.getElementById('notifyModal');
+        if (notifyEl) {
+            notifyEl.addEventListener('hidden.bs.modal', function () {
+                if (typeof notifyOkCallback === 'function') {
+                    var cb = notifyOkCallback;
+                    notifyOkCallback = null;
+                    cb();
+                }
+            });
+        }
     });
 
-    // Экспорт для inline onclick
+    // Экспорт для inline onclick в шаблоне
     window.openCoverModal        = openCoverModal;
     window.openAssignArtistModal = openAssignArtistModal;
 })();

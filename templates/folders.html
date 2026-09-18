@@ -7,6 +7,35 @@
 {% endblock %}
 
 {% block content %}
+<style>
+    .notify-icon {
+        width: 44px;
+        height: 44px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 24px;
+        font-weight: 700;
+        flex-shrink: 0;
+        line-height: 1;
+    }
+    .notify-icon.success { background: #d1fae5; color: #065f46; }
+    .notify-icon.error   { background: #fee2e2; color: #991b1b; }
+    .notify-icon.info    { background: #dbeafe; color: #1e40af; }
+
+    .artist-checkbox-list {
+        max-height: 320px;
+        overflow-y: auto;
+        border: 1px solid #3a3a3a;
+        border-radius: 6px;
+        padding: 8px 12px;
+    }
+    .artist-checkbox-list .form-check {
+        padding: 4px 0 4px 1.5em;
+    }
+</style>
+
 <div class="folder-grid">
     {% for folder in folders %}
     <div class="folder-card" data-folder-path="{{ folder.path }}" data-folder-name="{{ folder.name }}">
@@ -149,6 +178,27 @@
                 <button type="button" class="btn btn-primary" id="assignArtistBtn" disabled>
                     Назначить
                 </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- УНИВЕРСАЛЬНАЯ МОДАЛКА УВЕДОМЛЕНИЙ -->
+<div class="modal fade" id="notifyModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content edit-modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="notifyTitle">Уведомление</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="d-flex align-items-start gap-3">
+                    <div class="notify-icon info" id="notifyIcon">i</div>
+                    <div id="notifyMessage" style="flex:1; word-break: break-word;">…</div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-primary" id="notifyOkBtn" data-bs-dismiss="modal">ОК</button>
             </div>
         </div>
     </div>
