@@ -149,9 +149,35 @@ def register(app):
         video = get_video_by_id(video_id)
         if not video:
             abort(404)
+
+        # Контекст просмотра: папка, из которой пришли.
+        folder = request.args.get('folder')
+
+        # Формируем ленту для свайпа:
+        #  - если пришли из папки — только видео этой папки, по имени файла;
+        #  - иначе — все видео профиля, тоже по имени файла (а не по id).
+        if folder:
+            all_videos = get_all_videos(
+                mode=current_mode,
+                sort_by='filename',
+                folder=folder,
+            )
+        else:
+            all_videos = get_all_videos(
+                mode=current_mode,
+                sort_by='filename',
+            )
+
+        # На всякий случай: если текущего видео нет в ленте (например, оно из
+        # другой папки), добавляем его первым, чтобы свайп не сломался.
+        feed_ids = [v['id'] for v in all_videos]
+        if video_id not in feed_ids:
+            all_videos = [video] + all_videos
+            feed_ids = [v['id'] for v in all_videos]
+
+        # Рекомендации — как раньше, по общим категориям.
         video_categories = video.get('categories', [])
         category_ids = [cat['id'] for cat in video_categories]
-        all_videos = get_all_videos(mode=current_mode)
 
         recommendations = []
         for v in all_videos:
@@ -175,7 +201,6 @@ def register(app):
         end = start + ITEMS_PER_PAGE
         page_recs = recommendations[start:end]
 
-        feed_ids = [v['id'] for v in all_videos]
         try:
             feed_index = feed_ids.index(video_id)
         except ValueError:

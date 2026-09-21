@@ -101,25 +101,44 @@ def delete_video(video_id):
         conn.close()
 
 
-def get_all_videos(mode=None):
+def get_all_videos(mode=None, sort_by='id', folder=None):
+    """
+    Возвращает список видео.
+
+    :param mode: режим профиля (1 или 2), или None для всех.
+    :param sort_by: 'id' (по умолчанию) или 'filename' (алфавитный порядок).
+    :param folder: если указан, вернуть только видео из этой папки.
+    """
     conn = get_db_connection()
     try:
         cursor = conn.cursor()
+
+        where_parts = []
+        params = []
+
         if mode is not None:
-            cursor.execute('''
-                SELECT v.*, l.name as library_name
-                FROM videos v
-                LEFT JOIN libraries l ON v.library_id = l.id
-                WHERE v.mode = ?
-                ORDER BY v.id
-            ''', (mode,))
+            where_parts.append('v.mode = ?')
+            params.append(mode)
+
+        if folder:
+            where_parts.append('v.folder = ?')
+            params.append(folder)
+
+        where_sql = ('WHERE ' + ' AND '.join(where_parts)) if where_parts else ''
+
+        if sort_by == 'filename':
+            order_sql = 'ORDER BY v.filename COLLATE NOCASE ASC'
         else:
-            cursor.execute('''
-                SELECT v.*, l.name as library_name
-                FROM videos v
-                LEFT JOIN libraries l ON v.library_id = l.id
-                ORDER BY v.id
-            ''')
+            order_sql = 'ORDER BY v.id'
+
+        cursor.execute(f'''
+            SELECT v.*, l.name as library_name
+            FROM videos v
+            LEFT JOIN libraries l ON v.library_id = l.id
+            {where_sql}
+            {order_sql}
+        ''', params)
+
         rows = cursor.fetchall()
         video_ids = [row['id'] for row in rows]
         categories_map = _batch_load_categories(cursor, video_ids)
