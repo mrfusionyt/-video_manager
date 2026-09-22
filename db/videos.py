@@ -1,3 +1,6 @@
+# ===================================================================
+# Файл 1: db/videos.py
+# ===================================================================
 """CRUD для таблицы videos."""
 import os
 import sqlite3
@@ -5,9 +8,6 @@ from datetime import datetime
 from .connection import get_db_connection
 
 
-# ===================================================================
-#                     batch categories
-# ===================================================================
 def _batch_load_categories(cursor, video_ids, chunk_size=500):
     if not video_ids:
         return {}
@@ -30,9 +30,6 @@ def _batch_load_categories(cursor, video_ids, chunk_size=500):
     return result
 
 
-# ===================================================================
-#                     CRUD
-# ===================================================================
 def add_video(library_id, filename, filepath, duration=0, size=0, added=None,
               rating=0, orientation='horizontal', media_type='video',
               width=0, height=0, codec='', bitrate=0, fps=0.0, mode=1,
@@ -60,21 +57,10 @@ def add_video(library_id, filename, filepath, duration=0, size=0, added=None,
         except sqlite3.IntegrityError:
             cursor.execute('''
                 UPDATE videos SET
-                    library_id = ?,
-                    filename = ?,
-                    folder = ?,
-                    duration = ?,
-                    size = ?,
-                    added = ?,
-                    rating = ?,
-                    orientation = ?,
-                    media_type = ?,
-                    width = ?,
-                    height = ?,
-                    codec = ?,
-                    bitrate = ?,
-                    fps = ?,
-                    mode = ?
+                    library_id = ?, filename = ?, folder = ?, duration = ?,
+                    size = ?, added = ?, rating = ?, orientation = ?,
+                    media_type = ?, width = ?, height = ?, codec = ?,
+                    bitrate = ?, fps = ?, mode = ?
                 WHERE filepath = ?
             ''', (library_id, filename, folder, duration, size, added,
                   rating, orientation, media_type,
@@ -102,35 +88,22 @@ def delete_video(video_id):
 
 
 def get_all_videos(mode=None, sort_by='id', folder=None):
-    """
-    Возвращает список видео.
-
-    :param mode: режим профиля (1 или 2), или None для всех.
-    :param sort_by: 'id' (по умолчанию) или 'filename' (алфавитный порядок).
-    :param folder: если указан, вернуть только видео из этой папки.
-    """
     conn = get_db_connection()
     try:
         cursor = conn.cursor()
-
         where_parts = []
         params = []
-
         if mode is not None:
             where_parts.append('v.mode = ?')
             params.append(mode)
-
         if folder:
             where_parts.append('v.folder = ?')
             params.append(folder)
-
         where_sql = ('WHERE ' + ' AND '.join(where_parts)) if where_parts else ''
-
         if sort_by == 'filename':
             order_sql = 'ORDER BY v.filename COLLATE NOCASE ASC'
         else:
             order_sql = 'ORDER BY v.id'
-
         cursor.execute(f'''
             SELECT v.*, l.name as library_name
             FROM videos v
@@ -138,11 +111,9 @@ def get_all_videos(mode=None, sort_by='id', folder=None):
             {where_sql}
             {order_sql}
         ''', params)
-
         rows = cursor.fetchall()
         video_ids = [row['id'] for row in rows]
         categories_map = _batch_load_categories(cursor, video_ids)
-
         videos = []
         for row in rows:
             v = dict(row)
@@ -193,7 +164,6 @@ def rename_video(video_id, new_filename):
     new_path = os.path.join(dir_path, new_filename)
     if not os.path.exists(old_path):
         return False
-
     conn = get_db_connection()
     try:
         cursor = conn.cursor()
@@ -211,9 +181,6 @@ def rename_video(video_id, new_filename):
         conn.close()
 
 
-# ===================================================================
-#                     SQL-пагинация
-# ===================================================================
 _ORDER_BY_MAP = {
     'date': 'v.added DESC',
     'rating': 'v.rating DESC',
@@ -227,7 +194,6 @@ _ORDER_BY_MAP = {
     'top50': 'v.rating DESC',
     'top100': 'v.rating DESC',
 }
-
 _TOP_LIMIT = {'top10': 10, 'top50': 50, 'top100': 100}
 
 
@@ -235,34 +201,26 @@ def query_videos_paged(mode=None, sort='date', search='', folder='',
                        category_ids=None, page=1, per_page=15):
     if category_ids:
         return None, None
-
     order_clause = _ORDER_BY_MAP.get(sort)
     if order_clause is None:
         return None, None
-
     where_parts = []
     params = []
-
     if search:
         where_parts.append('LOWER(v.filename) LIKE ?')
         params.append(f'%{search.lower()}%')
     elif mode is not None:
         where_parts.append('v.mode = ?')
         params.append(mode)
-
     if folder:
         where_parts.append('v.folder = ?')
         params.append(folder)
-
     where_sql = ('WHERE ' + ' AND '.join(where_parts)) if where_parts else ''
-
     conn = get_db_connection()
     try:
         cursor = conn.cursor()
-
         cursor.execute(f'SELECT COUNT(*) AS cnt FROM videos v {where_sql}', params)
         total = cursor.fetchone()['cnt']
-
         if sort in _TOP_LIMIT:
             limit = _TOP_LIMIT[sort]
             pagination_sql = f'LIMIT {limit}'
@@ -270,7 +228,6 @@ def query_videos_paged(mode=None, sort='date', search='', folder='',
             limit = per_page
             offset = max(0, (page - 1) * per_page)
             pagination_sql = f'LIMIT {limit} OFFSET {offset}'
-
         cursor.execute(f'''
             SELECT v.*, l.name as library_name
             FROM videos v
@@ -280,16 +237,13 @@ def query_videos_paged(mode=None, sort='date', search='', folder='',
             {pagination_sql}
         ''', params)
         rows = cursor.fetchall()
-
         video_ids = [row['id'] for row in rows]
         categories_map = _batch_load_categories(cursor, video_ids)
-
         videos = []
         for row in rows:
             v = dict(row)
             v['categories'] = categories_map.get(v['id'], [])
             videos.append(v)
-
         return videos, total
     finally:
         conn.close()

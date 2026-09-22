@@ -32,8 +32,21 @@ def _get_ffmpeg_path():
             _FFMPEG_PATH = c
             return c
 
-    _FFMPEG_PATH = 'ffmpeg'  # fallback на системный PATH
+    _FFMPEG_PATH = 'ffmpeg'
     return _FFMPEG_PATH
+
+
+def _subprocess_kwargs():
+    """Общие параметры для subprocess.run.
+
+    encoding + errors критично важны на Windows: без них Python
+    читает вывод как cp1252 и падает на кириллических путях.
+    """
+    return dict(
+        capture_output=True,
+        encoding='utf-8',
+        errors='replace',
+    )
 
 
 def ensure_dir():
@@ -58,15 +71,52 @@ def delete_thumbnail(video_id):
         print(f"[thumbnails] delete error for {video_id}: {e}")
 
 
+def _run_ffmpeg(cmd, video_id, timeout=30):
+    """Запускает ffmpeg, возвращает (success, stderr_tail)."""
+    try:
+        result = subprocess.run(cmd, timeout=timeout, **_subprocess_kwargs())
+    except subprocess.TimeoutExpired:
+        print(f"[thumbnails] timeout for {video_id}")
+        return False, 'timeout'
+    except FileNotFoundError:
+        print(f"[thumbnails] ffmpeg not found at {cmd[0]}")
+        return False, 'ffmpeg not found'
+    except Exception as e:
+        print(f"[thumbnails] ffmpeg spawn error for {video_id}: {e}")
+        return False, str(e)
+
+    if result.returncode == 0:
+        return True, ''
+
+    err_tail = (result.stderr or '')[-300:].strip()
+    return False, err_tail
+
+
 def generate_thumbnail(video_id, filepath, duration=0):
-    """Генерирует JPEG-превью для видео. Возвращает True при успехе."""
+    """
+    Генерирует JPEG-превью для видео. Возвращает True при успехе.
+
+    Стратегия:
+      1. Если задана duration — берём кадр на 10% (1..10 сек).
+         Быстрый -ss ДО -i (keyframe seek).
+      2. Если первый вариант упал (битые timestamps, mpegts-контейнер) —
+         повторяем с -fflags +genpts+igndts и увеличенными probesize/analyzeduration,
+         но уже без -ss (берём первый кадр).
+    """
     if not filepath or not os.path.exists(filepath):
         return False
 
     ensure_dir()
     out = get_thumbnail_path(video_id)
 
-    # Точка захвата: 10% от длительности (не больше 10 сек, не меньше 1 сек)
+    # Убираем предыдущий обломок, если был
+    try:
+        if os.path.exists(out):
+            os.remove(out)
+    except OSError:
+        pass
+
+    # Точка захвата: 10% от длительности (1..10 сек)
     if duration and duration > 3:
         target_seconds = min(max(duration * 0.1, 1), 10)
     else:
@@ -74,6 +124,7 @@ def generate_thumbnail(video_id, filepath, duration=0):
 
     ffmpeg = _get_ffmpeg_path()
 
+    # -------- Попытка 1: быстрый seek --------
     cmd = [
         ffmpeg,
         '-y',
@@ -84,25 +135,52 @@ def generate_thumbnail(video_id, filepath, duration=0):
         '-q:v', '4',
         out,
     ]
+    ok, err = _run_ffmpeg(cmd, video_id, timeout=30)
+    if ok and os.path.exists(out) and os.path.getsize(out) > 0:
+        return True
 
-    try:
-        result = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=30,
-        )
-        if result.returncode == 0 and os.path.exists(out):
-            return True
-        err_tail = (result.stderr or '')[-200:]
-        print(f"[thumbnails] ffmpeg rc={result.returncode} for {video_id}: {err_tail}")
-        return False
-    except subprocess.TimeoutExpired:
-        print(f"[thumbnails] timeout for {video_id}")
-        return False
-    except FileNotFoundError:
-        print(f"[thumbnails] ffmpeg not found at {ffmpeg}")
-        return False
-    except Exception as e:
-        print(f"[thumbnails] error for {video_id}: {e}")
-        return False
+    # -------- Попытка 2: для битых контейнеров (mpegts и т.п.) --------
+    # -fflags +genpts+igndts — чинит битые timestamps
+    # -analyzeduration / -probesize — увеличиваем анализ входа
+    # -ss убран — берём первый доступный кадр
+    print(f"[thumbnails] retry with mpegts options for {video_id} (prev rc: {err[:80]})")
+    cmd2 = [
+        ffmpeg,
+        '-y',
+        '-fflags', '+genpts+igndts',
+        '-analyzeduration', '100M',
+        '-probesize', '100M',
+        '-i', filepath,
+        '-vframes', '1',
+        '-vf', 'scale=480:-2',
+        '-q:v', '4',
+        out,
+    ]
+    ok2, err2 = _run_ffmpeg(cmd2, video_id, timeout=60)
+    if ok2 and os.path.exists(out) and os.path.getsize(out) > 0:
+        return True
+
+    # -------- Попытка 3: то же, но с seek на 1 сек --------
+    cmd3 = [
+        ffmpeg,
+        '-y',
+        '-fflags', '+genpts+igndts',
+        '-analyzeduration', '100M',
+        '-probesize', '100M',
+        '-ss', '1',
+        '-i', filepath,
+        '-vframes', '1',
+        '-vf', 'scale=480:-2',
+        '-q:v', '4',
+        out,
+    ]
+    ok3, err3 = _run_ffmpeg(cmd3, video_id, timeout=60)
+    if ok3 and os.path.exists(out) and os.path.getsize(out) > 0:
+        return True
+
+    # Всё упало — логируем, но НЕ крашимся
+    print(f"[thumbnails] ffmpeg failed for {video_id}: {err2[:200]}")
+    return False
 
 
 def generate_all_missing(get_all_videos_fn):

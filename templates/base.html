@@ -25,6 +25,27 @@
                         </a>
                     </li>
                     {% endfor %}
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.endpoint == 'tools_page' %}active{% endif %}"
+                           href="{{ url_for('tools_page', profile=current_profile) }}">
+                            Tools
+                        </a>
+                    </li>
+                </ul>
+
+            {% elif request.endpoint == 'tools_page' %}
+                <h5 class="px-3 mb-3 text-light">Tools</h5>
+                <ul class="nav flex-column">
+                    <li class="nav-item">
+                        <a class="nav-link active" href="{{ url_for('tools_page', profile=current_profile) }}">
+                            Maintenance
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('settings', profile=current_profile) }}">
+                            ← Back to Settings
+                        </a>
+                    </li>
                 </ul>
 
             {% elif request.endpoint in ('artists_page', 'artist_view') %}
@@ -157,7 +178,7 @@
                         <a href="#" onclick="window.history.back(); return false;" class="btn-nav icon-only" title="Back">
                             <img src="{{ url_for('serve_image', filename='back.png') }}" alt="Back">
                         </a>
-                    {% elif request.endpoint == 'settings' or request.endpoint == 'edit_video' or request.endpoint == 'artist_view' %}
+                    {% elif request.endpoint == 'settings' or request.endpoint == 'edit_video' or request.endpoint == 'artist_view' or request.endpoint == 'tools_page' %}
                         <a href="{{ url_for('index', profile=current_profile) }}" class="btn-nav icon-only" title="Back">
                             <img src="{{ url_for('serve_image', filename='back.png') }}" alt="Back">
                         </a>
@@ -294,6 +315,13 @@
                     <a href="{{ url_for('youtube.index') }}">
                         <img src="{{ url_for('serve_image', filename='youtube.png') }}" alt="YouTube" class="drawer-icon">
                         <span>YouTube Downloader</span>
+                    </a>
+                </li>
+                <li>
+                    <a href="{{ url_for('tools_page', profile=current_profile) }}"
+                       class="{% if request.endpoint == 'tools_page' %}active{% endif %}">
+                        <img src="{{ url_for('serve_image', filename='settings.png') }}" alt="Tools" class="drawer-icon">
+                        <span>Tools</span>
                     </a>
                 </li>
                 <li>

@@ -1,0 +1,231 @@
+{% extends "base.html" %}
+
+{% block title %}Tools{% endblock %}
+
+{% block content %}
+<div class="settings-section">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h4>Tools — Library Maintenance</h4>
+        <a href="{{ url_for('settings', profile=current_profile) }}" class="btn-add">← Back to Settings</a>
+    </div>
+
+    <!-- Folder stats -->
+    <div class="row g-3 mb-4">
+        <div class="col-md-4">
+            <div class="stat-card">
+                <div class="stat-label">!Broken</div>
+                {% if broken.exists %}
+                    <div class="stat-path"><code>{{ broken.path }}</code></div>
+                    <div class="stat-value">{{ broken.count }} files, {{ (broken.size / (1024**2))|round(1) }} MB</div>
+                {% else %}
+                    <div class="text-muted">not found</div>
+                {% endif %}
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="stat-card">
+                <div class="stat-label">!Good</div>
+                {% if good.exists %}
+                    <div class="stat-path"><code>{{ good.path }}</code></div>
+                    <div class="stat-value">{{ good.count }} files, {{ (good.size / (1024**2))|round(1) }} MB</div>
+                {% else %}
+                    <div class="text-muted">not found</div>
+                {% endif %}
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="stat-card">
+                <div class="stat-label">!Duplicates</div>
+                {% if duplicates.exists %}
+                    <div class="stat-path"><code>{{ duplicates.path }}</code></div>
+                    <div class="stat-value">{{ duplicates.count }} files, {{ (duplicates.size / (1024**2))|round(1) }} MB</div>
+                {% else %}
+                    <div class="text-muted">not found</div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- Actions -->
+    <div class="mb-4">
+        <h5>Actions</h5>
+        <div class="d-flex flex-wrap gap-2 mb-3">
+            <button class="btn-add" onclick="runTask('/tools/diagnose', {mode: 'check'})">
+                Check !Broken (no move)
+            </button>
+            <button class="btn-add" onclick="runTask('/tools/diagnose', {mode: 'move'})">
+                Move OK → !Good
+            </button>
+            <button class="btn-add" onclick="runTask('/tools/diagnose', {mode: 'move_partial'})">
+                Move OK + PARTIAL → !Good
+            </button>
+        </div>
+        <div class="d-flex flex-wrap gap-2 mb-3">
+            <select id="restoreLibrary" class="form-control form-control-dark" style="max-width:400px;">
+                {% for lib in libraries %}
+                    <option value="{{ lib.id }}">{{ lib.path }} (mode={{ lib.mode }})</option>
+                {% endfor %}
+            </select>
+            <button class="btn-add" onclick="restoreToLibrary()">
+                Restore !Good → Library
+            </button>
+            <button class="btn-add" onclick="runTask('/tools/scan', {})">
+                Scan Libraries
+            </button>
+        </div>
+
+        <div id="progressContainer" class="dup-progress" style="display:none;">
+            <div class="dup-progress-bar">
+                <div id="progressFill" class="dup-progress-fill" style="width:0%;"></div>
+            </div>
+            <div id="progressText" class="dup-progress-text">Initializing...</div>
+            <div id="progressCurrent" class="dup-progress-current" style="font-size:0.85em;color:#aaa;margin-top:6px;"></div>
+        </div>
+
+        <div id="resultContainer" style="display:none; margin-top:20px;">
+            <h6>Result</h6>
+            <div id="resultBody"></div>
+        </div>
+    </div>
+
+    <!-- File listings -->
+    <div class="row g-4">
+        <div class="col-md-6">
+            <h5>!Broken ({{ broken_files|length }})</h5>
+            <div class="table-responsive" style="max-height:400px; overflow-y:auto;">
+                <table class="table table-dark-custom table-sm">
+                    <thead><tr><th>Name</th><th>Size</th></tr></thead>
+                    <tbody>
+                        {% for f in broken_files %}
+                        <tr>
+                            <td class="text-truncate" style="max-width:300px;" title="{{ f.name }}">{{ f.name }}</td>
+                            <td>{{ (f.size / (1024**2))|round(1) }} MB</td>
+                        </tr>
+                        {% else %}
+                        <tr><td colspan="2" class="text-muted">empty</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        <div class="col-md-6">
+            <h5>!Good ({{ good_files|length }})</h5>
+            <div class="table-responsive" style="max-height:400px; overflow-y:auto;">
+                <table class="table table-dark-custom table-sm">
+                    <thead><tr><th>Name</th><th>Size</th></tr></thead>
+                    <tbody>
+                        {% for f in good_files %}
+                        <tr>
+                            <td class="text-truncate" style="max-width:300px;" title="{{ f.name }}">{{ f.name }}</td>
+                            <td>{{ (f.size / (1024**2))|round(1) }} MB</td>
+                        </tr>
+                        {% else %}
+                        <tr><td colspan="2" class="text-muted">empty</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    function runTask(url, body) {
+        const fd = new FormData();
+        for (const k in body) fd.append(k, body[k]);
+
+        fetch(url, { method: 'POST', body: fd })
+            .then(r => r.json())
+            .then(data => {
+                if (data.error) {
+                    alert('Error: ' + data.error);
+                    return;
+                }
+                monitorProgress(data.task_id);
+            })
+            .catch(err => alert('Error: ' + err));
+    }
+
+    function restoreToLibrary() {
+        const sel = document.getElementById('restoreLibrary');
+        if (!sel || !sel.value) {
+            alert('Select a library');
+            return;
+        }
+        runTask('/tools/restore', {library_id: sel.value});
+    }
+
+    function monitorProgress(taskId) {
+        const c = document.getElementById('progressContainer');
+        const fill = document.getElementById('progressFill');
+        const text = document.getElementById('progressText');
+        const cur = document.getElementById('progressCurrent');
+        const res = document.getElementById('resultContainer');
+        const resBody = document.getElementById('resultBody');
+
+        c.style.display = 'block';
+        fill.style.background = '';
+        fill.style.width = '0%';
+        text.textContent = 'Initializing...';
+        cur.textContent = '';
+        res.style.display = 'none';
+
+        const es = new EventSource('/tools/progress/' + taskId);
+        es.onmessage = function(event) {
+            let d;
+            try { d = JSON.parse(event.data); } catch(e) { return; }
+
+            if (d.status === 'complete') {
+                fill.style.width = '100%';
+                text.textContent = '✅ ' + (d.message || 'Done');
+                cur.textContent = '';
+                es.close();
+                if (d.result) {
+                    resBody.innerHTML = formatResult(d.result);
+                    res.style.display = 'block';
+                }
+                setTimeout(() => location.reload(), 2500);
+            } else if (d.status === 'error') {
+                fill.style.width = '100%';
+                fill.style.background = '#dc3545';
+                text.textContent = '❌ ' + (d.message || 'Error');
+                es.close();
+            } else if (d.status === 'not_found') {
+                text.textContent = 'Progress lost';
+                es.close();
+            } else {
+                const pct = d.progress || 0;
+                fill.style.width = pct + '%';
+                text.textContent = `${pct}% — ${d.processed || 0}/${d.total || 0}`;
+                cur.textContent = d.message || d.current || '';
+            }
+        };
+        es.onerror = function() {
+            text.textContent = 'Connection lost';
+            es.close();
+        };
+    }
+
+    function formatResult(r) {
+        if (r.results) {
+            let html = `<div>Moved: ${r.moved}, errors: ${r.errors}</div>`;
+            html += '<table class="table table-dark-custom table-sm mt-2">';
+            html += '<thead><tr><th>Name</th><th>Status</th><th>Decoded</th><th>Errors</th></tr></thead><tbody>';
+            for (const row of r.results) {
+                const cls = row.status === 'OK' ? 'color:#4caf50'
+                          : row.status === 'PARTIAL' ? 'color:#ffc107'
+                          : 'color:#f44336';
+                html += `<tr>
+                    <td class="text-truncate" style="max-width:300px;">${row.name}</td>
+                    <td style="${cls}">${row.status}</td>
+                    <td>${row.decoded}/${row.duration}s</td>
+                    <td>${row.errors}</td>
+                </tr>`;
+            }
+            html += '</tbody></table>';
+            return html;
+        }
+        return `<pre>${JSON.stringify(r, null, 2)}</pre>`;
+    }
+</script>
+{% endblock %}

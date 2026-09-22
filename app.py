@@ -47,6 +47,15 @@ app.register_blueprint(youtube_bp)
 set_post_download_hook(scan_libraries)
 register_all(app)
 
+# -------------------------------------------------------------------
+# Ручная регистрация страницы Tools (не входит в register_all)
+# -------------------------------------------------------------------
+try:
+    from views import tools as views_tools
+    views_tools.register(app)
+except Exception as _e:
+    print(f"[app] WARNING: tools page not registered: {_e}")
+
 
 @app.route("/image/<path:filename>")
 def image_files(filename):
