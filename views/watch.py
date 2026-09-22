@@ -1,10 +1,17 @@
 """
 Страница просмотра, раздача видеофайла, info, download, VR, rating, rename,
 edit_video, set_categories.
+
+Плюс: транскодирование несовместимых с браузером видео (MKV/AVI/HEVC/MPEG-TS
+и т.п.) в MP4/H.264 на лету через ffmpeg с кэшем в _transcode_cache/.
 """
 import os
 import mimetypes
 import math
+import subprocess
+import hashlib
+import threading
+
 from flask import (
     render_template, request, redirect, url_for, jsonify, abort, send_file,
 )
@@ -20,6 +27,199 @@ from config import ITEMS_PER_PAGE
 from helpers.profiles import get_current_profile, profile_to_mode
 
 
+# ===================================================================
+#                     Транскодирование несовместимых видео
+# ===================================================================
+_BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_TRANSCODE_CACHE_DIR = os.path.join(_BASE_DIR, '_transcode_cache')
+_TRANSCODE_LOCK = threading.Lock()
+
+_BAD_EXTENSIONS = {
+    '.mkv', '.avi', '.wmv', '.flv', '.mov',
+    '.ts', '.m2ts', '.vob', '.rm', '.rmvb', '.3gp',
+}
+
+_BAD_FORMATS = {
+    'mpegts',
+    'mpegtsraw',
+    'matroska',
+    'avi',
+    'asf',
+    'flv',
+    'ogg',
+    'rm',
+    'realmedia',
+}
+
+_BAD_CODECS = {
+    'hevc', 'h265', 'mpeg4', 'msmpeg4', 'msmpeg4v3',
+    'wmv1', 'wmv2', 'wmv3', 'vc1', 'mpeg2video',
+    'prores', 'dnxhd', 'theora', 'vp6', 'rv40',
+}
+
+_GOOD_CODECS = {'h264', 'avc1', 'vp8', 'vp9', 'av1', 'mp4v'}
+
+_FFMPEG_PATH = os.path.join(_BASE_DIR, '_dop', 'ffmpeg.exe')
+_FFPROBE_PATH = os.path.join(_BASE_DIR, '_dop', 'ffprobe.exe')
+if not os.path.exists(_FFMPEG_PATH):
+    import shutil as _sh
+    _FFMPEG_PATH = _sh.which('ffmpeg') or 'ffmpeg'
+if not os.path.exists(_FFPROBE_PATH):
+    import shutil as _sh
+    _FFPROBE_PATH = _sh.which('ffprobe') or 'ffprobe'
+
+
+_PROBE_CACHE = {}
+_PROBE_LOCK = threading.Lock()
+
+
+def _probe_format(filepath):
+    try:
+        st = os.stat(filepath)
+        mtime = st.st_mtime
+    except OSError:
+        return ''
+
+    with _PROBE_LOCK:
+        cached = _PROBE_CACHE.get(filepath)
+        if cached and cached[0] == mtime:
+            return cached[1]
+
+    try:
+        result = subprocess.run(
+            [_FFPROBE_PATH, '-v', 'error',
+             '-show_entries', 'format=format_name',
+             '-of', 'default=nw=1:nk=1',
+             filepath],
+            capture_output=True, text=True,
+            encoding='utf-8', errors='replace', timeout=15
+        )
+        fmt = (result.stdout or '').strip().lower()
+    except Exception as e:
+        print(f"[probe] format error for {filepath}: {e}")
+        fmt = ''
+
+    with _PROBE_LOCK:
+        _PROBE_CACHE[filepath] = (mtime, fmt)
+    return fmt
+
+
+def _needs_transcode(filepath, video):
+    ext = os.path.splitext(filepath)[1].lower()
+    codec = (video.get('codec') or '').lower()
+
+    if ext in _BAD_EXTENSIONS:
+        return True
+
+    if codec and codec in _BAD_CODECS:
+        return True
+
+    fmt = _probe_format(filepath)
+    if fmt:
+        parts = set(fmt.split(','))
+        if parts & _BAD_FORMATS:
+            return True
+
+    if ext in {'.mp4', '.m4v', '.webm'} and codec in _GOOD_CODECS:
+        return False
+
+    if ext in {'.mp4', '.m4v', '.webm'} and not codec:
+        return False
+
+    return False
+
+
+def _get_transcoded(src_path, video_id):
+    try:
+        os.makedirs(_TRANSCODE_CACHE_DIR, exist_ok=True)
+    except OSError as e:
+        print(f"[transcode] Cannot create cache dir: {e}")
+        return None
+
+    try:
+        st = os.stat(src_path)
+        key = f"{src_path}|{st.st_mtime}|{st.st_size}".encode('utf-8')
+    except OSError as e:
+        print(f"[transcode] stat error: {e}")
+        return None
+
+    h = hashlib.md5(key).hexdigest()[:12]
+    dst_path = os.path.join(_TRANSCODE_CACHE_DIR, f"{video_id}_{h}.mp4")
+
+    if os.path.exists(dst_path) and os.path.getsize(dst_path) > 0:
+        return dst_path
+
+    with _TRANSCODE_LOCK:
+        if os.path.exists(dst_path) and os.path.getsize(dst_path) > 0:
+            return dst_path
+
+        print(f"[transcode] {os.path.basename(src_path)} → MP4/H.264 "
+              f"(это может занять время...)")
+
+        tmp_path = dst_path + '.tmp'
+        cmd = [
+            _FFMPEG_PATH,
+            '-y',
+            '-i', src_path,
+            '-map', '0:v:0',
+            '-map', '0:a:0?',
+            '-c:v', 'libx264',
+            '-preset', 'veryfast',
+            '-crf', '23',
+            '-pix_fmt', 'yuv420p',
+            '-c:a', 'aac',
+            '-b:a', '128k',
+            '-ac', '2',
+            '-movflags', '+faststart',
+            tmp_path,
+        ]
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                encoding='utf-8',
+                errors='replace',
+                timeout=3600,
+            )
+            if result.returncode != 0:
+                print(f"[transcode] FAILED rc={result.returncode}")
+                if result.stderr:
+                    print(result.stderr[-2000:])
+                if os.path.exists(tmp_path):
+                    try:
+                        os.remove(tmp_path)
+                    except OSError:
+                        pass
+                return None
+
+            os.replace(tmp_path, dst_path)
+            size_mb = os.path.getsize(dst_path) / (1024 * 1024)
+            print(f"[transcode] OK → {os.path.basename(dst_path)} "
+                  f"({size_mb:.1f} MB)")
+            return dst_path
+
+        except subprocess.TimeoutExpired:
+            print("[transcode] TIMEOUT (>1h)")
+            if os.path.exists(tmp_path):
+                try:
+                    os.remove(tmp_path)
+                except OSError:
+                    pass
+            return None
+        except Exception as e:
+            print(f"[transcode] ERROR: {e}")
+            if os.path.exists(tmp_path):
+                try:
+                    os.remove(tmp_path)
+                except OSError:
+                    pass
+            return None
+
+
+# ===================================================================
+#                     Роуты
+# ===================================================================
 def register(app):
 
     @app.route('/video/<int:video_id>')
@@ -30,16 +230,25 @@ def register(app):
         filepath = video['filepath']
         if not os.path.exists(filepath):
             abort(404)
+
+        if _needs_transcode(filepath, video):
+            transcoded = _get_transcoded(filepath, video_id)
+            if transcoded is None:
+                abort(500, "Transcode failed")
+            filepath = transcoded
+
         mimetype, _ = mimetypes.guess_type(filepath)
         if not mimetype:
             mimetype = 'video/mp4'
 
-        response = send_file(filepath, mimetype=mimetype, as_attachment=False, conditional=True)
+        response = send_file(
+            filepath, mimetype=mimetype,
+            as_attachment=False, conditional=True,
+        )
         response.headers['Access-Control-Allow-Origin'] = '*'
         response.headers['Access-Control-Allow-Methods'] = 'GET, HEAD, OPTIONS'
         response.headers['Access-Control-Allow-Headers'] = 'Range'
         response.headers['Accept-Ranges'] = 'bytes'
-        # Кэш на сутки — браузер не будет перекачивать файл при возврате
         response.headers['Cache-Control'] = 'public, max-age=86400'
         return response
 
@@ -63,7 +272,7 @@ def register(app):
             'orientation': video['orientation'],
             'library_name': video.get('library_name'),
             'mode': video['mode'],
-            'categories': video.get('categories', [])
+            'categories': video.get('categories', []),
         }
         return jsonify(data)
 
@@ -75,7 +284,8 @@ def register(app):
         filepath = video['filepath']
         if not os.path.exists(filepath):
             abort(404)
-        return send_file(filepath, as_attachment=True, download_name=video['filename'])
+        return send_file(filepath, as_attachment=True,
+                         download_name=video['filename'])
 
     @app.route('/vr/<int:video_id>')
     def vr_player(video_id):
@@ -120,7 +330,10 @@ def register(app):
             category_ids = request.form.getlist('categories')
             category_ids = [int(x) for x in category_ids if x]
             update_video_categories(video_id, category_ids)
-            return redirect(url_for('watch', video_id=video_id, profile=request.args.get('profile', 'female')))
+            return redirect(url_for(
+                'watch', video_id=video_id,
+                profile=request.args.get('profile', 'female')
+            ))
         return render_template('edit_video.html', video=video)
 
     @app.route('/video/<int:video_id>/set_categories', methods=['POST'])
@@ -132,12 +345,14 @@ def register(app):
         data = request.get_json() or {}
         category_ids = data.get('category_ids', [])
         if not isinstance(category_ids, list):
-            return jsonify({'success': False, 'error': 'category_ids must be a list'}), 400
+            return jsonify({'success': False,
+                            'error': 'category_ids must be a list'}), 400
 
         try:
             category_ids = [int(x) for x in category_ids]
         except (ValueError, TypeError):
-            return jsonify({'success': False, 'error': 'Invalid category ids'}), 400
+            return jsonify({'success': False,
+                            'error': 'Invalid category ids'}), 400
 
         update_video_categories(video_id, category_ids)
         return jsonify({'success': True})
@@ -150,12 +365,8 @@ def register(app):
         if not video:
             abort(404)
 
-        # Контекст просмотра: папка, из которой пришли.
         folder = request.args.get('folder')
 
-        # Формируем ленту для свайпа:
-        #  - если пришли из папки — только видео этой папки, по имени файла;
-        #  - иначе — все видео профиля, тоже по имени файла (а не по id).
         if folder:
             all_videos = get_all_videos(
                 mode=current_mode,
@@ -168,14 +379,11 @@ def register(app):
                 sort_by='filename',
             )
 
-        # На всякий случай: если текущего видео нет в ленте (например, оно из
-        # другой папки), добавляем его первым, чтобы свайп не сломался.
         feed_ids = [v['id'] for v in all_videos]
         if video_id not in feed_ids:
             all_videos = [video] + all_videos
             feed_ids = [v['id'] for v in all_videos]
 
-        # Рекомендации — как раньше, по общим категориям.
         video_categories = video.get('categories', [])
         category_ids = [cat['id'] for cat in video_categories]
 
@@ -189,7 +397,8 @@ def register(app):
                 recommendations.append(v)
 
         total_recs = len(recommendations)
-        total_rec_pages = math.ceil(total_recs / ITEMS_PER_PAGE) if total_recs > 0 else 1
+        total_rec_pages = (math.ceil(total_recs / ITEMS_PER_PAGE)
+                           if total_recs > 0 else 1)
 
         rec_page = request.args.get('rec_page', 1, type=int)
         if rec_page < 1:
@@ -207,11 +416,13 @@ def register(app):
             feed_ids = [video_id] + feed_ids
             feed_index = 0
 
-        return render_template('watch.html',
-                               video=video,
-                               recommendations=page_recs,
-                               rec_page=rec_page,
-                               total_rec_pages=total_rec_pages,
-                               total_recs=total_recs,
-                               feed_ids=feed_ids,
-                               feed_index=feed_index)
+        return render_template(
+            'watch.html',
+            video=video,
+            recommendations=page_recs,
+            rec_page=rec_page,
+            total_rec_pages=total_rec_pages,
+            total_recs=total_recs,
+            feed_ids=feed_ids,
+            feed_index=feed_index,
+        )

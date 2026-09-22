@@ -63,8 +63,13 @@ def get_media_info(filepath):
             try:
                 cmd = [ffprobe_path, '-v', 'quiet', '-print_format', 'json',
                        '-show_streams', '-show_format', filepath]
-                result = subprocess.run(cmd, capture_output=True, text=True, check=False)
-                if result.returncode == 0:
+                # encoding + errors важен на Windows: иначе кириллические пути
+                # ломают декодирование cp1252 и result.stdout становится None.
+                result = subprocess.run(
+                    cmd, capture_output=True, text=True, check=False,
+                    encoding='utf-8', errors='replace'
+                )
+                if result.returncode == 0 and result.stdout:
                     data = json.loads(result.stdout)
                     stream = data['streams'][0] if data.get('streams') else {}
                     width = int(stream.get('width', 0))
@@ -76,8 +81,8 @@ def get_media_info(filepath):
                     else:
                         fps = float(fps_str)
                     codec = stream.get('codec_name', '')
-                    bitrate = int(data['format'].get('bit_rate', 0))
-                    duration = int(float(data['format'].get('duration', 0)))
+                    bitrate = int(data['format'].get('bit_rate', 0) or 0)
+                    duration = int(float(data['format'].get('duration', 0) or 0))
                     orientation = 'vertical' if height > width else 'horizontal'
                     return {
                         'duration': duration,
@@ -182,6 +187,8 @@ def _scan_impl(progress_cb=None):
             print(f"[scan] skip non-existent library: {lib_path}")
             continue
         for root, dirs, files in os.walk(lib_path):
+            # Пропускаем папку !Duplicates — она служебная
+            dirs[:] = [d for d in dirs if d != '!Duplicates']
             for file in files:
                 ext = os.path.splitext(file)[1].lower()
                 if ext in VIDEO_EXTENSIONS or ext in IMAGE_EXTENSIONS:
