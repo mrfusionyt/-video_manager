@@ -6,12 +6,15 @@ r"""
   2. needs_conversion()   — если контейнер/кодек плохой, идём дальше.
   3. Делаем remux (быстро, без потери) ИЛИ re-encode (для плохого кодека).
   4. Проверяем is_playable(результата).
-     Если remux дал неиграбельный результат — фallback на re-encode.
+     Если remux дал неиграбельный результат — fallback на re-encode.
   5. Заменяем оригинал (он уезжает в !Duplicates).
   6. Обновляем запись в БД.
 
 Битые файлы переносятся в <диск>:\!Broken\ (без подпапок).
 Оригинал при конвертации переносится в <диск>:\!Duplicates\converted_<дата>.
+
+Кэш ffprobe (probe_cache.json) живёт на диске — после перезапуска
+сервера повторные вызовы ffprobe не делаются.
 """
 import os
 import json as _json
@@ -60,8 +63,46 @@ _FATAL_MARKERS = (
 )
 
 
-_PROBE_CACHE = {}
+# ===================================================================
+#                     Persistent probe cache
+# ===================================================================
+_PROBE_CACHE_FILE = os.path.join(BASE_DIR, 'probe_cache.json')
+_PROBE_CACHE = {}         # filepath -> (mtime, codec, format_name)
 _PROBE_CACHE_LOCK = threading.Lock()
+_PROBE_CACHE_DIRTY = False
+
+
+def _load_probe_cache():
+    global _PROBE_CACHE
+    try:
+        if os.path.exists(_PROBE_CACHE_FILE):
+            with open(_PROBE_CACHE_FILE, 'r', encoding='utf-8') as f:
+                data = _json.load(f) or {}
+            loaded = {}
+            for k, v in data.items():
+                if isinstance(v, list) and len(v) == 3:
+                    try:
+                        loaded[k] = (float(v[0]), str(v[1]), str(v[2]))
+                    except (ValueError, TypeError):
+                        continue
+            _PROBE_CACHE = loaded
+    except Exception as e:
+        print(f"[probe-cache] load failed: {e}")
+        _PROBE_CACHE = {}
+
+
+def _save_probe_cache():
+    global _PROBE_CACHE_DIRTY
+    with _PROBE_CACHE_LOCK:
+        if not _PROBE_CACHE_DIRTY:
+            return
+        snapshot = {k: list(v) for k, v in _PROBE_CACHE.items()}
+        _PROBE_CACHE_DIRTY = False
+    try:
+        with open(_PROBE_CACHE_FILE, 'w', encoding='utf-8') as f:
+            _json.dump(snapshot, f)
+    except Exception as e:
+        print(f"[probe-cache] save failed: {e}")
 
 
 def _subprocess_kwargs():
@@ -74,6 +115,8 @@ def _subprocess_kwargs():
 
 def _probe_full(filepath):
     """Возвращает (codec_name, format_name). Кэшируется по mtime."""
+    global _PROBE_CACHE_DIRTY
+
     try:
         st = os.stat(filepath)
         mtime = st.st_mtime
@@ -108,6 +151,8 @@ def _probe_full(filepath):
 
     with _PROBE_CACHE_LOCK:
         _PROBE_CACHE[filepath] = (mtime, codec, fmt)
+        _PROBE_CACHE_DIRTY = True
+
     return codec, fmt
 
 
@@ -156,9 +201,6 @@ def is_playable(filepath, probe_seconds=10):
 
     True  — файл декодируется без фатальных ошибок за первые N секунд.
     False — есть фатальные маркеры (Invalid NAL и т.п.).
-
-    Безобидные warning'и (mmco: unref short failure, co located POCs
-    unavailable, reference picture missing during reorder) ИГНОРИРУЮТСЯ.
     """
     if not os.path.exists(filepath):
         return False, 'file not found'
@@ -293,7 +335,7 @@ def _do_remux(src, tmp):
 
 
 def _do_reencode(src, tmp):
-    """Перекодирование видео в H.264, аудио — без изменений (если возможно)."""
+    """Перекодирование видео в H.264, аудио — AAC."""
     cmd = [
         FFMPEG_PATH, '-y', '-i', src,
         '-map', '0:v:0', '-map', '0:a:0?',
@@ -309,23 +351,13 @@ def convert_video_in_place(video):
     """
     Конвертирует видео прямо в его папке.
 
-    Шаги:
-      1. Проверяем is_playable(src) — если битый, отказываемся.
-      2. Решаем, нужна ли конвертация.
-      3. Делаем remux или re-encode.
-      4. Проверяем is_playable(результат).
-         Если remux дал плохой результат — fallback на re-encode.
-      5. Заменяем оригинал, оригинал уезжает в !Duplicates.
-      6. Возвращаем (True, new_video, message).
-
-    Возвращает (False, None, error) при любой ошибке.
-    При этом оригинал НЕ трогается, временный файл удаляется.
+    Возвращает (True, new_video, message) или (False, None, error).
+    При любой ошибке оригинал НЕ трогается.
     """
     src = video['filepath']
     if not os.path.exists(src):
         return False, None, 'file not found'
 
-    # Шаг 1 — оригинал не битый
     ok, reason = is_playable(src)
     if not ok:
         return False, None, f'broken stream ({reason})'
@@ -351,8 +383,6 @@ def convert_video_in_place(video):
     )
 
     try:
-        # Шаг 3 — первая попытка: remux (для плохого контейнера)
-        # или сразу re-encode (для плохого кодека)
         if need_reencode:
             print(f"[convert] re-encode: "
                   f"{os.path.basename(src)} -> {dst_name}")
@@ -364,7 +394,6 @@ def convert_video_in_place(video):
             ok_run, err = _do_remux(src, tmp)
             mode_label = 'remux'
 
-        # Шаг 4 — проверяем результат
         if ok_run and os.path.exists(tmp) and os.path.getsize(tmp) > 0:
             ok_play, why = is_playable(tmp)
             if not ok_play:
@@ -373,7 +402,6 @@ def convert_video_in_place(video):
                 _cleanup_tmp(tmp)
                 ok_run = False
 
-        # Fallback: remux упал или дал плохой результат — делаем re-encode
         if not ok_run and not need_reencode:
             print(f"[convert] fallback to re-encode: {os.path.basename(src)}")
             ok_run, err = _do_reencode(src, tmp)
@@ -392,10 +420,8 @@ def convert_video_in_place(video):
             _cleanup_tmp(tmp)
             return False, None, 'empty output'
 
-        # Шаг 5 — заменяем оригинал
         moved_old = None
 
-        # Если dst != src и dst уже есть — тоже в !Duplicates
         if not same_path and os.path.exists(dst):
             try:
                 _move_to_duplicates(dst, keep_name=os.path.basename(dst))
@@ -403,7 +429,6 @@ def convert_video_in_place(video):
                 _cleanup_tmp(tmp)
                 return False, None, f'cannot move existing dst: {e}'
 
-        # Если same_path — оригинал уезжает в !Duplicates ПЕРЕД заменой
         if same_path:
             try:
                 moved_old = _move_to_duplicates(src, keep_name=video['filename'])
@@ -411,7 +436,6 @@ def convert_video_in_place(video):
                 _cleanup_tmp(tmp)
                 return False, None, f'cannot move original: {e}'
 
-        # Кладём tmp на место dst
         try:
             os.replace(tmp, dst)
         except Exception as e:
@@ -423,14 +447,12 @@ def convert_video_in_place(video):
             _cleanup_tmp(tmp)
             return False, None, f'cannot place new file: {e}'
 
-        # Если dst != src — оригинал src ещё на месте, переносим
         if not same_path:
             try:
                 moved_old = _move_to_duplicates(src, keep_name=video['filename'])
             except Exception as e:
                 print(f"[convert] warning: original not moved: {e}")
 
-        # Шаг 6 — новые метаданные
         meta = probe_metadata(dst)
         new_size = os.path.getsize(dst)
 

@@ -6,8 +6,8 @@ r"""
   2. needs_conversion()  — если контейнер/кодек плохой, конвертируем на месте.
   3. add_video()         — только после проверки и конвертации.
 
-Оригинал при конвертации уезжает в !Duplicates.
-Битые файлы уезжают в !Broken.
+Кэши (scan_cache.json + probe_cache.json) живут на диске — повторный
+скан уже проверенных файлов занимает секунды.
 """
 import os
 import cv2
@@ -21,8 +21,11 @@ from models import (
 from converter import (
     needs_conversion, convert_video_in_place, update_db_after_conversion,
     is_playable, move_to_broken,
+    _load_probe_cache, _save_probe_cache,
 )
 
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 VIDEO_EXTENSIONS = {'.mp4', '.avi', '.mkv', '.mov', '.wmv', '.flv', '.webm', '.m4v'}
 IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.bmp', '.gif', '.tiff', '.webp'}
@@ -35,6 +38,73 @@ SCAN_IN_PROGRESS = False
 _RUN_LOCK = threading.Lock()
 
 
+# ===================================================================
+#                     Persistent scan cache
+# ===================================================================
+_SCAN_CACHE_FILE = os.path.join(BASE_DIR, 'scan_cache.json')
+_SCAN_CACHE = {}
+_SCAN_CACHE_LOCK = threading.Lock()
+
+
+def _load_scan_cache():
+    global _SCAN_CACHE
+    try:
+        if os.path.exists(_SCAN_CACHE_FILE):
+            with open(_SCAN_CACHE_FILE, 'r', encoding='utf-8') as f:
+                _SCAN_CACHE = json.load(f) or {}
+    except Exception as e:
+        print(f"[scan-cache] load failed: {e}")
+        _SCAN_CACHE = {}
+
+
+def _save_scan_cache():
+    try:
+        with open(_SCAN_CACHE_FILE, 'w', encoding='utf-8') as f:
+            json.dump(_SCAN_CACHE, f)
+    except Exception as e:
+        print(f"[scan-cache] save failed: {e}")
+
+
+def _file_signature(path):
+    """Возвращает (mtime, size) или None."""
+    try:
+        st = os.stat(path)
+        return (st.st_mtime, st.st_size)
+    except OSError:
+        return None
+
+
+def _cache_get_playable(path):
+    """True / False / None (нет записи или файл изменился)."""
+    sig = _file_signature(path)
+    if sig is None:
+        return None
+    mtime, size = sig
+    entry = _SCAN_CACHE.get(path)
+    if not entry:
+        return None
+    if entry.get('mtime') != mtime or entry.get('size') != size:
+        return None
+    return entry.get('playable')
+
+
+def _cache_set_playable(path, playable, reason=''):
+    sig = _file_signature(path)
+    if sig is None:
+        return
+    mtime, size = sig
+    with _SCAN_CACHE_LOCK:
+        _SCAN_CACHE[path] = {
+            'mtime': mtime,
+            'size': size,
+            'playable': bool(playable),
+            'reason': reason,
+        }
+
+
+# ===================================================================
+#                     subprocess helpers
+# ===================================================================
 def _subprocess_kwargs():
     return dict(
         capture_output=True,
@@ -171,6 +241,9 @@ def _is_temp_file(filename):
 
 
 def _scan_impl(progress_cb=None):
+    _load_scan_cache()
+    _load_probe_cache()
+
     acquired = _RUN_LOCK.acquire(blocking=False)
     if not acquired:
         print("[scan] another scan is already running, skipping.")
@@ -200,7 +273,6 @@ def _scan_impl_locked(progress_cb=None):
             print(f"[scan] skip non-existent library: {lib_path}")
             continue
         for root, dirs, files in os.walk(lib_path):
-            # Исключаем служебные папки
             dirs[:] = [d for d in dirs
                        if d not in ('!Duplicates', '!Broken', '!Good')]
             for file in files:
@@ -242,10 +314,20 @@ def _scan_impl_locked(progress_cb=None):
         try:
             is_video = os.path.splitext(full_path)[1].lower() in VIDEO_EXTENSIONS
 
-            # --- Шаг 1. Проверка целостности видео ---
+            # --- Шаг 1. Проверка целостности видео (с кэшем) ---
             if is_video and full_path not in attempted:
                 attempted.add(full_path)
-                ok, reason = is_playable(full_path)
+
+                cached_playable = _cache_get_playable(full_path)
+
+                if cached_playable is True:
+                    ok, reason = True, 'cached'
+                elif cached_playable is False:
+                    ok, reason = False, 'cached (broken)'
+                else:
+                    ok, reason = is_playable(full_path)
+                    _cache_set_playable(full_path, ok, reason)
+
                 if not ok:
                     print(f"[scan] broken video: {filename} ({reason})")
 
@@ -311,7 +393,6 @@ def _scan_impl_locked(progress_cb=None):
                 if info:
                     original_path = full_path
 
-                    # --- Шаг 2. Конвертация ДО добавления в БД ---
                     need, reason = needs_conversion(
                         full_path, info.get('codec'),
                         info.get('format_name'),
@@ -339,7 +420,6 @@ def _scan_impl_locked(progress_cb=None):
                             print(f"[scan] convert FAILED (will retry later): "
                                   f"{msg}")
 
-                    # --- Шаг 3. Добавляем в БД ---
                     add_video(
                         lib_id, filename, full_path,
                         duration=info['duration'],
@@ -368,6 +448,17 @@ def _scan_impl_locked(progress_cb=None):
             except Exception as e:
                 print(f"[scan] delete error for {row['id']}: {e}")
 
+    # --- Чистим scan_cache от несуществующих записей ---
+    with _SCAN_CACHE_LOCK:
+        valid_paths = set(found_paths)
+        for cached_path in list(_SCAN_CACHE.keys()):
+            if cached_path not in valid_paths:
+                del _SCAN_CACHE[cached_path]
+
+    _save_scan_cache()
+    _save_probe_cache()
+
+    print(f"[scan] scan cache saved ({len(_SCAN_CACHE)} entries)")
     print("[scan] Scan complete.")
 
 
