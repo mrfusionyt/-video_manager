@@ -8,12 +8,14 @@
         <div class="action-row">
             <form method="post" id="addLibraryForm" class="flex-form">
                 <input type="hidden" name="action" value="add_library">
+                <input type="hidden" name="profile" value="{{ current_profile }}">
                 <input type="text" name="path" id="libraryPath" class="form-control form-control-dark" placeholder="Enter full path to video folder (e.g., C:\Users\...)" value="">
                 <button type="button" class="btn-paste" id="pasteBtn">Paste</button>
                 <button type="submit" class="btn-add">Add</button>
             </form>
             <form method="post" class="scan-form" id="scanForm">
                 <input type="hidden" name="action" value="scan">
+                <input type="hidden" name="profile" value="{{ current_profile }}">
                 <button type="submit" class="btn-add" id="scanBtn" {% if scan_running %}disabled{% endif %}>
                     {% if scan_running %}Scanning…{% else %}Scan{% endif %}
                 </button>
@@ -41,6 +43,7 @@
                         <td>
                             <form method="post" style="display:inline;">
                                 <input type="hidden" name="action" value="delete_library">
+                                <input type="hidden" name="profile" value="{{ current_profile }}">
                                 <input type="hidden" name="library_id" value="{{ lib.id }}">
                                 <button type="submit" class="btn-delete" title="Delete library">✕</button>
                             </form>
@@ -60,6 +63,7 @@
         <div class="mb-3">
             <form method="post">
                 <input type="hidden" name="action" value="import_categories">
+                <input type="hidden" name="profile" value="{{ current_profile }}">
                 <div class="mb-2">
                     <label class="form-label text-muted small">Enter category names (one per line):</label>
                     <textarea name="categories_text" class="form-control form-control-dark" placeholder="Horror&#10;Comedy&#10;Documentary"></textarea>
@@ -70,6 +74,7 @@
         <div class="mb-3">
             <form method="post" onsubmit="return confirm('Delete ALL categories for selected profile? This cannot be undone.');">
                 <input type="hidden" name="action" value="delete_all_categories">
+                <input type="hidden" name="profile" value="{{ current_profile }}">
                 <button type="submit" class="btn-danger-custom">Delete All Categories</button>
             </form>
         </div>
@@ -87,6 +92,7 @@
                                 <td>
                                     <form method="post" style="display:inline;">
                                         <input type="hidden" name="action" value="delete_category">
+                                        <input type="hidden" name="profile" value="{{ current_profile }}">
                                         <input type="hidden" name="category_id" value="{{ cat.id }}">
                                         <button type="submit" class="btn-delete" title="Delete category">✕</button>
                                     </form>
@@ -100,6 +106,7 @@
                                 <td>
                                     <form method="post" style="display:inline;">
                                         <input type="hidden" name="action" value="delete_category">
+                                        <input type="hidden" name="profile" value="{{ current_profile }}">
                                         <input type="hidden" name="category_id" value="{{ cat.id }}">
                                         <button type="submit" class="btn-delete" title="Delete category">✕</button>
                                     </form>
@@ -125,6 +132,7 @@
         <h5>Static IP</h5>
         <form method="post">
             <input type="hidden" name="action" value="save_ip">
+            <input type="hidden" name="profile" value="{{ current_profile }}">
             <div class="mb-3">
                 <label for="static_ip" class="form-label">Enter static IP address (e.g., 192.168.1.100):</label>
                 <input type="text" class="form-control form-control-dark" id="static_ip" name="static_ip" 
@@ -146,6 +154,7 @@
         <div class="mb-3">
             <form method="post" action="{{ url_for('settings') }}" id="duplicateScanForm">
                 <input type="hidden" name="action" value="start_duplicate_scan">
+                <input type="hidden" name="profile" value="{{ current_profile }}">
                 <div class="mb-2">
                     <label class="form-label">Media types to scan:</label>
                     <div class="form-check form-check-inline">
@@ -201,13 +210,11 @@
             });
         }
 
-        // ---------- Async scan: отслеживание прогресса ----------
         const urlParams = new URLSearchParams(window.location.search);
         const taskId = urlParams.get('task_id');
         const scanBtn = document.getElementById('scanBtn');
         const scanForm = document.getElementById('scanForm');
 
-        // При отправке формы скана — блокируем кнопку сразу
         if (scanForm) {
             scanForm.addEventListener('submit', function() {
                 if (scanBtn) {

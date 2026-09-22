@@ -1,15 +1,18 @@
-"""
+r"""
 Поиск дубликатов видео и картинок.
 
 Двухуровневая схема:
-  1) pHash по 5 ключевым кадрам (10/30/50/70/90% длительности)
-     → находит полные дубликаты одной длины.
-  2) Chromaprint (fpcalc) аудио-фингерпринт
-     → находит фрагменты (короткое видео внутри длинного), даже если
-       картинка перекодирована и/или длины различаются.
+  1) 5 ключевых кадров (10/30/50/70/90% длительности).
+     Дубликат — если совпало МИНИМУМ 3 из 5 кадров.
+     Сравнение хэшей — поэлементное: orig↔orig, mirror↔mirror и т.д.
+     (раньше сравнивались все 16 комбинаций, что давало ложные).
 
-Кэш хэшей (duplicates_hash_cache.json) ускоряет повторные сканы:
-для уже обработанных файлов (по mtime + size) хэши переиспользуются.
+  2) Chromaprint (fpcalc) аудио-фингерпринт.
+     Для случая "5-мин видео внутри 10-мин" — нужен минимум
+     AUDIO_MIN_RUN_SEC секунд непрерывного совпадения.
+
+Кэш хэшей (hash_cache.json) живёт на диске — при повторных сканах
+уже проверенные файлы не обрабатываются заново.
 """
 import os
 import json
@@ -36,34 +39,35 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 DUPLICATE_CACHE_FILE = os.path.join(BASE_DIR, 'duplicates_cache.json')
-HASH_CACHE_FILE = os.path.join(BASE_DIR, 'duplicates_hash_cache.json')
+HASH_CACHE_FILE = os.path.join(BASE_DIR, 'hash_cache.json')
 
-# fpcalc — отдельный бинарник chromaprint. Положите fpcalc.exe рядом с ffprobe.
 FPCALC_CANDIDATES = [
     os.path.join(BASE_DIR, '_dop', 'fpcalc.exe'),
     os.path.join(BASE_DIR, '_dop', 'fpcalc'),
     shutil.which('fpcalc'),
 ]
 
-# Ключевые кадры: доли длительности
+# --- Ключевые кадры ---
 KEYFRAME_POSITIONS = [0.10, 0.30, 0.50, 0.70, 0.90]
-KEYFRAMES_REQUIRED = 3            # минимум 3 из 5 кадров должны совпасть
+# Минимум совпавших кадров из 5 (было фактически 1 из 1 → теперь 3 из 5)
+KEYFRAMES_REQUIRED = 3
 
-# Пороги pHash (расстояние Хэмминга)
-HASH_THRESHOLD_STRICT = 4         # «это точно тот же кадр»
-HASH_THRESHOLD_LOOSE  = 10        # «похоже»
+# --- Пороги pHash ---
+HASH_THRESHOLD_STRICT = 4      # «это точно тот же кадр»
+HASH_THRESHOLD_LOOSE  = 10     # «похоже»
 
-# Аудио
-AUDIO_BITS_TOLERANT   = 10        # из 32 бит на sub-fingerprint — допускаем ≤10 отличий
-AUDIO_MIN_RUN_SEC     = 6.0       # минимум непрерывного совпадения, сек
-AUDIO_SUBPRINT_PER_SEC = 1.0 / 0.1234  # chromaprint выдаёт ~8.13 sub-print/сек
-FPCALC_MAX_LENGTH     = 600       # анализировать не больше N секунд аудио (0 = вся дорожка)
+# --- Аудио ---
+AUDIO_BITS_TOLERANT    = 8     # было 10; снижено против ложных
+AUDIO_MIN_RUN_SEC      = 10.0  # было 6; поднято против ложных
+AUDIO_SUBPRINT_PER_SEC = 1.0 / 0.1234
+FPCALC_MAX_LENGTH      = 600
 
-# Длины: если одна сторона больше другой в >= 1.35 раза — считаем «фрагмент»
+# --- Длина ---
 DURATION_RATIO_FRAGMENT = 1.35
-DURATION_SAME_TOLERANCE = 0.10    # ±10% — «одной длины»
+DURATION_SAME_TOLERANCE = 0.10
 
-THRESHOLD = 0                     # оставлено для обратной совместимости
+THRESHOLD = 0     # legacy
+
 
 # ===================================================================
 #                     Глобальное состояние
@@ -74,9 +78,6 @@ scan_progress = {}
 _lock = threading.Lock()
 
 
-# ===================================================================
-#                     Поиск fpcalc
-# ===================================================================
 FPCALC_PATH = None
 for cand in FPCALC_CANDIDATES:
     if cand and os.path.exists(cand):
@@ -85,27 +86,36 @@ for cand in FPCALC_CANDIDATES:
 
 
 # ===================================================================
-#                     Кэш хэшей
+#                     Hash cache (persistent)
 # ===================================================================
+_HASH_CACHE = {}
+_HASH_CACHE_LOCK = threading.Lock()
+_HASH_CACHE_DIRTY = False
+
+
 def _load_hash_cache():
-    if not os.path.exists(HASH_CACHE_FILE):
-        return {}
+    global _HASH_CACHE
     try:
-        with open(HASH_CACHE_FILE, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-            if isinstance(data, dict):
-                return data
-    except Exception:
-        pass
-    return {}
+        if os.path.exists(HASH_CACHE_FILE):
+            with open(HASH_CACHE_FILE, 'r', encoding='utf-8') as f:
+                _HASH_CACHE = json.load(f) or {}
+    except Exception as e:
+        print(f"[hash-cache] load failed: {e}")
+        _HASH_CACHE = {}
 
 
-def _save_hash_cache(cache):
+def _save_hash_cache():
+    global _HASH_CACHE_DIRTY
+    with _HASH_CACHE_LOCK:
+        if not _HASH_CACHE_DIRTY:
+            return
+        snapshot = dict(_HASH_CACHE)
+        _HASH_CACHE_DIRTY = False
     try:
         with open(HASH_CACHE_FILE, 'w', encoding='utf-8') as f:
-            json.dump(cache, f)
+            json.dump(snapshot, f)
     except Exception as e:
-        print(f"[dup] Failed to save hash cache: {e}")
+        print(f"[hash-cache] save failed: {e}")
 
 
 def _cache_entry_fresh(entry, filepath):
@@ -125,7 +135,6 @@ def _cache_entry_fresh(entry, filepath):
 #                     Работа с кадрами
 # ===================================================================
 def extract_frames_at_positions(filepath, positions):
-    """Возвращает список кадров (или None на неудачной позиции)."""
     cap = cv2.VideoCapture(filepath)
     if not cap.isOpened():
         return []
@@ -146,10 +155,7 @@ def extract_frames_at_positions(filepath, positions):
 
 
 def _hash_frame_with_flips(frame):
-    """
-    Возвращает 4 хэша: orig / mirror / flip / flip+mirror.
-    Нужно, чтобы ловить зеркальные копии.
-    """
+    """Возвращает 4 хэша: orig / mirror / flip / flip+mirror."""
     if frame is None:
         return None
     rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -161,46 +167,61 @@ def _hash_frame_with_flips(frame):
     return [h_orig, h_h, h_v, h_hv]
 
 
-@lru_cache(maxsize=8192)
+@lru_cache(maxsize=16384)
 def _hex_to_hash(h):
-    """Кэшируем конвертацию hex → ImageHash (одни и те же хэши
-    сравниваются между парами многократно)."""
     return imagehash.hex_to_hash(h)
 
 
 def _hash_distance(h1, h2):
-    """Расстояние Хэмминга между двумя hex-хэшами pHash."""
     try:
         return _hex_to_hash(h1) - _hex_to_hash(h2)
     except Exception:
         return 999
 
 
-def _frames_match(hash_variants_a, hash_variants_b, threshold):
+def _frames_match_strict(hashes_a, hashes_b, threshold):
     """
-    Сравнивает два кадра с учётом зеркал.
-    hash_variants_* — список из 4 hex-строк (или None).
+    Поэлементное сравнение: orig↔orig, mirror↔mirror, flip↔flip,
+    flipmirror↔flipmirror.
+
+    НЕ сравниваем orig↔mirror: это давало ложные срабатывания —
+    два разных видео, одно из которых зеркало другого случайно, шли
+    в одну группу.
     """
-    if not hash_variants_a or not hash_variants_b:
+    if not hashes_a or not hashes_b:
         return False
-    for h1 in hash_variants_a:
-        for h2 in hash_variants_b:
-            if h1 and h2 and _hash_distance(h1, h2) <= threshold:
-                return True
+    n = min(len(hashes_a), len(hashes_b))
+    for i in range(n):
+        h1 = hashes_a[i]
+        h2 = hashes_b[i]
+        if h1 and h2 and _hash_distance(h1, h2) <= threshold:
+            return True
     return False
 
 
+def _keyframes_overlap_count(cache_a, cache_b, threshold):
+    """
+    Считает, сколько из 5 позиций совпали (поэлементно).
+
+    Если у одного из кэшей меньше 5 позиций (fallback на 1 кадр) —
+    сравниваем только доступные.
+    """
+    ka = cache_a.get('keyframe_hashes') or []
+    kb = cache_b.get('keyframe_hashes') or []
+    if not ka or not kb:
+        return 0
+    n = min(len(ka), len(kb))
+    count = 0
+    for i in range(n):
+        if _frames_match_strict(ka[i], kb[i], threshold):
+            count += 1
+    return count
+
+
 # ===================================================================
-#                     Аудио-фингерпринт (chromaprint / fpcalc)
+#                     Аудио-фингерпринт
 # ===================================================================
 def extract_audio_fingerprint(filepath):
-    """
-    Возвращает (fp_list, duration_sec) или (None, 0).
-    fp_list — список 32-битных unsigned int (raw chromaprint).
-
-    fpcalc -raw -json отдаёт fingerprint как СПИСОК целых чисел
-    (не base64-строку), поэтому base64.b64decode тут не нужен.
-    """
     if not FPCALC_PATH:
         return None, 0
     try:
@@ -208,7 +229,7 @@ def extract_audio_fingerprint(filepath):
             [FPCALC_PATH, '-raw', '-json',
              '-length', str(FPCALC_MAX_LENGTH), filepath],
             capture_output=True, text=True, timeout=180,
-            encoding='utf-8', errors='replace'
+            encoding='utf-8', errors='replace',
         )
         if result.returncode != 0 or not result.stdout:
             return None, 0
@@ -218,10 +239,8 @@ def extract_audio_fingerprint(filepath):
             return None, 0
 
         if isinstance(fp_data, list):
-            # Основной случай: fpcalc отдал массив int32
             fp = [int(x) & 0xFFFFFFFF for x in fp_data]
         else:
-            # Резервный случай: строка base64 (старые/иные сборки fpcalc)
             raw = base64.b64decode(fp_data)
             n = len(raw) // 4
             fp = list(struct.unpack('<%dI' % n, raw[:n * 4]))
@@ -237,7 +256,6 @@ def extract_audio_fingerprint(filepath):
 
 
 def _popcount_u32(x):
-    """Векторный popcount для numpy uint32 (SWAR bit hack)."""
     x = x.astype(np.uint32, copy=False)
     x = x - ((x >> np.uint32(1)) & np.uint32(0x55555555))
     x = (x & np.uint32(0x33333333)) + ((x >> np.uint32(2)) & np.uint32(0x33333333))
@@ -246,8 +264,7 @@ def _popcount_u32(x):
     return x
 
 
-def _longest_true_run_np(flags):
-    """Длина самого длинного непрерывного True."""
+def _longest_true_run(flags):
     if not len(flags):
         return 0
     best = 0
@@ -263,16 +280,6 @@ def _longest_true_run_np(flags):
 
 
 def compare_audio_fingerprints(fp_a, fp_b):
-    """
-    Ищет лучшее выравнивание двух chromaprint-последовательностей.
-    Возвращает dict:
-      {
-        'best_run_sec': float,
-        'best_run_steps': int,
-        'best_shift': int,
-        'direction': 'b_inside_a' | 'a_inside_b' | 'same'
-      }
-    """
     if not fp_a or not fp_b:
         return None
 
@@ -297,7 +304,7 @@ def compare_audio_fingerprints(fp_a, fp_b):
         xor = np.bitwise_xor(window, b)
         bits = _popcount_u32(xor)
         flags = bits <= AUDIO_BITS_TOLERANT
-        run = _longest_true_run_np(flags)
+        run = _longest_true_run(flags)
         if run > best_run:
             best_run = run
             best_shift = shift
@@ -315,11 +322,7 @@ def compare_audio_fingerprints(fp_a, fp_b):
 # ===================================================================
 #                     Обработка одного медиа
 # ===================================================================
-def _process_media(item, cache, cache_lock):
-    """
-    Возвращает dict с хэшами для одного видео/картинки,
-    с учётом кэша по mtime+size.
-    """
+def _process_media(item, cache_lock):
     filepath = item['filepath']
     if not os.path.exists(filepath):
         return None
@@ -329,8 +332,8 @@ def _process_media(item, cache, cache_lock):
     except OSError:
         return None
 
-    with cache_lock:
-        entry = cache.get(filepath)
+    with _HASH_CACHE_LOCK:
+        entry = _HASH_CACHE.get(filepath)
     if _cache_entry_fresh(entry, filepath):
         return entry
 
@@ -351,13 +354,17 @@ def _process_media(item, cache, cache_lock):
             print(f"[dup] Image hash error {filepath}: {e}")
             return None
         result['audio_fp'] = None
+        with _HASH_CACHE_LOCK:
+            _HASH_CACHE[filepath] = result
+            global _HASH_CACHE_DIRTY
+            _HASH_CACHE_DIRTY = True
         return result
 
     # --- Видео: 5 ключевых кадров ---
     frames = extract_frames_at_positions(filepath, KEYFRAME_POSITIONS)
     kf_hashes = [_hash_frame_with_flips(f) for f in frames]
 
-    # если ни одного кадра — попробуем 1 кадр в середине
+    # fallback на 1 кадр в середине, если 5 не получились
     if not any(kf_hashes):
         cap = cv2.VideoCapture(filepath)
         if cap.isOpened():
@@ -383,6 +390,10 @@ def _process_media(item, cache, cache_lock):
     else:
         result['audio_fp'] = None
 
+    with _HASH_CACHE_LOCK:
+        _HASH_CACHE[filepath] = result
+        _HASH_CACHE_DIRTY = True
+
     return result
 
 
@@ -406,23 +417,16 @@ def _fragment_length_ratio(item_a, item_b):
     return max(da, db) / max(1, min(da, db))
 
 
-def _keyframes_overlap_count(cache_a, cache_b, threshold):
-    """Сколько из 5 позиций совпали (с учётом зеркал)."""
-    ka = cache_a.get('keyframe_hashes') or []
-    kb = cache_b.get('keyframe_hashes') or []
-    if not ka or not kb:
-        return 0
-    n = min(len(ka), len(kb))
-    count = 0
-    for i in range(n):
-        if _frames_match(ka[i], kb[i], threshold):
-            count += 1
-    return count
-
-
 def _is_duplicate_pair(meta_a, meta_b, cache_a, cache_b):
     """
-    Возвращает (True, 'reason') если пара — дубликат, иначе (False, None).
+    Возвращает (True, 'reason') или (False, None).
+
+    Логика:
+      1) Если длины примерно равны — сравниваем 5 keyframes.
+         Дубликат ТОЛЬКО если совпало >= KEYFRAMES_REQUIRED (3 из 5).
+      2) Если длины сильно различаются — сравниваем аудио-фингерпринты.
+         Дубликат ТОЛЬКО если есть непрерывное совпадение >= 10 секунд.
+      3) Fallback на keyframes для разных длин — тоже 3 из 5.
     """
     if not cache_a or not cache_b:
         return False, None
@@ -430,41 +434,45 @@ def _is_duplicate_pair(meta_a, meta_b, cache_a, cache_b):
     media_a = cache_a.get('media_type', 'video')
     media_b = cache_b.get('media_type', 'video')
 
-    # Картинки сравниваем одним хэшем
+    # --- Картинки ---
     if media_a == 'image' and media_b == 'image':
         ha = (cache_a.get('keyframe_hashes') or [[None]])[0]
         hb = (cache_b.get('keyframe_hashes') or [[None]])[0]
-        if _frames_match(ha, hb, HASH_THRESHOLD_STRICT):
+        if _frames_match_strict(ha, hb, HASH_THRESHOLD_STRICT):
             return True, 'image-phash'
         return False, None
 
     if media_a != media_b:
         return False, None
 
-    # --- 1) Полные дубликаты одной длины: 5 keyframes ---
+    ratio = _fragment_length_ratio(meta_a, meta_b)
+
+    # --- 1) Одинаковая длина: 5 keyframes, нужно 3+ совпадений ---
     if _same_length(meta_a, meta_b):
         matched = _keyframes_overlap_count(cache_a, cache_b, HASH_THRESHOLD_STRICT)
         if matched >= KEYFRAMES_REQUIRED:
             return True, f'keyframes {matched}/5'
 
-    # --- 2) Фрагмент: разные длины + аудио ---
-    ratio = _fragment_length_ratio(meta_a, meta_b)
+    # --- 2) Разная длина: аудио-фингерпринт ---
     if ratio >= DURATION_RATIO_FRAGMENT:
         fp_a = cache_a.get('audio_fp')
         fp_b = cache_b.get('audio_fp')
         if fp_a and fp_b:
             res = compare_audio_fingerprints(fp_a, fp_b)
             if res and res['best_run_sec'] >= AUDIO_MIN_RUN_SEC:
-                return True, f'audio overlap {res["best_run_sec"]:.0f}s ({res["direction"]})'
+                return True, (f'audio overlap {res["best_run_sec"]:.0f}s '
+                              f'({res["direction"]})')
 
-    # --- 3) Разные длины без аудио: fallback по keyframes ---
+    # --- 3) Разная длина, аудио не сработало: fallback на keyframes ---
+    # Нужны 3 из 5 совпадений — реже ложные, чем 1 из 1.
     if ratio >= DURATION_RATIO_FRAGMENT:
         ka = cache_a.get('keyframe_hashes') or []
         kb = cache_b.get('keyframe_hashes') or []
+        # Считаем совпадения «всё-со-всем»: у разных длин позиции не совпадают
         common = 0
         for ha in ka:
             for hb in kb:
-                if _frames_match(ha, hb, HASH_THRESHOLD_STRICT):
+                if _frames_match_strict(ha, hb, HASH_THRESHOLD_STRICT):
                     common += 1
                     break
         if common >= KEYFRAMES_REQUIRED:
@@ -498,7 +506,8 @@ def _find_duplicates_worker(task_id, filters):
     try:
         print(f"[DEBUG] Worker started for task_id={task_id}")
 
-        # --- Список видео и картинок ---
+        _load_hash_cache()
+
         all_items = get_all_videos()
         if filters:
             allowed = set(filters)
@@ -518,17 +527,13 @@ def _find_duplicates_worker(task_id, filters):
             scan_progress[task_id]['message'] = 'No files to scan.'
             return
 
-        # --- Кэш ---
-        cache = _load_hash_cache()
         cache_lock = threading.Lock()
-
-        # --- Параллельная обработка (хэши + аудио) ---
         processed = 0
         max_workers = min(4, os.cpu_count() or 1)
-        by_path = {}   # filepath -> cache_entry
+        by_path = {}
 
         def _job(item):
-            return item, _process_media(item, cache, cache_lock)
+            return item, _process_media(item, cache_lock)
 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = [executor.submit(_job, it) for it in all_items]
@@ -540,18 +545,14 @@ def _find_duplicates_worker(task_id, filters):
                 scan_progress[task_id]['processed'] = processed
                 if entry:
                     by_path[item['filepath']] = entry
-                    with cache_lock:
-                        cache[item['filepath']] = entry
                 name = os.path.basename(item['filepath']) if item else '...'
                 scan_progress[task_id]['message'] = \
                     f'Processing {processed}/{total} ({name})'
                 if processed % 10 == 0:
                     print(f"[DEBUG] Progress: {progress}% ({processed}/{total})")
 
-        # Сохраняем кэш хэшей
-        _save_hash_cache(cache)
+        _save_hash_cache()
 
-        # --- Сравнение пар ---
         scan_progress[task_id]['message'] = 'Comparing pairs...'
         items = list(all_items)
         n = len(items)
@@ -602,7 +603,6 @@ def _find_duplicates_worker(task_id, filters):
     finally:
         with _lock:
             scan_in_progress = False
-            print("[DEBUG] scan_in_progress reset to False.")
 
 
 def _save_groups(groups):
@@ -619,10 +619,6 @@ def _save_groups(groups):
 #                     Геттеры
 # ===================================================================
 def get_duplicate_groups():
-    """
-    Возвращает только те группы, все элементы которых ещё существуют в БД.
-    Stale-записи (после перемещения дубликатов) отбрасываются и чистятся.
-    """
     global DUPLICATE_GROUPS
 
     if not DUPLICATE_GROUPS:
@@ -635,7 +631,6 @@ def get_duplicate_groups():
     if not DUPLICATE_GROUPS:
         return []
 
-    # Собираем все ID из кэша
     all_ids = set()
     for group in DUPLICATE_GROUPS:
         for v in group:
@@ -646,7 +641,6 @@ def get_duplicate_groups():
     if not all_ids:
         return []
 
-    # Одним запросом узнаём, какие ID реально есть в БД
     conn = get_db_connection()
     try:
         cursor = conn.cursor()
@@ -659,7 +653,6 @@ def get_duplicate_groups():
     finally:
         conn.close()
 
-    # Оставляем только те группы, где ВСЕ элементы ещё в БД
     cleaned = []
     changed = False
     for group in DUPLICATE_GROUPS:

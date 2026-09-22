@@ -42,9 +42,13 @@ def register(app):
 
     @app.route('/settings', methods=['GET', 'POST'])
     def settings():
-        current_profile = get_current_profile()
+        # Профиль читаем в первую очередь из request.values
+        # (args + form). Это критично для POST-запросов, где profile
+        # приходит только в форме — иначе get_current_profile()
+        # вернёт профиль по умолчанию и редирект «переключит» профиль.
+        current_profile = request.values.get('profile') or get_current_profile()
         current_mode = profile_to_mode(current_profile)
-        tab = request.args.get('tab', 'libraries')
+        tab = request.values.get('tab') or request.args.get('tab') or 'libraries'
         task_id = request.args.get('task_id')
 
         if request.method == 'POST':
@@ -80,13 +84,14 @@ def register(app):
                 lib_id = request.form.get('library_id')
                 if lib_id:
                     delete_library(lib_id)
-                    return redirect(url_for('settings', tab='libraries', profile=current_profile))
+                    return redirect(url_for('settings', tab='libraries',
+                                            profile=current_profile))
             elif action == 'scan':
-                # Асинхронный запуск
                 new_task_id = str(uuid.uuid4())
                 started = scan_libraries_async(new_task_id)
                 if not started:
-                    return redirect(url_for('settings', tab='libraries', profile=current_profile))
+                    return redirect(url_for('settings', tab='libraries',
+                                            profile=current_profile))
                 return redirect(url_for('settings',
                                         tab='libraries',
                                         task_id=new_task_id,
@@ -102,7 +107,8 @@ def register(app):
                 new_task_id = str(uuid.uuid4())
                 find_duplicates_async(new_task_id, filters)
                 return redirect(url_for('settings', tab='duplicates',
-                                        task_id=new_task_id, profile=current_profile))
+                                        task_id=new_task_id,
+                                        profile=current_profile))
             return redirect(url_for('settings', tab=tab, profile=current_profile))
 
         if tab == 'duplicates':
@@ -133,10 +139,12 @@ def register(app):
                                    task_id=task_id)
         elif tab == 'stats':
             stats_female = get_stats(mode=1) or {
-                'total_videos': 0, 'total_categories': 0, 'total_size': 0, 'avg_rating': 0.0
+                'total_videos': 0, 'total_categories': 0,
+                'total_size': 0, 'avg_rating': 0.0
             }
             stats_transgender = get_stats(mode=2) or {
-                'total_videos': 0, 'total_categories': 0, 'total_size': 0, 'avg_rating': 0.0
+                'total_videos': 0, 'total_categories': 0,
+                'total_size': 0, 'avg_rating': 0.0
             }
             return render_template('stats.html',
                                    stats_female=stats_female,
@@ -149,7 +157,6 @@ def register(app):
                                    task_id=task_id,
                                    scan_running=is_scan_in_progress())
 
-    # ---------- SSE: прогресс сканирования ----------
     @app.route('/scan_progress/<task_id>')
     def scan_progress_stream(task_id):
         def generate():
@@ -165,7 +172,6 @@ def register(app):
                 time.sleep(0.5)
         return Response(generate(), mimetype="text/event-stream")
 
-    # ---------- VR download (без изменений) ----------
     @app.route('/download_vr', methods=['GET', 'POST'])
     def download_vr():
         if request.method == 'POST':
@@ -173,7 +179,9 @@ def register(app):
             download_path = request.form.get('download_path', '').strip()
 
             if not url:
-                return render_template('download_vr.html', error='URL is required', files=get_vr_downloads())
+                return render_template('download_vr.html',
+                                       error='URL is required',
+                                       files=get_vr_downloads())
 
             base_dir = os.path.dirname(CONFIG_PATH)
             if download_path and os.path.exists(download_path) and os.path.isdir(download_path):
@@ -211,9 +219,13 @@ def register(app):
                         message += " (ffmpeg not found)"
                     if not deno_available:
                         message += " (Deno not found)"
-                    return render_template('download_vr.html', success=message, files=get_vr_downloads())
+                    return render_template('download_vr.html',
+                                           success=message,
+                                           files=get_vr_downloads())
             except Exception as e:
-                return render_template('download_vr.html', error=str(e), files=get_vr_downloads())
+                return render_template('download_vr.html',
+                                       error=str(e),
+                                       files=get_vr_downloads())
         return render_template('download_vr.html', files=get_vr_downloads())
 
     @app.route('/vr_download/<filename>')
@@ -227,7 +239,6 @@ def register(app):
             mimetype = 'video/mp4'
         return send_file(filepath, mimetype=mimetype, as_attachment=False)
 
-    # ---------- SSE: прогресс дубликатов (без изменений) ----------
     @app.route('/progress/<task_id>')
     def progress_stream(task_id):
         def generate():
