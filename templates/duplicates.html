@@ -57,7 +57,8 @@
             <span class="value" style="color: #17a2b8;">{{ (total_size_move / (1024**2))|round(2) }} MB</span>
         </div>
     </div>
-    <div class="mb-3">
+    <div class="mb-3 d-flex align-items-center gap-2 flex-wrap">
+        <button id="moveSelectedBtn" class="btn-move-all">Move Selected</button>
         <button id="moveAllBtn" class="btn-move-all">Move All Duplicates</button>
         <span id="status-all" class="status-msg"></span>
     </div>
@@ -75,14 +76,21 @@
     <div id="duplicateGroups">
         {% for group in duplicates %}
             {% set best = group|sort(attribute='size', reverse=True)|first %}
-            <div class="duplicate-group" id="group-{{ loop.index0 }}">
-                <div class="group-title">
-                    Group #{{ loop.index }} ({{ group|length }} files)
+            <div class="duplicate-group" id="group-{{ loop.index0 }}" data-group-index="{{ loop.index0 }}">
+                <div class="group-title d-flex align-items-center gap-2 flex-wrap">
+                    <span>Group #{{ loop.index }} ({{ group|length }} files)</span>
+                    <button type="button" class="btn-mini" onclick="selectAllInGroup({{ loop.index0 }})">Select all</button>
+                    <button type="button" class="btn-mini" onclick="deselectAllInGroup({{ loop.index0 }})">Deselect all</button>
                     <button class="btn-move-group" data-group-index="{{ loop.index0 }}">Move duplicates (keep best)</button>
                     <span class="status-msg" id="status-{{ loop.index0 }}"></span>
                 </div>
                 {% for video in group %}
                     <div class="duplicate-file {% if video.id == best.id %}best-video{% endif %}">
+                        <input type="checkbox"
+                               class="dup-checkbox"
+                               data-group="{{ loop.parent.loop.index0 }}"
+                               data-video-id="{{ video.id }}"
+                               {% if video.id != best.id %}checked{% endif %}>
                         <div class="duplicate-preview-container">
                             {% set preview_url = url_for('video_file', video_id=video.id) %}
                             {% set ext = video.filename.split('.')[-1].lower() %}
@@ -119,111 +127,132 @@
 {% endif %}
 
 <script>
-    document.addEventListener('DOMContentLoaded', function() {
-        const urlParams = new URLSearchParams(window.location.search);
-        const taskId = urlParams.get('task_id');
-        if (taskId) {
-            startProgressMonitoring(taskId);
-        }
+(function () {
+    'use strict';
 
-        document.getElementById('refreshDuplicates')?.addEventListener('click', function() {
+    function getSelectedIds() {
+        return Array.from(document.querySelectorAll('.dup-checkbox:checked'))
+            .map(function (cb) { return parseInt(cb.dataset.videoId, 10); })
+            .filter(function (x) { return !isNaN(x); });
+    }
+
+    window.selectAllInGroup = function (idx) {
+        document.querySelectorAll('.dup-checkbox[data-group="' + idx + '"]')
+            .forEach(function (cb) { cb.checked = true; });
+    };
+    window.deselectAllInGroup = function (idx) {
+        document.querySelectorAll('.dup-checkbox[data-group="' + idx + '"]')
+            .forEach(function (cb) { cb.checked = false; });
+    };
+
+    document.addEventListener('DOMContentLoaded', function () {
+        var urlParams = new URLSearchParams(window.location.search);
+        var taskId = urlParams.get('task_id');
+        if (taskId) startProgressMonitoring(taskId);
+
+        document.getElementById('refreshDuplicates')?.addEventListener('click', function () {
             location.reload();
         });
 
         function startProgressMonitoring(taskId) {
-            const progressContainer = document.getElementById('progressContainer');
-            const progressFill = document.getElementById('progressFill');
-            const progressText = document.getElementById('progressText');
-            progressContainer.style.display = 'block';
-
-            const eventSource = new EventSource('/progress/' + taskId);
-            eventSource.onmessage = function(event) {
-                const data = JSON.parse(event.data);
+            var pc = document.getElementById('progressContainer');
+            var pf = document.getElementById('progressFill');
+            var pt = document.getElementById('progressText');
+            pc.style.display = 'block';
+            var es = new EventSource('/progress/' + taskId);
+            es.onmessage = function (event) {
+                var data = JSON.parse(event.data);
                 if (data.status === 'complete') {
-                    progressFill.style.width = '100%';
-                    progressText.textContent = '✅ ' + data.message;
-                    eventSource.close();
-                    const url = new URL(window.location.href);
+                    pf.style.width = '100%';
+                    pt.textContent = '✅ ' + data.message;
+                    es.close();
+                    var url = new URL(window.location.href);
                     url.searchParams.delete('task_id');
-                    setTimeout(() => window.location.href = url.toString(), 1000);
+                    setTimeout(function () { window.location.href = url.toString(); }, 1000);
                 } else if (data.status === 'error') {
-                    progressFill.style.width = '100%';
-                    progressFill.style.background = '#dc3545';
-                    progressText.textContent = '❌ Error: ' + data.message;
-                    eventSource.close();
-                    const url = new URL(window.location.href);
-                    url.searchParams.delete('task_id');
-                    setTimeout(() => window.location.href = url.toString(), 1000);
+                    pf.style.width = '100%';
+                    pf.style.background = '#dc3545';
+                    pt.textContent = '❌ Error: ' + data.message;
+                    es.close();
                 } else if (data.status === 'scanning') {
-                    progressFill.style.width = data.progress + '%';
-                    progressText.textContent = data.message + ' (' + data.progress + '%)';
+                    pf.style.width = data.progress + '%';
+                    pt.textContent = (data.message || '') + ' (' + data.progress + '%)';
                 } else {
-                    progressText.textContent = data.message || 'Unknown status';
+                    pt.textContent = data.message || 'Unknown status';
                 }
             };
-            eventSource.onerror = function() {
-                progressText.textContent = 'Connection lost. Please refresh the page.';
-                eventSource.close();
-                const url = new URL(window.location.href);
-                url.searchParams.delete('task_id');
-                setTimeout(() => window.location.href = url.toString(), 1000);
-            };
+            es.onerror = function () { es.close(); };
         }
 
-        const moveBtns = document.querySelectorAll('.btn-move-group');
-        moveBtns.forEach(btn => {
-            btn.addEventListener('click', function() {
-                const groupIndex = this.dataset.groupIndex;
-                const statusSpan = document.getElementById('status-' + groupIndex);
+        // Move Selected
+        var moveSelectedBtn = document.getElementById('moveSelectedBtn');
+        if (moveSelectedBtn) {
+            moveSelectedBtn.addEventListener('click', function () {
+                var ids = getSelectedIds();
+                if (!ids.length) {
+                    document.getElementById('status-all').textContent = 'Nothing selected';
+                    return;
+                }
+                if (!confirm('Move ' + ids.length + ' selected file(s) to !Duplicates?')) return;
+                document.getElementById('status-all').textContent = 'Moving ' + ids.length + ' file(s)...';
+                fetch('/move_selected_duplicates', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({video_ids: ids})
+                })
+                .then(function (r) { return r.json(); })
+                .then(function (data) {
+                    document.getElementById('status-all').textContent = data.message || 'Done';
+                    if (data.success) setTimeout(function () { location.reload(); }, 1000);
+                })
+                .catch(function (err) {
+                    document.getElementById('status-all').textContent = 'Error: ' + err;
+                });
+            });
+        }
+
+        // Move group (keep best)
+        document.querySelectorAll('.btn-move-group').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                var gi = this.dataset.groupIndex;
+                var statusSpan = document.getElementById('status-' + gi);
                 statusSpan.textContent = 'Moving...';
                 fetch('/move_duplicates', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ group_index: parseInt(groupIndex) })
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({group_index: parseInt(gi, 10)})
                 })
-                .then(response => response.json())
-                .then(data => {
+                .then(function (r) { return r.json(); })
+                .then(function (data) {
+                    statusSpan.textContent = data.message;
                     if (data.success) {
-                        statusSpan.textContent = data.message;
-                        const groupDiv = document.getElementById('group-' + groupIndex);
+                        var groupDiv = document.getElementById('group-' + gi);
                         if (groupDiv) groupDiv.style.display = 'none';
-                        setTimeout(() => location.reload(), 1000);
-                    } else {
-                        statusSpan.textContent = 'Error: ' + data.message;
+                        setTimeout(function () { location.reload(); }, 1000);
                     }
                 })
-                .catch(err => {
-                    statusSpan.textContent = 'Error: ' + err;
-                });
+                .catch(function (err) { statusSpan.textContent = 'Error: ' + err; });
             });
         });
 
-        const moveAllBtn = document.getElementById('moveAllBtn');
-        const statusAll = document.getElementById('status-all');
+        // Move all
+        var moveAllBtn = document.getElementById('moveAllBtn');
         if (moveAllBtn) {
-            moveAllBtn.addEventListener('click', function() {
-                statusAll.textContent = 'Moving all groups...';
-                fetch('/move_all_duplicates', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+            moveAllBtn.addEventListener('click', function () {
+                if (!confirm('Move ALL duplicates (keep best of each group)?')) return;
+                document.getElementById('status-all').textContent = 'Moving all...';
+                fetch('/move_all_duplicates', {method: 'POST', headers: {'Content-Type': 'application/json'}})
+                .then(function (r) { return r.json(); })
+                .then(function (data) {
+                    document.getElementById('status-all').textContent = data.message;
+                    if (data.success) setTimeout(function () { location.reload(); }, 1000);
                 })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success) {
-                        statusAll.textContent = data.message;
-                        document.querySelectorAll('.duplicate-group').forEach(el => {
-                            el.style.display = 'none';
-                        });
-                        setTimeout(() => location.reload(), 1000);
-                    } else {
-                        statusAll.textContent = 'Error: ' + data.message;
-                    }
-                })
-                .catch(err => {
-                    statusAll.textContent = 'Error: ' + err;
+                .catch(function (err) {
+                    document.getElementById('status-all').textContent = 'Error: ' + err;
                 });
             });
         }
     });
+})();
 </script>
 {% endblock %}
