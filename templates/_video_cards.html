@@ -1,7 +1,7 @@
 {% for video in videos %}
-<div class="col-md-4 col-sm-6 col-6 mb-3 video-card" 
-     data-video-id="{{ video.id }}" 
-     onclick="window.location.href='/watch/{{ video.id }}?profile={{ current_profile }}'">
+<div class="col-md-4 col-sm-6 col-6 mb-3 video-card"
+     data-video-id="{{ video.id }}"
+     onclick="window.location.href='{{ url_for('watch', video_id=video.id, profile=current_profile, sort=(sort if sort is defined else 'date'), search=(search if search is defined else ''), folder=(folder if folder is defined else '')) }}{% for c in (selected_categories if selected_categories is defined else []) %}&category={{ c }}{% endfor %}'">
     <div class="card h-100">
         <div class="video-wrapper">
             <img class="video-thumbnail"

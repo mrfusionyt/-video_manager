@@ -15,6 +15,11 @@
      • бегущая строка для длинных названий плейлистов
 
    Конфиг приходит из окна как window.WATCH_CONFIG.
+
+   Лента (feed) строится в том же порядке, что и список на
+   странице index с учётом sort / search / folder / category.
+   При переходе на следующее видео все эти параметры
+   передаются в URL — см. buildWatchQuery().
    ============================================================ */
 (function () {
     'use strict';
@@ -24,6 +29,11 @@
     var FEED_IDS = CFG.feedIds || [];
     var CURRENT_PROFILE = CFG.currentProfile || 'female';
     var ALL_CATEGORIES = CFG.allCategories || [];
+
+    var FEED_SORT = CFG.sort || 'date';
+    var FEED_SEARCH = CFG.search || '';
+    var FEED_FOLDER = CFG.folder || '';
+    var FEED_CATEGORIES = CFG.selectedCategories || [];
 
     var currentVideoId = CFG.videoId;
     var currentFeedIndex = CFG.feedIndex || 0;
@@ -68,6 +78,24 @@
         rate: 1.0,
         loop: false
     };
+
+    /* ====== СБОРКА QUERY ДЛЯ URL /watch/<id> ====== */
+    function buildWatchQuery() {
+        var parts = ['profile=' + encodeURIComponent(CURRENT_PROFILE)];
+        if (FEED_SORT && FEED_SORT !== 'date') {
+            parts.push('sort=' + encodeURIComponent(FEED_SORT));
+        }
+        if (FEED_SEARCH) {
+            parts.push('search=' + encodeURIComponent(FEED_SEARCH));
+        }
+        if (FEED_FOLDER) {
+            parts.push('folder=' + encodeURIComponent(FEED_FOLDER));
+        }
+        for (var i = 0; i < FEED_CATEGORIES.length; i++) {
+            parts.push('category=' + encodeURIComponent(FEED_CATEGORIES[i]));
+        }
+        return parts.join('&');
+    }
 
     /* ====== DOM ====== */
     var wrapper = document.getElementById('videoWrapper');
@@ -408,12 +436,12 @@
         window.history.pushState(
             { videoId: currentVideoId, feedIndex: currentFeedIndex },
             '',
-            '/watch/' + currentVideoId + '?profile=' + CURRENT_PROFILE
+            '/watch/' + currentVideoId + '?' + buildWatchQuery()
         );
 
         updateScrubSrc(currentVideoId);
 
-        fetch('/watch/' + currentVideoId + '?profile=' + CURRENT_PROFILE, {
+        fetch('/watch/' + currentVideoId + '?' + buildWatchQuery(), {
             headers: { 'X-Requested-With': 'XMLHttpRequest' }
         })
             .then(function (r) { return r.text(); })

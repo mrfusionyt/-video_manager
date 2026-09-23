@@ -373,6 +373,10 @@ window.WATCH_CONFIG = {
     videoCategoryIds: {{ video.categories | map(attribute='id') | list | tojson }},
     initialRating: {{ video.rating|default(0)|int }},
     feedIndex: {{ feed_index }},
+    sort: {{ sort|tojson }},
+    search: {{ search|tojson }},
+    folder: {{ folder|tojson }},
+    selectedCategories: {{ category_ids|tojson }},
     icons: {
         play:    "{{ url_for('serve_image', filename='play.png') }}",
         pause:   "{{ url_for('serve_image', filename='pause.png') }}",

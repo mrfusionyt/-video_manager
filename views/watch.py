@@ -20,6 +20,7 @@ from models import (
 )
 from config import ITEMS_PER_PAGE
 from helpers.profiles import get_current_profile, profile_to_mode
+from helpers.video_filter import process_videos
 from converter import (
     needs_conversion,
     convert_video_in_place,
@@ -178,31 +179,49 @@ def register(app):
         if not video:
             abort(404)
 
-        folder = request.args.get('folder')
+        # ---------- Фильтры/сортировка из URL ----------
+        sort = request.args.get('sort', 'date')
+        search = request.args.get('search', '').strip()
+        folder = request.args.get('folder', '')
+        category_ids = request.args.getlist('category', type=int)
 
         if folder:
-            all_videos = get_all_videos(
-                mode=current_mode, sort_by='filename', folder=folder,
-            )
-        else:
-            all_videos = get_all_videos(
-                mode=current_mode, sort_by='filename',
-            )
+            folder = os.path.normpath(folder)
 
+        # ---------- Полный отфильтрованный список ----------
+        # Используем ту же логику, что и в index() / load_more().
+        search_lc = search.lower()
+        if search_lc:
+            all_videos = get_all_videos(mode=None)
+        else:
+            all_videos = get_all_videos(mode=current_mode)
+
+        if folder:
+            all_videos = [v for v in all_videos if v.get('folder') == folder]
+        if search_lc:
+            all_videos = [v for v in all_videos
+                          if search_lc in v['filename'].lower()]
+
+        all_videos = process_videos(all_videos, category_ids, sort)
+
+        # ---------- Формируем feed_ids ----------
         feed_ids = [v['id'] for v in all_videos]
         if video_id not in feed_ids:
+            # Если по фильтрам текущее видео не попало в список —
+            # ставим его первым, остальные — как есть.
             all_videos = [video] + all_videos
             feed_ids = [v['id'] for v in all_videos]
 
+        # ---------- Recommendations ----------
         video_categories = video.get('categories', [])
-        category_ids = [cat['id'] for cat in video_categories]
+        video_cat_ids = [cat['id'] for cat in video_categories]
 
         recommendations = []
         for v in all_videos:
             if v['id'] == video_id:
                 continue
             v_cat_ids = [c['id'] for c in v.get('categories', [])]
-            common = set(category_ids) & set(v_cat_ids)
+            common = set(video_cat_ids) & set(v_cat_ids)
             if common:
                 recommendations.append(v)
 
@@ -233,4 +252,8 @@ def register(app):
             total_recs=total_recs,
             feed_ids=feed_ids,
             feed_index=feed_index,
+            sort=sort,
+            search=search,
+            folder=folder,
+            category_ids=category_ids,
         )
