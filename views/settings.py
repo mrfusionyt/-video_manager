@@ -38,14 +38,38 @@ from duplicate_finder import (
 )
 
 
+def _duplicates_stats(groups):
+    """Считает total_* для шаблона."""
+    total_files = 0
+    total_keep = 0
+    total_move = 0
+    total_size_keep = 0
+    total_size_move = 0
+    for g in groups:
+        files = g.get('files', []) if isinstance(g, dict) else g
+        if not files:
+            continue
+        best = max(files, key=lambda v: v.get('size', 0))
+        total_files += len(files)
+        total_keep += 1
+        total_move += len(files) - 1
+        total_size_keep += best.get('size', 0)
+        for v in files:
+            if v['id'] != best['id']:
+                total_size_move += v.get('size', 0)
+    return {
+        'total_files': total_files,
+        'total_keep': total_keep,
+        'total_move': total_move,
+        'total_size_keep': total_size_keep,
+        'total_size_move': total_size_move,
+    }
+
+
 def register(app):
 
     @app.route('/settings', methods=['GET', 'POST'])
     def settings():
-        # Профиль читаем в первую очередь из request.values
-        # (args + form). Это критично для POST-запросов, где profile
-        # приходит только в форме — иначе get_current_profile()
-        # вернёт профиль по умолчанию и редирект «переключит» профиль.
         current_profile = request.values.get('profile') or get_current_profile()
         current_mode = profile_to_mode(current_profile)
         tab = request.values.get('tab') or request.args.get('tab') or 'libraries'
@@ -103,7 +127,7 @@ def register(app):
             elif action == 'start_duplicate_scan':
                 filters = request.form.getlist('media_types')
                 if not filters:
-                    filters = ['video', 'audio', 'image']
+                    filters = ['video', 'image']
                 new_task_id = str(uuid.uuid4())
                 find_duplicates_async(new_task_id, filters)
                 return redirect(url_for('settings', tab='duplicates',
@@ -113,30 +137,11 @@ def register(app):
 
         if tab == 'duplicates':
             duplicates = get_duplicate_groups()
-            total_files = 0
-            total_keep = 0
-            total_move = 0
-            total_size_keep = 0
-            total_size_move = 0
-            for group in duplicates:
-                if not group:
-                    continue
-                best = max(group, key=lambda v: v.get('size', 0))
-                total_files += len(group)
-                total_keep += 1
-                total_move += len(group) - 1
-                total_size_keep += best.get('size', 0)
-                for video in group:
-                    if video['id'] != best['id']:
-                        total_size_move += video.get('size', 0)
+            stats = _duplicates_stats(duplicates)
             return render_template('duplicates.html',
                                    duplicates=duplicates,
-                                   total_files=total_files,
-                                   total_keep=total_keep,
-                                   total_move=total_move,
-                                   total_size_keep=total_size_keep,
-                                   total_size_move=total_size_move,
-                                   task_id=task_id)
+                                   task_id=task_id,
+                                   **stats)
         elif tab == 'stats':
             stats_female = get_stats(mode=1) or {
                 'total_videos': 0, 'total_categories': 0,

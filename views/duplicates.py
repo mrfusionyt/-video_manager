@@ -1,10 +1,26 @@
-"""Роуты дубликатов: перемещение выбранных / одной группы / всех групп."""
-from flask import request, jsonify
+"""Роуты дубликатов: сравнение, перемещение выбранных/группы/всех."""
+from flask import request, jsonify, render_template, abort
 
-from duplicate_finder import move_group, move_all_groups, move_selected
+from duplicate_finder import (
+    move_group, move_all_groups, move_selected, get_duplicate_groups,
+)
+from helpers.profiles import get_current_profile
 
 
 def register(app):
+
+    @app.route('/compare/<int:group_index>')
+    def compare_group(group_index):
+        groups = get_duplicate_groups()
+        if group_index < 0 or group_index >= len(groups):
+            abort(404)
+        group = groups[group_index]
+        return render_template(
+            'compare.html',
+            group=group,
+            group_index=group_index,
+            current_profile=get_current_profile(),
+        )
 
     @app.route('/move_selected_duplicates', methods=['POST'])
     def move_selected_duplicates():

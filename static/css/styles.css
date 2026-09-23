@@ -251,8 +251,6 @@ a:hover { color: #b0d0ff; }
 
 /* ============================================================
    4. WATCH: ПЛЕЕР (вертикальная карусель через .vp-strip)
-   ---- Привязка к .watch-container, чтобы не влиять на карточки
-        на главной, у которых тоже class="video-wrapper".
    ============================================================ */
 
 .watch-container { margin-top: 0; }
@@ -268,7 +266,6 @@ a:hover { color: #b0d0ff; }
     aspect-ratio: 16 / 9;
 }
 
-/* ---------- Полоса слайдов (вертикальная карусель) ---------- */
 .vp-strip {
     position: absolute;
     inset: 0;
@@ -303,7 +300,6 @@ a:hover { color: #b0d0ff; }
     -webkit-backface-visibility: hidden;
 }
 
-/* Fullscreen */
 .watch-container .video-wrapper:fullscreen,
 .watch-container .video-wrapper:-webkit-full-screen,
 .watch-container .video-wrapper:-moz-full-screen,
@@ -338,7 +334,6 @@ a:hover { color: #b0d0ff; }
 }
 .watch-container .video-wrapper.show-controls .custom-controls { opacity: 1; pointer-events: auto; }
 
-/* ---------- ЕДИНАЯ ЛИНИЯ ВЫРАВНИВАНИЯ ВСЕХ КНОПОК + ТАЙМЛАЙНА ---------- */
 .custom-controls .controls-row {
     display: flex;
     align-items: center;
@@ -388,7 +383,6 @@ a:hover { color: #b0d0ff; }
     pointer-events: none;
 }
 
-/* ---------- Таймлайн ---------- */
 .custom-controls .progress-container {
     flex: 1;
     display: flex;
@@ -421,7 +415,6 @@ a:hover { color: #b0d0ff; }
     margin: 0;
 }
 
-/* ---------- Тултип-превью кадра ---------- */
 .scrub-tooltip {
     position: absolute;
     bottom: calc(100% + 14px);
@@ -534,7 +527,6 @@ img#starIcon.inactive { filter: grayscale(1) brightness(0.55); opacity: 0.75; }
 
 /* ============================================================
    6. WATCH: РЕЙТИНГ + BOTTOM SHEET
-   ---- Радиус панели рейтинга = 6px (как всё остальное).
    ============================================================ */
 
 .rating-panel {
@@ -714,7 +706,6 @@ img#starIcon.inactive { filter: grayscale(1) brightness(0.55); opacity: 0.75; }
 
     .custom-controls { padding: 12px 14px 8px 14px; }
 
-    /* Мобильные: та же единая линия, кнопки чуть больше */
     .custom-controls .controls-row {
         gap: 8px;
         height: var(--ctrl-btn-size-mobile);
@@ -734,10 +725,8 @@ img#starIcon.inactive { filter: grayscale(1) brightness(0.55); opacity: 0.75; }
     }
     .custom-controls .controls-row #nextBtn { display: none !important; }
 
-    /* Мобильное: скрываем тултип-превью (touch не даёт hover) */
     .scrub-tooltip { display: none !important; }
 
-    /* Рейтинг-панель на мобильном — тоже 6px */
     .rating-panel {
         border-radius: var(--radius);
         padding: 8px 12px;
@@ -841,7 +830,6 @@ img#starIcon.inactive { filter: grayscale(1) brightness(0.55); opacity: 0.75; }
     .folder-card .cover-btn img { width: 18px; height: 18px; }
 }
 
-/* .edit-modal-content — унифицирован под обычную модалку */
 .edit-modal-content { background: var(--bg-surface); color: var(--text-primary); border: none; border-radius: var(--radius); box-shadow: var(--shadow-modal); }
 .edit-modal-content .modal-header { background: transparent; color: var(--text-primary); border-bottom: 1px solid var(--border); border-radius: var(--radius) var(--radius) 0 0; padding: 1rem; }
 .edit-modal-content .modal-header .modal-title { font-weight: 500; color: var(--text-primary); }
@@ -855,7 +843,6 @@ img#starIcon.inactive { filter: grayscale(1) brightness(0.55); opacity: 0.75; }
 .edit-modal-content .btn-secondary { background: #6c757d; border-color: #6c757d; color: #fff; }
 .edit-modal-content .btn-secondary:hover { background: #5a6268; border-color: #5a6268; color: #fff; }
 
-/* Общий стиль выбора обложки (folders / artist / playlist) */
 .cover-grid, .cover-picker {
     max-height: 55vh;
     overflow-y: auto;
@@ -1028,7 +1015,6 @@ textarea.form-control-dark::placeholder { color: #aaa !important; }
 
 /* ============================================================
    16. DUPLICATES
-   ---- Классы .dup-* чтобы не конфликтовать с плеером ----
    ============================================================ */
 
 .duplicate-group { background: var(--bg-surface); border-radius: var(--radius); padding: 0.75rem; margin-bottom: 1rem; }
@@ -1044,18 +1030,31 @@ textarea.form-control-dark::placeholder { color: #aaa !important; }
     padding: 2px 8px;
     border-radius: var(--radius);
     cursor: pointer;
+    text-decoration: none;
 }
 .btn-mini:hover { background: var(--bg-subtle); color: #fff; }
 
+.reason-badge {
+    display: inline-block;
+    padding: 1px 8px;
+    border-radius: var(--radius-pill);
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    text-transform: lowercase;
+    color: #fff;
+}
+.reason-badge.video { background: var(--red); }
+.reason-badge.audio { background: #0d6efd; }
+.reason-badge.both  { background: linear-gradient(90deg, var(--red), #0d6efd); }
+
 .dup-checkbox {
-    width: 18px;
-    height: 18px;
+    width: 18px; height: 18px;
     accent-color: var(--red);
     cursor: pointer;
     margin-right: 8px;
     flex-shrink: 0;
 }
-
 .duplicate-file {
     display: flex; align-items: center; gap: 0.6rem;
     padding: 0.4rem 0.5rem;
@@ -1073,10 +1072,15 @@ textarea.form-control-dark::placeholder { color: #aaa !important; }
     border-radius: var(--radius); background: #000;
     cursor: pointer;
 }
+.duplicate-preview.placeholder-q {
+    display: flex; align-items: center; justify-content: center;
+    color: #888;
+}
 
 .duplicate-info { flex: 1; min-width: 0; }
 .duplicate-info .filename { color: var(--text-primary); word-break: break-all; }
 .duplicate-info .size { color: var(--text-muted); font-size: 0.8rem; }
+.duplicate-info .path { font-size: 0.7rem; color: #888; word-break: break-all; }
 
 .dup-actions { flex-shrink: 0; }
 
@@ -1085,7 +1089,7 @@ textarea.form-control-dark::placeholder { color: #aaa !important; }
     padding: 0.25rem 0.75rem; border-radius: var(--radius);
     cursor: pointer; transition: background var(--tr);
 }
-.btn-move-group:hover { background: var(--red-hover); color: #fff; }
+.btn-move-group:hover { background: var(--red-hover); }
 
 .btn-move-all {
     background: var(--green) !important; border: none !important;
@@ -1121,6 +1125,7 @@ textarea.form-control-dark::placeholder { color: #aaa !important; }
     .duplicate-file { flex-wrap: wrap; }
     .duplicate-info .path { display: none; }
 }
+
 
 /* ============================================================
    17. EDIT_VIDEO
@@ -1172,12 +1177,9 @@ textarea.form-control-dark::placeholder { color: #aaa !important; }
 @media (max-width: 768px) { .profile-row .stat-card { flex: 1 1 calc(50% - 1rem); } }
 @media (max-width: 576px) { .profile-row .stat-card { flex: 1 1 100%; } }
 
+
 /* ============================================================
    20. HOVER-PREVIEW (thumbnails + ленивое <video>)
-   ------------------------------------------------------------
-   На карточках показывается <img class="video-thumbnail">.
-   При наведении мыши JS создаёт <video class="hover-preview">
-   поверх картинки — см. static/js/preview_hover.js.
    ============================================================ */
 
 .video-thumbnail {
@@ -1209,8 +1211,81 @@ textarea.form-control-dark::placeholder { color: #aaa !important; }
     opacity: 1;
 }
 
-/* ---- z-index fix: оверлеи и кнопки поверх hover-preview ---- */
 .artist-card .overlay   { z-index: 2; }
 .artist-card .actions   { z-index: 3; }
 .video-tile .vname      { z-index: 2; }
 .video-tile .vremove    { z-index: 3; }
+
+
+/* ============================================================
+   21. COMPARE PLAYER
+   ============================================================ */
+
+.compare-toolbar {
+    display: flex; flex-wrap: wrap; align-items: center;
+    justify-content: space-between; gap: 10px;
+    background: var(--bg-surface);
+    border-radius: var(--radius);
+    padding: 10px 14px;
+    margin-bottom: 12px;
+}
+.compare-info { color: var(--text-primary); font-size: 0.9rem; }
+.compare-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+
+.compare-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 12px;
+}
+.compare-grid[data-count="1"] { grid-template-columns: 1fr; }
+.compare-grid[data-count="2"] { grid-template-columns: 1fr 1fr; }
+.compare-grid[data-count="3"] { grid-template-columns: 1fr 1fr 1fr; }
+.compare-grid[data-count="4"] { grid-template-columns: 1fr 1fr; }
+
+.compare-cell {
+    background: var(--bg-surface);
+    border-radius: var(--radius);
+    overflow: hidden;
+    display: flex; flex-direction: column;
+    min-width: 0;
+}
+.compare-header {
+    padding: 8px 12px;
+    display: flex; flex-direction: column;
+    border-bottom: 1px solid var(--border);
+}
+.compare-name {
+    color: var(--text-primary);
+    font-weight: 500;
+    font-size: 0.85rem;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.compare-meta { color: var(--text-muted); font-size: 0.75rem; margin-top: 2px; }
+
+.compare-media { background: #000; flex: 1; display: flex; align-items: center; justify-content: center; }
+.compare-video {
+    width: 100%; max-height: 70vh;
+    object-fit: contain;
+    background: #000;
+    display: block;
+}
+.compare-video.placeholder-q { height: 200px; color: #888; }
+
+.compare-controls {
+    padding: 6px 10px;
+    display: flex; align-items: center; gap: 10px;
+    flex-wrap: wrap;
+    border-top: 1px solid var(--border);
+    color: var(--text-muted);
+    font-size: 0.8rem;
+}
+.compare-controls .cb-mute { accent-color: var(--red); margin-right: 4px; }
+.compare-controls .rg-vol { width: 90px; accent-color: var(--red); }
+.compare-controls .compare-time { margin-left: auto; font-variant-numeric: tabular-nums; }
+
+@media (max-width: 900px) {
+    .compare-grid,
+    .compare-grid[data-count="2"],
+    .compare-grid[data-count="3"],
+    .compare-grid[data-count="4"] { grid-template-columns: 1fr; }
+}

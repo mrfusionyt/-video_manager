@@ -1,0 +1,167 @@
+{% extends "base.html" %}
+
+{% block title %}Compare group #{{ group_index + 1 }}{% endblock %}
+{% block page_title %}Compare duplicates{% endblock %}
+
+{% block content %}
+{% set files = group.files if group is mapping else group %}
+{% set reason = group.reason if group is mapping else 'video' %}
+{% set video_files = files | selectattr('media_type', 'equalto', 'video') | list %}
+{% set image_files = files | selectattr('media_type', 'equalto', 'image') | list %}
+
+<div class="compare-toolbar">
+    <div class="compare-info">
+        <b>Group #{{ group_index + 1 }}</b>
+        • {{ files|length }} files
+        • reason: <span class="reason-badge {{ reason }}">{{ reason }}</span>
+    </div>
+    <div class="compare-actions">
+        <button type="button" class="btn-mini" id="playAllBtn">▶ Play all</button>
+        <button type="button" class="btn-mini" id="pauseAllBtn">⏸ Pause all</button>
+        <button type="button" class="btn-mini" id="syncBtn" title="Выровнять по первому плееру и запустить">⟲ Sync</button>
+        <button type="button" class="btn-mini" id="muteAllBtn">🔇 Mute all</button>
+        <button type="button" class="btn-mini" id="unmuteAllBtn">🔊 Unmute all</button>
+        <a href="{{ url_for('settings', tab='duplicates', profile=current_profile) }}" class="btn-mini">← Back</a>
+    </div>
+</div>
+
+<div class="compare-grid" data-count="{{ video_files|length + image_files|length }}">
+    {% for v in files %}
+        {% set ext = (v.filename or '').split('.')[-1].lower() %}
+        {% set is_video = ext in ['mp4','avi','mkv','mov','wmv','flv','webm','m4v','mpg','mpeg'] %}
+        <div class="compare-cell" data-video-id="{{ v.id }}">
+            <div class="compare-header">
+                <span class="compare-name" title="{{ v.filepath }}">{{ v.filename }}</span>
+                <span class="compare-meta">
+                    {{ (v.size / (1024**2))|round(2) }} MB
+                    {% if v.duration %} • {{ (v.duration // 60) }}:{{ '%02d' % (v.duration % 60) }}{% endif %}
+                </span>
+            </div>
+
+            <div class="compare-media">
+                {% if is_video %}
+                    <video class="compare-video"
+                           src="{{ url_for('video_file', video_id=v.id) }}"
+                           preload="metadata" playsinline muted
+                           controls></video>
+                {% elif ext in ['jpg','jpeg','png','bmp','gif','tiff','webp'] %}
+                    <img class="compare-video" src="{{ url_for('video_file', video_id=v.id) }}"
+                         alt="{{ v.filename }}">
+                {% else %}
+                    <div class="compare-video placeholder-q">?</div>
+                {% endif %}
+            </div>
+
+            <div class="compare-controls">
+                <label class="compare-mute">
+                    <input type="checkbox" class="cb-mute" data-video-id="{{ v.id }}"> mute
+                </label>
+                <label class="compare-vol">
+                    vol <input type="range" class="rg-vol" min="0" max="1" step="0.05" value="1"
+                              data-video-id="{{ v.id }}">
+                </label>
+                <span class="compare-time">0:00 / 0:00</span>
+            </div>
+        </div>
+    {% endfor %}
+</div>
+
+<script>
+(function () {
+    'use strict';
+
+    var cells = Array.from(document.querySelectorAll('.compare-cell'));
+    var videos = cells
+        .map(function (c) { return c.querySelector('video.compare-video'); })
+        .filter(function (v) { return !!v; });
+
+    function fmt(t) {
+        if (!isFinite(t) || t < 0) t = 0;
+        var m = Math.floor(t / 60);
+        var s = Math.floor(t % 60);
+        return m + ':' + (s < 10 ? '0' : '') + s;
+    }
+
+    // ---- отображение времени ----
+    videos.forEach(function (v) {
+        var cell = v.closest('.compare-cell');
+        var timeEl = cell.querySelector('.compare-time');
+        function update() {
+            timeEl.textContent = fmt(v.currentTime) + ' / ' + fmt(v.duration);
+        }
+        v.addEventListener('timeupdate', update);
+        v.addEventListener('loadedmetadata', update);
+        update();
+    });
+
+    // ---- mute checkbox ----
+    document.querySelectorAll('.cb-mute').forEach(function (cb) {
+        cb.addEventListener('change', function () {
+            var v = document.querySelector(
+                'video[src*="/video/' + this.dataset.videoId + '"]');
+            if (v) v.muted = this.checked;
+        });
+    });
+
+    // ---- volume slider ----
+    document.querySelectorAll('.rg-vol').forEach(function (rg) {
+        rg.addEventListener('input', function () {
+            var v = document.querySelector(
+                'video[src*="/video/' + this.dataset.videoId + '"]');
+            if (v) v.volume = parseFloat(this.value);
+        });
+    });
+
+    // ---- Play/Pause all ----
+    document.getElementById('playAllBtn').addEventListener('click', function () {
+        videos.forEach(function (v) { v.play().catch(function () {}); });
+    });
+    document.getElementById('pauseAllBtn').addEventListener('click', function () {
+        videos.forEach(function (v) { v.pause(); });
+    });
+    document.getElementById('muteAllBtn').addEventListener('click', function () {
+        videos.forEach(function (v) { v.muted = true; });
+        document.querySelectorAll('.cb-mute').forEach(function (cb) { cb.checked = true; });
+    });
+    document.getElementById('unmuteAllBtn').addEventListener('click', function () {
+        videos.forEach(function (v) { v.muted = false; });
+        document.querySelectorAll('.cb-mute').forEach(function (cb) { cb.checked = false; });
+    });
+
+    // ---- Sync — выставляет одинаковый currentTime по первому видео ----
+    document.getElementById('syncBtn').addEventListener('click', function () {
+        if (!videos.length) return;
+        var t = videos[0].currentTime || 0;
+        videos.forEach(function (v, i) {
+            if (i === 0) return;
+            try { v.currentTime = t; } catch (e) {}
+        });
+        videos.forEach(function (v) { v.play().catch(function () {}); });
+    });
+
+    // ---- Клик по видео — play/pause ----
+    videos.forEach(function (v) {
+        v.addEventListener('click', function (e) {
+            // Пропускаем клик по нативным контролам
+            if (e.offsetY > v.clientHeight - 40) return;
+            if (v.paused) v.play().catch(function () {});
+            else v.pause();
+        });
+    });
+
+    // Горячие клавиши
+    document.addEventListener('keydown', function (e) {
+        if (e.target.tagName === 'INPUT') return;
+        if (e.code === 'Space') {
+            e.preventDefault();
+            var anyPlaying = videos.some(function (v) { return !v.paused; });
+            if (anyPlaying) videos.forEach(function (v) { v.pause(); });
+            else videos.forEach(function (v) { v.play().catch(function () {}); });
+        }
+        if (e.key === 's' || e.key === 'S') {
+            document.getElementById('syncBtn').click();
+        }
+    });
+})();
+</script>
+{% endblock %}

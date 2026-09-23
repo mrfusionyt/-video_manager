@@ -52,10 +52,6 @@
             <span class="label">Size to move</span>
             <span class="value red">{{ (total_size_move / (1024**2))|round(2) }} MB</span>
         </div>
-        <div class="stats-item">
-            <span class="label">Space saved</span>
-            <span class="value" style="color: #17a2b8;">{{ (total_size_move / (1024**2))|round(2) }} MB</span>
-        </div>
     </div>
     <div class="mb-3 d-flex align-items-center gap-2 flex-wrap">
         <button id="moveSelectedBtn" class="btn-move-all">Move Selected</button>
@@ -76,16 +72,32 @@
     <div id="duplicateGroups">
         {% for group in duplicates %}
             {% set outer_idx = loop.index0 %}
-            {% set best = group|sort(attribute='size', reverse=True)|first %}
+            {% set files = group.files if group is mapping else group %}
+            {% set reason = group.reason if group is mapping else 'video' %}
+            {% set best = files|sort(attribute='size', reverse=True)|first %}
+
             <div class="duplicate-group" id="group-{{ outer_idx }}" data-group-index="{{ outer_idx }}">
                 <div class="group-title">
-                    <span>Group #{{ loop.index }} ({{ group|length }} files)</span>
+                    <span>Group #{{ loop.index }} ({{ files|length }} files)</span>
+                    {% if reason == 'video' %}
+                        <span class="reason-badge video" title="Совпал видеокадр">video</span>
+                    {% elif reason == 'audio' %}
+                        <span class="reason-badge audio" title="Совпала аудиодорожка">audio</span>
+                    {% elif reason == 'video+audio' %}
+                        <span class="reason-badge both" title="Совпали видео и аудио">video+audio</span>
+                    {% endif %}
+
+                    <a class="btn-mini" href="{{ url_for('compare_group', group_index=outer_idx, profile=current_profile) }}"
+                       target="_blank" title="Открыть сравнительный плеер">
+                        ▶ Compare
+                    </a>
                     <button type="button" class="btn-mini" onclick="selectAllInGroup({{ outer_idx }})">Select all</button>
                     <button type="button" class="btn-mini" onclick="deselectAllInGroup({{ outer_idx }})">Deselect all</button>
                     <button class="btn-move-group" data-group-index="{{ outer_idx }}">Move duplicates (keep best)</button>
                     <span class="status-msg" id="status-{{ outer_idx }}"></span>
                 </div>
-                {% for video in group %}
+
+                {% for video in files %}
                     <div class="duplicate-file {% if video.id == best.id %}best-video{% endif %}">
                         <input type="checkbox"
                                class="dup-checkbox"
@@ -95,7 +107,7 @@
 
                         <div class="duplicate-preview-container">
                             {% set ext = (video.filename or '').split('.')[-1].lower() %}
-                            {% if ext in ['mp4', 'avi', 'mkv', 'mov', 'wmv', 'flv', 'webm', 'm4v', 'mpg', 'mpeg'] %}
+                            {% if ext in ['mp4','avi','mkv','mov','wmv','flv','webm','m4v','mpg','mpeg'] %}
                                 <a href="{{ url_for('watch', video_id=video.id, profile=current_profile) }}"
                                    target="_blank" title="Open video">
                                     <img class="duplicate-preview"
@@ -103,7 +115,7 @@
                                          alt="{{ video.filename }}"
                                          loading="lazy">
                                 </a>
-                            {% elif ext in ['jpg', 'jpeg', 'png', 'bmp', 'gif', 'tiff', 'webp'] %}
+                            {% elif ext in ['jpg','jpeg','png','bmp','gif','tiff','webp'] %}
                                 <a href="{{ url_for('video_file', video_id=video.id) }}"
                                    target="_blank" title="Open image">
                                     <img class="duplicate-preview"
@@ -112,7 +124,7 @@
                                          loading="lazy">
                                 </a>
                             {% else %}
-                                <div class="duplicate-preview" style="display:flex;align-items:center;justify-content:center;color:#888;">?</div>
+                                <div class="duplicate-preview placeholder-q">?</div>
                             {% endif %}
                         </div>
 
@@ -130,9 +142,7 @@
                                     • {{ (video.duration // 60) }}:{{ '%02d' % (video.duration % 60) }}
                                 {% endif %}
                             </div>
-                            <div class="path" style="font-size:0.7rem;color:#888;word-break:break-all;">
-                                {{ video.filepath }}
-                            </div>
+                            <div class="path">{{ video.filepath }}</div>
                         </div>
 
                         <div class="dup-actions">
@@ -206,7 +216,6 @@
             es.onerror = function () { es.close(); };
         }
 
-        // Move Selected
         var moveSelectedBtn = document.getElementById('moveSelectedBtn');
         if (moveSelectedBtn) {
             moveSelectedBtn.addEventListener('click', function () {
@@ -233,7 +242,6 @@
             });
         }
 
-        // Move group (keep best)
         document.querySelectorAll('.btn-move-group').forEach(function (btn) {
             btn.addEventListener('click', function () {
                 var gi = this.dataset.groupIndex;
@@ -257,7 +265,6 @@
             });
         });
 
-        // Move all
         var moveAllBtn = document.getElementById('moveAllBtn');
         if (moveAllBtn) {
             moveAllBtn.addEventListener('click', function () {
