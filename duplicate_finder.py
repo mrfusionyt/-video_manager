@@ -4,18 +4,16 @@ r"""
 Для каждого файла:
   • Извлекается ОДИН кадр на 50% длительности (для видео).
   • Считается phash + 3 зеркальные/перевёрнутые версии (4 хеша).
-  • Сравниваются ВСЕ 16 комбинаций хешей двух файлов
-    (orig↔orig, orig↔mirror, mirror↔flip, ... — все 4×4).
+  • Сравниваются ВСЕ 16 комбинаций хешей двух файлов.
   • Дубликат — если хоть одна пара имеет hamming distance <= THRESHOLD.
 
 Поиск идёт по всем видео в БД (все библиотеки).
 
-Кэш хэшей (hash_cache.json) — по (mtime, size), живёт на диске.
+Кэш хэшей (hash_cache.json) — по (mtime, size), на диске.
 """
 import os
 import json
 import threading
-import hashlib
 import shutil
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -33,8 +31,8 @@ DUPLICATE_CACHE_FILE = os.path.join(BASE_DIR, 'duplicates_cache.json')
 HASH_CACHE_FILE      = os.path.join(BASE_DIR, 'hash_cache.json')
 
 # ---------- Порог pHash ----------
-# 0 = точное совпадение (как в Finder.py, там это работало).
-# Если хочется ловить чуть перекодированные — поднять до 1–2.
+# 0 = точное совпадение (как в Finder.py).
+# 1-2 — если хотите ловить лёгкую перекодировку.
 THRESHOLD = 0
 
 
@@ -56,8 +54,12 @@ def _load_hash_cache():
     try:
         if os.path.exists(HASH_CACHE_FILE):
             with open(HASH_CACHE_FILE, 'r', encoding='utf-8') as f:
-                _HASH_CACHE = json.load(f) or {}
-            print(f"[dup] hash-cache loaded: {len(_HASH_CACHE)} entries")
+                raw = json.load(f) or {}
+            # Оставляем только записи с новой схемой ('hashes')
+            _HASH_CACHE = {k: v for k, v in raw.items()
+                           if isinstance(v, dict) and 'hashes' in v}
+            print(f"[dup] hash-cache loaded: {len(_HASH_CACHE)} "
+                  f"(из {len(raw)} записей)")
     except Exception as e:
         print(f"[hash-cache] load failed: {e}")
         _HASH_CACHE = {}
@@ -78,11 +80,7 @@ def _save_hash_cache():
 
 
 def _cache_fresh(entry, filepath):
-    if not entry:
-        return False
-    # Схема кеша: старая версия писала keyframe_hashes,
-    # новая — hashes. Старые записи принудительно пересчитываем.
-    if 'hashes' not in entry:
+    if not entry or 'hashes' not in entry:
         return False
     try:
         st = os.stat(filepath)
@@ -148,7 +146,6 @@ def _process_image(image_path):
 
 
 def _process_media(item, cache_lock):
-    """Возвращает dict с хешами или None."""
     filepath = item['filepath']
     if not os.path.exists(filepath):
         return None
@@ -189,14 +186,7 @@ def _process_media(item, cache_lock):
 #                     Сравнение — как в Finder.py
 # ===================================================================
 def _hashes_match(hashes_a, hashes_b, threshold):
-    """
-    ВСЕ 16 комбинаций (4×4).  Дубликат — если любая пара
-    имеет hamming distance <= threshold.
-
-    Это ключевое отличие от прежней версии: сравниваются все
-    комбинации orig/mirror/flip/hv между двумя файлами,
-    а не только позиция-в-позицию.
-    """
+    """ВСЕ 16 комбинаций (4×4)."""
     if not hashes_a or not hashes_b:
         return False
     objs_a = [imagehash.hex_to_hash(h) for h in hashes_a]
@@ -209,21 +199,11 @@ def _hashes_match(hashes_a, hashes_b, threshold):
 
 
 def _group_by_hashes(hashes_by_path, threshold):
-    """
-    Группировка — как в Finder.py, но с быстрым индексом.
-
-    При threshold == 0 используем hash-index:
-      hash-string -> [paths].
-    Это O(n) вместо O(n²).
-
-    При threshold > 0 — O(n²), но с ранним выходом.
-    """
     items = list(hashes_by_path.items())
     groups = []
     used = set()
 
     if threshold == 0:
-        # Быстрый путь: точное совпадение любого из 4 хешей
         hash_index = defaultdict(set)
         for path, hashes in items:
             for h in hashes:
@@ -241,15 +221,13 @@ def _group_by_hashes(hashes_by_path, threshold):
             for path_j in candidates:
                 if path_j in used:
                     continue
-                hashes_j = hashes_by_path[path_j]
-                if _hashes_match(hashes_i, hashes_j, threshold):
+                if _hashes_match(hashes_i, hashes_by_path[path_j], threshold):
                     group.append(path_j)
                     used.add(path_j)
             if len(group) > 1:
                 groups.append(group)
         return groups
 
-    # Медленный путь для threshold > 0
     for i, (path_i, hashes_i) in enumerate(items):
         if path_i in used:
             continue
@@ -293,8 +271,7 @@ def _find_duplicates_worker(task_id, filters):
         print(f"[dup] worker start")
         _load_hash_cache()
 
-        # ---------- Берём ВСЕ видео из БД (все библиотеки) ----------
-        all_items = get_all_videos()   # mode=None => все
+        all_items = get_all_videos()
         print(f"[dup] total in DB: {len(all_items)}")
 
         if filters:
@@ -316,12 +293,11 @@ def _find_duplicates_worker(task_id, filters):
             })
             return
 
-        # ---------- Хеширование в потоках ----------
         cache_lock = threading.Lock()
         processed = 0
         max_workers = min(4, os.cpu_count() or 1)
-        hashes_by_path = {}   # path -> [h_orig, h_mirror, h_flip, h_hv]
-        item_by_path = {}     # path -> video-dict
+        hashes_by_path = {}
+        item_by_path = {}
 
         def _job(item):
             return item, _process_media(item, cache_lock)
@@ -343,15 +319,23 @@ def _find_duplicates_worker(task_id, filters):
         _save_hash_cache()
         print(f"[dup] hashed {len(hashes_by_path)}/{total}")
 
-        # ---------- Группировка ----------
         scan_progress[task_id]['message'] = 'Grouping duplicates...'
         raw_groups = _group_by_hashes(hashes_by_path, THRESHOLD)
         print(f"[dup] raw groups: {len(raw_groups)}")
 
-        # Превращаем списки путей в списки video-dict
+        # Превращаем пути в video-dict.  Гарантируем, что у каждого
+        # элемента есть 'id' — иначе шаблон / move не сработает.
         groups = []
         for path_list in raw_groups:
-            group = [item_by_path[p] for p in path_list if p in item_by_path]
+            group = []
+            for p in path_list:
+                item = item_by_path.get(p)
+                if not item:
+                    continue
+                if 'id' not in item or item['id'] is None:
+                    print(f"[dup] WARN: item without id: {p}")
+                    continue
+                group.append(item)
             if len(group) > 1:
                 groups.append(group)
 
@@ -377,8 +361,9 @@ def _save_groups(groups):
     try:
         with open(DUPLICATE_CACHE_FILE, 'w', encoding='utf-8') as f:
             json.dump(groups, f,
-                      default=lambda o: o if isinstance(o, dict) else str(o),
+                      default=lambda o: o if isinstance(o, (dict, list)) else str(o),
                       indent=2)
+        print(f"[dup] saved {len(groups)} groups to cache")
     except Exception as e:
         print(f"[dup] save groups failed: {e}")
 
@@ -387,25 +372,42 @@ def _save_groups(groups):
 #                     Геттеры
 # ===================================================================
 def get_duplicate_groups():
+    """Возвращает список групп video-dict'ов."""
     global DUPLICATE_GROUPS
+
     if not DUPLICATE_GROUPS:
         try:
             with open(DUPLICATE_CACHE_FILE, 'r', encoding='utf-8') as f:
-                DUPLICATE_GROUPS = json.load(f) or []
+                raw = json.load(f) or []
         except (FileNotFoundError, json.JSONDecodeError):
-            DUPLICATE_GROUPS = []
+            raw = []
+        # Валидируем: группа — список dict'ов с 'id'
+        DUPLICATE_GROUPS = []
+        for group in raw:
+            if not isinstance(group, list):
+                continue
+            valid = []
+            for v in group:
+                if isinstance(v, dict) and v.get('id') is not None:
+                    valid.append(v)
+            if len(valid) >= 2:
+                DUPLICATE_GROUPS.append(valid)
+        print(f"[dup] loaded {len(DUPLICATE_GROUPS)} groups from cache")
 
     if not DUPLICATE_GROUPS:
         return []
 
-    # Оставляем только те, что ещё есть в БД
+    # Синхронизируем с БД
     all_ids = set()
     for group in DUPLICATE_GROUPS:
         for v in group:
-            vid = v.get('id') if isinstance(v, dict) else None
-            if vid is not None:
-                all_ids.add(int(vid))
+            try:
+                all_ids.add(int(v['id']))
+            except (KeyError, TypeError, ValueError):
+                pass
     if not all_ids:
+        DUPLICATE_GROUPS = []
+        _save_groups([])
         return []
 
     conn = get_db_connection()
@@ -423,7 +425,8 @@ def get_duplicate_groups():
     cleaned = []
     changed = False
     for group in DUPLICATE_GROUPS:
-        new_group = [v for v in group if int(v.get('id', -1)) in existing_ids]
+        new_group = [v for v in group
+                     if int(v.get('id', -1)) in existing_ids]
         if len(new_group) >= 2:
             cleaned.append(new_group)
             if len(new_group) != len(group):
@@ -493,6 +496,7 @@ def move_selected(video_ids):
             continue
         src = v['filepath']
         if not os.path.exists(src):
+            errors.append(f"{os.path.basename(src)}: not found")
             continue
         try:
             dest_dir = _duplicates_dir_for(src)
@@ -503,8 +507,8 @@ def move_selected(video_ids):
             print(f"[dup] moved: {src} -> {dest}")
         except Exception as e:
             errors.append(f"{os.path.basename(src)}: {e}")
+            print(f"[dup] move error: {e}")
 
-    # Чистим группы
     kept = []
     for group in DUPLICATE_GROUPS:
         new_group = [v for v in group if int(v.get('id', -1)) not in target]
@@ -519,7 +523,6 @@ def move_selected(video_ids):
 
 
 def move_group(group_index, keep_best=True):
-    """Оставляет лучший файл в группе, остальные — в !Duplicates."""
     groups = get_duplicate_groups()
     if group_index < 0 or group_index >= len(groups):
         return False, "Group not found"
@@ -540,7 +543,6 @@ def move_group(group_index, keep_best=True):
 
 
 def move_all_groups(keep_best=True):
-    """Двигает все дубликаты во всех группах."""
     groups = get_duplicate_groups()
     if not groups:
         return False, "No duplicate groups found"

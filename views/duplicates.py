@@ -18,14 +18,14 @@ def register(app):
 
     @app.route('/move_duplicates', methods=['POST'])
     def move_duplicates():
-        data = request.get_json()
+        data = request.get_json() or {}
         group_index = data.get('group_index')
         if group_index is None:
             return jsonify({'success': False,
                             'message': 'Group index required'}), 400
         try:
             group_index = int(group_index)
-        except ValueError:
+        except (TypeError, ValueError):
             return jsonify({'success': False,
                             'message': 'Invalid group index'}), 400
         ok, msg = move_group(group_index, keep_best=True)

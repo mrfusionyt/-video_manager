@@ -75,47 +75,69 @@
     <h5>Found {{ duplicates|length }} groups</h5>
     <div id="duplicateGroups">
         {% for group in duplicates %}
+            {% set outer_idx = loop.index0 %}
             {% set best = group|sort(attribute='size', reverse=True)|first %}
-            <div class="duplicate-group" id="group-{{ loop.index0 }}" data-group-index="{{ loop.index0 }}">
-                <div class="group-title d-flex align-items-center gap-2 flex-wrap">
+            <div class="duplicate-group" id="group-{{ outer_idx }}" data-group-index="{{ outer_idx }}">
+                <div class="group-title">
                     <span>Group #{{ loop.index }} ({{ group|length }} files)</span>
-                    <button type="button" class="btn-mini" onclick="selectAllInGroup({{ loop.index0 }})">Select all</button>
-                    <button type="button" class="btn-mini" onclick="deselectAllInGroup({{ loop.index0 }})">Deselect all</button>
-                    <button class="btn-move-group" data-group-index="{{ loop.index0 }}">Move duplicates (keep best)</button>
-                    <span class="status-msg" id="status-{{ loop.index0 }}"></span>
+                    <button type="button" class="btn-mini" onclick="selectAllInGroup({{ outer_idx }})">Select all</button>
+                    <button type="button" class="btn-mini" onclick="deselectAllInGroup({{ outer_idx }})">Deselect all</button>
+                    <button class="btn-move-group" data-group-index="{{ outer_idx }}">Move duplicates (keep best)</button>
+                    <span class="status-msg" id="status-{{ outer_idx }}"></span>
                 </div>
                 {% for video in group %}
                     <div class="duplicate-file {% if video.id == best.id %}best-video{% endif %}">
                         <input type="checkbox"
                                class="dup-checkbox"
-                               data-group="{{ loop.parent.loop.index0 }}"
+                               data-group="{{ outer_idx }}"
                                data-video-id="{{ video.id }}"
                                {% if video.id != best.id %}checked{% endif %}>
+
                         <div class="duplicate-preview-container">
-                            {% set preview_url = url_for('video_file', video_id=video.id) %}
-                            {% set ext = video.filename.split('.')[-1].lower() %}
-                            {% if ext in ['mp4', 'avi', 'mkv', 'mov', 'wmv', 'flv', 'webm', 'm4v'] %}
-                                <video class="duplicate-preview" muted playsinline preload="metadata">
-                                    <source src="{{ preview_url }}" type="video/mp4">
-                                </video>
+                            {% set ext = (video.filename or '').split('.')[-1].lower() %}
+                            {% if ext in ['mp4', 'avi', 'mkv', 'mov', 'wmv', 'flv', 'webm', 'm4v', 'mpg', 'mpeg'] %}
+                                <a href="{{ url_for('watch', video_id=video.id, profile=current_profile) }}"
+                                   target="_blank" title="Open video">
+                                    <img class="duplicate-preview"
+                                         src="{{ url_for('thumbnail', video_id=video.id) }}"
+                                         alt="{{ video.filename }}"
+                                         loading="lazy">
+                                </a>
                             {% elif ext in ['jpg', 'jpeg', 'png', 'bmp', 'gif', 'tiff', 'webp'] %}
-                                <img class="duplicate-preview" src="{{ preview_url }}" alt="preview">
+                                <a href="{{ url_for('video_file', video_id=video.id) }}"
+                                   target="_blank" title="Open image">
+                                    <img class="duplicate-preview"
+                                         src="{{ url_for('video_file', video_id=video.id) }}"
+                                         alt="{{ video.filename }}"
+                                         loading="lazy">
+                                </a>
                             {% else %}
                                 <div class="duplicate-preview" style="display:flex;align-items:center;justify-content:center;color:#888;">?</div>
                             {% endif %}
                         </div>
+
                         <div class="duplicate-info">
-                            <div class="filename">
+                            <div class="filename" title="{{ video.filepath }}">
                                 {{ video.filename }}
                                 {% if video.mode %}
                                     <span class="badge bg-danger ms-1">{{ video.mode | mode_name }}</span>
                                 {% endif %}
                                 {% if video.id == best.id %}<span style="color:#dc3545;">★ Best</span>{% endif %}
                             </div>
-                            <div class="size">{{ (video.size / (1024**2))|round(2) }} MB</div>
+                            <div class="size">
+                                {{ (video.size / (1024**2))|round(2) }} MB
+                                {% if video.duration %}
+                                    • {{ (video.duration // 60) }}:{{ '%02d' % (video.duration % 60) }}
+                                {% endif %}
+                            </div>
+                            <div class="path" style="font-size:0.7rem;color:#888;word-break:break-all;">
+                                {{ video.filepath }}
+                            </div>
                         </div>
-                        <div>
-                            <a href="{{ url_for('watch', video_id=video.id, profile=current_profile) }}" class="btn btn-sm btn-outline-secondary">Watch</a>
+
+                        <div class="dup-actions">
+                            <a href="{{ url_for('watch', video_id=video.id, profile=current_profile) }}"
+                               class="btn btn-sm btn-outline-secondary" target="_blank">Watch</a>
                         </div>
                     </div>
                 {% endfor %}
@@ -168,7 +190,7 @@
                     es.close();
                     var url = new URL(window.location.href);
                     url.searchParams.delete('task_id');
-                    setTimeout(function () { window.location.href = url.toString(); }, 1000);
+                    setTimeout(function () { window.location.href = url.toString(); }, 1200);
                 } else if (data.status === 'error') {
                     pf.style.width = '100%';
                     pf.style.background = '#dc3545';
@@ -203,7 +225,7 @@
                 .then(function (r) { return r.json(); })
                 .then(function (data) {
                     document.getElementById('status-all').textContent = data.message || 'Done';
-                    if (data.success) setTimeout(function () { location.reload(); }, 1000);
+                    if (data.success) setTimeout(function () { location.reload(); }, 1200);
                 })
                 .catch(function (err) {
                     document.getElementById('status-all').textContent = 'Error: ' + err;
@@ -228,7 +250,7 @@
                     if (data.success) {
                         var groupDiv = document.getElementById('group-' + gi);
                         if (groupDiv) groupDiv.style.display = 'none';
-                        setTimeout(function () { location.reload(); }, 1000);
+                        setTimeout(function () { location.reload(); }, 1200);
                     }
                 })
                 .catch(function (err) { statusSpan.textContent = 'Error: ' + err; });
@@ -245,7 +267,7 @@
                 .then(function (r) { return r.json(); })
                 .then(function (data) {
                     document.getElementById('status-all').textContent = data.message;
-                    if (data.success) setTimeout(function () { location.reload(); }, 1000);
+                    if (data.success) setTimeout(function () { location.reload(); }, 1200);
                 })
                 .catch(function (err) {
                     document.getElementById('status-all').textContent = 'Error: ' + err;

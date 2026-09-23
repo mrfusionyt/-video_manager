@@ -1028,36 +1028,14 @@ textarea.form-control-dark::placeholder { color: #aaa !important; }
 
 /* ============================================================
    16. DUPLICATES
-   ---- Классы переименованы в .dup-* чтобы не конфликтовать
-        с плеером (.progress-container / .progress-fill)  ----
+   ---- Классы .dup-* чтобы не конфликтовать с плеером ----
    ============================================================ */
 
-.duplicate-group { background: var(--bg-surface); border-radius: var(--radius); padding: 0.5rem; margin-bottom: 1rem; }
-.duplicate-group .group-title { color: var(--red); margin-bottom: 0.5rem; }
-.duplicate-file { display: flex; align-items: center; gap: 0.5rem; padding: 0.2rem 0.5rem; border-bottom: 1px solid var(--border); }
-.duplicate-file:last-child { border-bottom: none; }
-.duplicate-preview { width: 60px; height: 60px; object-fit: cover; border-radius: var(--radius); background: #000; }
-.duplicate-info { flex: 1; }
-.duplicate-info .filename { color: var(--text-primary); }
-.duplicate-info .size { color: var(--text-muted); font-size: 0.8rem; }
-.btn-move-group { background: var(--red); border: none; color: #fff; padding: 0.25rem 0.75rem; border-radius: var(--radius); cursor: pointer; transition: background var(--tr); }
-.btn-move-group:hover { background: var(--red-hover); color: #fff; }
-.btn-move-all { background: var(--green) !important; border: none !important; color: #fff !important; padding: 0.5rem 1rem; border-radius: var(--radius); cursor: pointer; }
-.btn-move-all:hover { background: var(--green-hover) !important; }
-.status-msg { color: var(--green); margin-top: 0.5rem; }
-.best-video { border: 2px solid var(--red); border-radius: var(--radius); padding: 2px; }
-.stats-box { background: var(--bg-elevated); border-radius: var(--radius); padding: 0.75rem 1rem; margin-bottom: 1.5rem; display: flex; flex-wrap: wrap; gap: 1rem; }
-.stats-item { display: flex; flex-direction: column; }
-.stats-item .label { color: var(--text-muted); font-size: 0.8rem; }
-.stats-item .value { color: var(--text-primary); font-size: 1.1rem; font-weight: bold; }
-.stats-item .value.red { color: var(--red); }
-.stats-item .value.green { color: var(--green); }
-
-.dup-progress { margin-bottom: 1rem; }
-.dup-progress-bar { height: 20px; background: var(--bg-elevated); border-radius: var(--radius); overflow: hidden; }
-.dup-progress-fill { height: 100%; background: var(--red); width: 0%; transition: width 0.3s; }
-.dup-progress-text { color: var(--text-muted); font-size: 0.9rem; margin-top: 0.2rem; }
-.duplicate-group .group-title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.duplicate-group { background: var(--bg-surface); border-radius: var(--radius); padding: 0.75rem; margin-bottom: 1rem; }
+.duplicate-group .group-title {
+    color: var(--red); margin-bottom: 0.6rem;
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+}
 .btn-mini {
     background: var(--bg-elevated);
     border: 1px solid var(--border-strong);
@@ -1068,16 +1046,81 @@ textarea.form-control-dark::placeholder { color: #aaa !important; }
     cursor: pointer;
 }
 .btn-mini:hover { background: var(--bg-subtle); color: #fff; }
+
 .dup-checkbox {
     width: 18px;
     height: 18px;
     accent-color: var(--red);
     cursor: pointer;
-    margin-right: 6px;
+    margin-right: 8px;
     flex-shrink: 0;
 }
-.duplicate-file { display: flex; align-items: center; gap: 0.5rem; padding: 0.3rem 0.5rem; }
 
+.duplicate-file {
+    display: flex; align-items: center; gap: 0.6rem;
+    padding: 0.4rem 0.5rem;
+    border-bottom: 1px solid var(--border);
+}
+.duplicate-file:last-child { border-bottom: none; }
+
+.duplicate-preview-container {
+    width: 80px; height: 60px; flex-shrink: 0;
+    overflow: hidden; border-radius: var(--radius); background: #000;
+}
+.duplicate-preview {
+    width: 80px; height: 60px;
+    object-fit: cover; display: block;
+    border-radius: var(--radius); background: #000;
+    cursor: pointer;
+}
+
+.duplicate-info { flex: 1; min-width: 0; }
+.duplicate-info .filename { color: var(--text-primary); word-break: break-all; }
+.duplicate-info .size { color: var(--text-muted); font-size: 0.8rem; }
+
+.dup-actions { flex-shrink: 0; }
+
+.btn-move-group {
+    background: var(--red); border: none; color: #fff;
+    padding: 0.25rem 0.75rem; border-radius: var(--radius);
+    cursor: pointer; transition: background var(--tr);
+}
+.btn-move-group:hover { background: var(--red-hover); color: #fff; }
+
+.btn-move-all {
+    background: var(--green) !important; border: none !important;
+    color: #fff !important; padding: 0.5rem 1rem;
+    border-radius: var(--radius); cursor: pointer;
+}
+.btn-move-all:hover { background: var(--green-hover) !important; }
+
+.status-msg { color: var(--green); margin-top: 0.5rem; }
+.best-video {
+    border: 2px solid var(--red); border-radius: var(--radius);
+    padding: 2px 4px;
+    background: rgba(220, 53, 69, 0.05);
+}
+
+.stats-box {
+    background: var(--bg-elevated); border-radius: var(--radius);
+    padding: 0.75rem 1rem; margin-bottom: 1.5rem;
+    display: flex; flex-wrap: wrap; gap: 1rem;
+}
+.stats-item { display: flex; flex-direction: column; }
+.stats-item .label { color: var(--text-muted); font-size: 0.8rem; }
+.stats-item .value { color: var(--text-primary); font-size: 1.1rem; font-weight: bold; }
+.stats-item .value.red { color: var(--red); }
+.stats-item .value.green { color: var(--green); }
+
+.dup-progress { margin-bottom: 1rem; }
+.dup-progress-bar { height: 20px; background: var(--bg-elevated); border-radius: var(--radius); overflow: hidden; }
+.dup-progress-fill { height: 100%; background: var(--red); width: 0%; transition: width 0.3s; }
+.dup-progress-text { color: var(--text-muted); font-size: 0.9rem; margin-top: 0.2rem; }
+
+@media (max-width: 768px) {
+    .duplicate-file { flex-wrap: wrap; }
+    .duplicate-info .path { display: none; }
+}
 
 /* ============================================================
    17. EDIT_VIDEO
