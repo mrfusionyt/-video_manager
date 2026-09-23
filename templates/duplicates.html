@@ -88,9 +88,7 @@
                     {% endif %}
 
                     <a class="btn-mini" href="{{ url_for('compare_group', group_index=outer_idx, profile=current_profile) }}"
-                       target="_blank" title="Открыть сравнительный плеер">
-                        ▶ Compare
-                    </a>
+                       target="_blank" title="Открыть сравнительный плеер">▶ Compare</a>
                     <button type="button" class="btn-mini" onclick="selectAllInGroup({{ outer_idx }})">Select all</button>
                     <button type="button" class="btn-mini" onclick="deselectAllInGroup({{ outer_idx }})">Deselect all</button>
                     <button class="btn-move-group" data-group-index="{{ outer_idx }}">Move duplicates (keep best)</button>
@@ -206,11 +204,17 @@
                     pf.style.background = '#dc3545';
                     pt.textContent = '❌ Error: ' + data.message;
                     es.close();
+                } else if (data.status === 'not_found') {
+                    pt.textContent = 'Скан уже завершён. Обновляю...';
+                    es.close();
+                    var url = new URL(window.location.href);
+                    url.searchParams.delete('task_id');
+                    setTimeout(function () { window.location.href = url.toString(); }, 800);
                 } else if (data.status === 'scanning') {
                     pf.style.width = data.progress + '%';
                     pt.textContent = (data.message || '') + ' (' + data.progress + '%)';
                 } else {
-                    pt.textContent = data.message || 'Unknown status';
+                    pt.textContent = (data.message || 'Unknown status') + ' [' + data.status + ']';
                 }
             };
             es.onerror = function () { es.close(); };

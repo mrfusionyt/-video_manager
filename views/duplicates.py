@@ -15,10 +15,13 @@ def register(app):
         if group_index < 0 or group_index >= len(groups):
             abort(404)
         group = groups[group_index]
+        files = group.get('files', [])
+        file_names = {v['id']: v['filename'] for v in files}
         return render_template(
             'compare.html',
             group=group,
             group_index=group_index,
+            file_names=file_names,
             current_profile=get_current_profile(),
         )
 

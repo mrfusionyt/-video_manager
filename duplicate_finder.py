@@ -1,13 +1,19 @@
 r"""
 Поиск дубликатов видео и картинок.
 
-Гибридная схема:
-  1) VIDEO: 1 кадр на 50% длительности → phash + 3 зеркальные версии.
-     Совпало любое из 16 сочетаний → video-дубликат.
-  2) AUDIO: Chromaprint через fpcalc (_dop/fpcalc.exe).
-     Совпал непрерывный run >= AUDIO_MIN_RUN_SEC → audio-дубликат.
+Для каждого видео:
+  • 5 кадров на 10/30/50/70/90% длительности.
+  • Для каждого кадра — phash + 3 зеркальные/перевёрнутые версии (4 хеша).
+  • Chromaprint-фингерпринт аудиодорожки через fpcalc.
 
-Группа помечается reason'ом: 'video' | 'audio' | 'video+audio'.
+Пары объединяются через Union-Find:
+  • video: любая из 16 комбинаций хешей двух кадров имеет hamming ≤ THRESHOLD;
+  • audio: непрерывный run ≥ AUDIO_MIN_RUN_SEC (интро пропускается).
+
+Для каждой группы сохраняются:
+  • matches.video — список пар {a_id, b_id, pairs: [{pos_a, pos_b, hamming}]}
+  • matches.audio — список пар {a_id, b_id, run_sec, start_a_sec, start_b_sec}
+
 Поиск идёт по всем видео в БД.
 """
 import os
@@ -40,11 +46,19 @@ FPCALC_CANDIDATES = [
 ]
 
 # ---------- Пороги ----------
-THRESHOLD = 0                  # pHash: точное совпадение
-AUDIO_BITS_TOLERANT = 10       # сколько бит может различаться в подписи
-AUDIO_MIN_RUN_SEC   = 10.0     # минимум непрерывного совпадения, секунд
+THRESHOLD = 0                  # pHash: точное совпадение (0 = identical)
+AUDIO_BITS_TOLERANT = 10
+AUDIO_MIN_RUN_SEC   = 10.0
 AUDIO_SUBPRINT_PER_SEC = 1.0 / 0.1234
 FPCALC_MAX_LENGTH = 600        # макс. секунд, которые анализирует fpcalc
+
+# ---------- Пропуск интро ----------
+# Первые N секунд аудиодорожки НЕ участвуют в сравнении.
+# Защищает от ложных срабатываний на одинаковых интро/джинглах.
+AUDIO_SKIP_INTRO_SEC = 30.0
+
+# Позиции ключевых кадров (доли длительности)
+KEYFRAME_POSITIONS = [0.10, 0.30, 0.50, 0.70, 0.90]
 
 
 FPCALC_PATH = None
@@ -53,6 +67,8 @@ for cand in FPCALC_CANDIDATES:
         FPCALC_PATH = cand
         break
 print(f"[dup] fpcalc path = {FPCALC_PATH}")
+print(f"[dup] audio: skip first {AUDIO_SKIP_INTRO_SEC:.0f}s, "
+      f"min run {AUDIO_MIN_RUN_SEC:.0f}s")
 
 
 # ===================================================================
@@ -75,7 +91,7 @@ def _load_hash_cache():
             with open(HASH_CACHE_FILE, 'r', encoding='utf-8') as f:
                 raw = json.load(f) or {}
             _HASH_CACHE = {k: v for k, v in raw.items()
-                           if isinstance(v, dict) and 'hashes' in v}
+                           if isinstance(v, dict) and 'frames' in v}
             print(f"[dup] hash-cache loaded: {len(_HASH_CACHE)} из {len(raw)}")
     except Exception as e:
         print(f"[hash-cache] load failed: {e}")
@@ -98,7 +114,7 @@ def _save_hash_cache():
 
 
 def _cache_fresh(entry, filepath):
-    if not entry or 'hashes' not in entry or 'audio_fp' not in entry:
+    if not entry or 'frames' not in entry or 'audio_fp' not in entry:
         return False
     try:
         st = os.stat(filepath)
@@ -108,24 +124,27 @@ def _cache_fresh(entry, filepath):
 
 
 # ===================================================================
-#                     Video: кадр + 4 pHash
+#                     Кадры
 # ===================================================================
-def _extract_frame(video_path, ratio=0.5):
+def _extract_frames(video_path, positions):
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         print(f"[dup] cv2 cannot open: {video_path}")
-        return None
+        return []
     try:
         total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        out = []
         if total <= 0:
             ret, frame = cap.read()
-            return frame if ret else None
-        cap.set(cv2.CAP_PROP_POS_FRAMES, int(total * ratio))
-        ret, frame = cap.read()
-        if not ret:
-            cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+            if ret:
+                out.append((positions[0], frame))
+            return out
+        for pos in positions:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, max(0, int(total * pos)))
             ret, frame = cap.read()
-        return frame if ret else None
+            if ret:
+                out.append((pos, frame))
+        return out
     finally:
         cap.release()
 
@@ -139,30 +158,42 @@ def _hash_image(pil_img):
     ]
 
 
-def _process_video(video_path):
-    frame = _extract_frame(video_path)
-    if frame is None:
-        return None
-    try:
-        pil_img = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-        return _hash_image(pil_img)
-    except Exception as e:
-        print(f"[dup] video hash error {video_path}: {e}")
-        return None
+def _process_video_frames(video_path):
+    raw = _extract_frames(video_path, KEYFRAME_POSITIONS)
+    out = []
+    for pos, frame in raw:
+        try:
+            pil_img = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+            out.append({'position': float(pos), 'hashes': _hash_image(pil_img)})
+        except Exception as e:
+            print(f"[dup] frame hash error {video_path} at {pos}: {e}")
+    if not out:
+        cap = cv2.VideoCapture(video_path)
+        if cap.isOpened():
+            try:
+                total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+                cap.set(cv2.CAP_PROP_POS_FRAMES, max(0, total // 2))
+                ret, frame = cap.read()
+                if ret:
+                    pil_img = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+                    out = [{'position': 0.5, 'hashes': _hash_image(pil_img)}]
+            finally:
+                cap.release()
+    return out
 
 
-def _process_image(image_path):
+def _process_image_frames(image_path):
     try:
         img = Image.open(image_path).convert('RGB')
         img.thumbnail((256, 256), Image.Resampling.LANCZOS)
-        return _hash_image(img)
+        return [{'position': 0.5, 'hashes': _hash_image(img)}]
     except Exception as e:
         print(f"[dup] image hash error {image_path}: {e}")
-        return None
+        return []
 
 
 # ===================================================================
-#                     Audio: fpcalc
+#                     Аудио
 # ===================================================================
 def _extract_audio_fingerprint(filepath):
     if not FPCALC_PATH:
@@ -204,41 +235,87 @@ def _popcount_u32(x):
     return x
 
 
-def _has_run_of_length(flags, length):
-    if length <= 0 or length > len(flags):
-        return False
-    cs = np.concatenate(([0], np.cumsum(flags, dtype=np.int32)))
-    return bool(np.any(cs[length:] - cs[:-length] >= length))
+def _find_longest_run_np(flags):
+    """flags — np.array(int) 0/1.  Возвращает (length, start)."""
+    if len(flags) == 0:
+        return 0, 0
+    padded = np.concatenate(([0], flags.astype(np.int8), [0]))
+    diffs = np.diff(padded)
+    starts = np.where(diffs == 1)[0]
+    ends = np.where(diffs == -1)[0]
+    if len(starts) == 0:
+        return 0, 0
+    lengths = ends - starts
+    idx = int(np.argmax(lengths))
+    return int(lengths[idx]), int(starts[idx])
 
 
-def _audio_match(fp_a, fp_b):
-    """True, если есть непрерывный совпадающий run >= AUDIO_MIN_RUN_SEC."""
+def _find_audio_match(fp_a, fp_b):
+    """
+    Возвращает dict с деталями совпадения или None.
+
+    Первые AUDIO_SKIP_INTRO_SEC секунд отбрасываются с обеих дорожек
+    (защита от одинаковых интро).  В start_a_sec / start_b_sec
+    добавка возвращается обратно — чтобы Jump попадал в реальную
+    позицию исходного видео.
+    """
     if not fp_a or not fp_b:
-        return False, 0
+        return None
     a = np.asarray(fp_a, dtype=np.uint32)
     b = np.asarray(fp_b, dtype=np.uint32)
-    if len(a) < len(b):
-        a, b = b, a
-    la, lb = len(a), len(b)
+
+    # ---- пропускаем интро ----
+    skip_steps = int(AUDIO_SKIP_INTRO_SEC * AUDIO_SUBPRINT_PER_SEC)
+    if skip_steps > 0:
+        a = a[skip_steps:]
+        b = b[skip_steps:]
+    if len(a) < 40 or len(b) < 40:
+        return None
+
+    if len(a) >= len(b):
+        long_fp, short_fp = a, b
+        a_is_long = True
+    else:
+        long_fp, short_fp = b, a
+        a_is_long = False
+
+    la, lb = len(long_fp), len(short_fp)
     if lb < 40:
-        return False, 0
-    # Защита от тишины / константной дорожки
-    if np.count_nonzero(b) < lb * 0.05:
-        return False, 0
+        return None
+    if np.count_nonzero(short_fp) < lb * 0.05:
+        return None
 
-    min_run_steps = int(AUDIO_MIN_RUN_SEC * AUDIO_SUBPRINT_PER_SEC)
-    min_run_steps = max(20, min(min_run_steps, lb))
+    min_run_steps = max(20, int(AUDIO_MIN_RUN_SEC * AUDIO_SUBPRINT_PER_SEC))
+    if min_run_steps > lb:
+        min_run_steps = lb
 
-    max_shift = la - lb
-    for shift in range(max_shift + 1):
-        window = a[shift:shift + lb]
-        xor = np.bitwise_xor(window, b)
+    for shift in range(la - lb + 1):
+        window = long_fp[shift:shift + lb]
+        xor = np.bitwise_xor(window, short_fp)
         bits = _popcount_u32(xor)
         flags = (bits <= AUDIO_BITS_TOLERANT).astype(np.int32)
-        # Быстрая проверка через cumsum — есть ли run нужной длины
-        if _has_run_of_length(flags, min_run_steps):
-            return True, min_run_steps
-    return False, 0
+        run_len, run_start = _find_longest_run_np(flags)
+        if run_len >= min_run_steps:
+            if a_is_long:
+                start_a_step = shift + run_start
+                start_b_step = run_start
+            else:
+                start_a_step = run_start
+                start_b_step = shift + run_start
+
+            # добавляем обратно пропущенное интро
+            start_a_sec = AUDIO_SKIP_INTRO_SEC + start_a_step / AUDIO_SUBPRINT_PER_SEC
+            start_b_sec = AUDIO_SKIP_INTRO_SEC + start_b_step / AUDIO_SUBPRINT_PER_SEC
+
+            return {
+                'run_steps': int(run_len),
+                'run_sec': float(run_len / AUDIO_SUBPRINT_PER_SEC),
+                'shift': int(shift),
+                'start_a_sec': float(start_a_sec),
+                'start_b_sec': float(start_b_sec),
+                'skipped_intro_sec': float(AUDIO_SKIP_INTRO_SEC),
+            }
+    return None
 
 
 # ===================================================================
@@ -260,13 +337,13 @@ def _process_media(item, cache_lock):
 
     media_type = item.get('media_type', 'video')
     if media_type == 'image':
-        hashes = _process_image(filepath)
+        frames = _process_image_frames(filepath)
         audio_fp = None
     else:
-        hashes = _process_video(filepath)
+        frames = _process_video_frames(filepath)
         audio_fp, _ = _extract_audio_fingerprint(filepath)
 
-    if not hashes:
+    if not frames:
         return None
 
     result = {
@@ -274,7 +351,7 @@ def _process_media(item, cache_lock):
         'media_type': media_type,
         'mtime': st.st_mtime,
         'size': st.st_size,
-        'hashes': hashes,
+        'frames': frames,
         'audio_fp': audio_fp,
     }
     with _HASH_CACHE_LOCK:
@@ -285,26 +362,43 @@ def _process_media(item, cache_lock):
 
 
 # ===================================================================
-#                     Сравнение
+#                     Сравнение пар
 # ===================================================================
-def _hashes_match(hashes_a, hashes_b, threshold):
-    if not hashes_a or not hashes_b:
-        return False
-    objs_a = [imagehash.hex_to_hash(h) for h in hashes_a]
-    objs_b = [imagehash.hex_to_hash(h) for h in hashes_b]
-    for h1 in objs_a:
-        for h2 in objs_b:
-            if h1 - h2 <= threshold:
-                return True
-    return False
+def _find_video_matches(frames_a, frames_b, threshold):
+    """
+    Возвращает список совпадений:
+      [{'pos_a': 0.5, 'pos_b': 0.5, 'hamming': 0}, ...]
+    """
+    if not frames_a or not frames_b:
+        return []
+    matches = []
+    objs_a = [(f['position'], [imagehash.hex_to_hash(h) for h in f['hashes']])
+              for f in frames_a]
+    objs_b = [(f['position'], [imagehash.hex_to_hash(h) for h in f['hashes']])
+              for f in frames_b]
+
+    for pos_a, hashes_a in objs_a:
+        for pos_b, hashes_b in objs_b:
+            best = 999
+            for h1 in hashes_a:
+                for h2 in hashes_b:
+                    d = h1 - h2
+                    if d < best:
+                        best = d
+            if best <= threshold:
+                matches.append({
+                    'pos_a': float(pos_a),
+                    'pos_b': float(pos_b),
+                    'hamming': int(best),
+                })
+    return matches
 
 
-def _group_all(hashes_by_path, audio_by_path, item_by_path, threshold):
-    """
-    Union-Find: объединяем пары, у которых совпало video ИЛИ audio.
-    Возвращает список dict'ов: {'files': [...], 'reason': 'video|audio|video+audio'}
-    """
-    paths = list(hashes_by_path.keys())
+# ===================================================================
+#                     Группировка
+# ===================================================================
+def _group_all(frames_by_path, audio_by_path, item_by_path, threshold):
+    paths = list(frames_by_path.keys())
     n = len(paths)
     idx = {p: i for i, p in enumerate(paths)}
     parent = list(range(n))
@@ -320,73 +414,99 @@ def _group_all(hashes_by_path, audio_by_path, item_by_path, threshold):
         if ra != rb:
             parent[ra] = rb
 
-    # ---- 1) Video matches (быстрый путь через hash index) ----
-    hash_index = defaultdict(set)
-    for i, path in enumerate(paths):
-        for h in hashes_by_path[path]:
-            hash_index[h].add(i)
+    video_matches_by_pair = {}
+    audio_matches_by_pair = {}
 
-    video_pairs = set()
-    for i, path_i in enumerate(paths):
-        cands = set()
-        for h in hashes_by_path[path_i]:
-            cands |= hash_index.get(h, set())
-        cands.discard(i)
-        for j in cands:
-            if (j, i) in video_pairs or (i, j) in video_pairs:
-                continue
-            if _hashes_match(hashes_by_path[path_i],
-                             hashes_by_path[paths[j]], threshold):
+    # ---------- video ----------
+    for i in range(n):
+        for j in range(i + 1, n):
+            matches = _find_video_matches(
+                frames_by_path[paths[i]],
+                frames_by_path[paths[j]],
+                threshold,
+            )
+            if matches:
                 union(i, j)
-                video_pairs.add((i, j))
+                video_matches_by_pair[(i, j)] = matches
 
-    # ---- 2) Audio matches ----
-    audio_candidates = [(i, p) for i, p in enumerate(paths)
-                        if audio_by_path.get(p)]
-    audio_pairs = set()
-    for a_pos in range(len(audio_candidates)):
-        i, p_i = audio_candidates[a_pos]
-        for b_pos in range(a_pos + 1, len(audio_candidates)):
-            j, p_j = audio_candidates[b_pos]
-            if find(i) == find(j) and (i, j) in video_pairs:
-                continue  # уже дубликаты по видео
-            ok, _ = _audio_match(audio_by_path[p_i], audio_by_path[p_j])
-            if ok:
+    # ---------- audio ----------
+    audio_items = [(i, audio_by_path[p]) for i, p in enumerate(paths)
+                   if audio_by_path.get(p)]
+    for a_pos in range(len(audio_items)):
+        i, fp_i = audio_items[a_pos]
+        for b_pos in range(a_pos + 1, len(audio_items)):
+            j, fp_j = audio_items[b_pos]
+            res = _find_audio_match(fp_i, fp_j)
+            if res:
                 union(i, j)
-                audio_pairs.add((min(i, j), max(i, j)))
+                audio_matches_by_pair[(i, j)] = res
 
-    # ---- 3) Сборка групп ----
+    # ---------- сборка групп ----------
     by_root = defaultdict(list)
     for i, path in enumerate(paths):
-        by_root[find(i)].append(path)
+        by_root[find(i)].append(i)
 
     groups = []
-    for root, group_paths in by_root.items():
-        if len(group_paths) < 2:
+    for root, idxs in by_root.items():
+        if len(idxs) < 2:
             continue
-        # reason: смотрим, что реально совпало
-        has_video = False
-        has_audio = False
-        for ii in range(len(group_paths)):
-            for jj in range(ii + 1, len(group_paths)):
-                i = idx[group_paths[ii]]
-                j = idx[group_paths[jj]]
-                pair = (min(i, j), max(i, j))
-                if pair in video_pairs or (j, i) in video_pairs:
-                    has_video = True
-                if pair in audio_pairs:
-                    has_audio = True
-        if has_video and has_audio:
-            reason = 'video+audio'
-        elif has_video:
-            reason = 'video'
-        else:
-            reason = 'audio'
 
-        files = [item_by_path[p] for p in group_paths if p in item_by_path]
-        files = [f for f in files if f.get('id') is not None]
-        if len(files) >= 2:
-            groups.append({'files': files, 'reason': reason})
+        group_files = []
+        for i in idxs:
+            item = item_by_path.get(paths[i])
+            if item and item.get('id') is not None:
+                group_files.append(item)
+        if len(group_files) < 2:
+            continue
+
+        group_ids = {f['id'] for f in group_files}
+
+        video_list = []
+        for (i, j), pairs in video_matches_by_pair.items():
+            a = item_by_path.get(paths[i])
+            b = item_by_path.get(paths[j])
+            if not a or not b:
+                continue
+            if a['id'] in group_ids and b['id'] in group_ids:
+                video_list.append({
+                    'a_id': a['id'],
+                    'b_id': b['id'],
+                    'pairs': pairs,
+                })
+
+        audio_list = []
+        for (i, j), res in audio_matches_by_pair.items():
+            a = item_by_path.get(paths[i])
+            b = item_by_path.get(paths[j])
+            if not a or not b:
+                continue
+            if a['id'] in group_ids and b['id'] in group_ids:
+                audio_list.append({
+                    'a_id': a['id'],
+                    'b_id': b['id'],
+                    'run_sec': res['run_sec'],
+                    'start_a_sec': res['start_a_sec'],
+                    'start_b_sec': res['start_b_sec'],
+                    'skipped_intro_sec': res.get('skipped_intro_sec', 0),
+                })
+
+        if video_list and audio_list:
+            reason = 'video+audio'
+        elif video_list:
+            reason = 'video'
+        elif audio_list:
+            reason = 'audio'
+        else:
+            continue
+
+        groups.append({
+            'files': group_files,
+            'reason': reason,
+            'matches': {
+                'video': video_list,
+                'audio': audio_list,
+            },
+        })
 
     return groups
 
@@ -442,7 +562,7 @@ def _find_duplicates_worker(task_id, filters):
         cache_lock = threading.Lock()
         processed = 0
         max_workers = min(4, os.cpu_count() or 1)
-        hashes_by_path = {}
+        frames_by_path = {}
         audio_by_path = {}
         item_by_path = {}
 
@@ -460,15 +580,15 @@ def _find_duplicates_worker(task_id, filters):
                 scan_progress[task_id]['message'] = \
                     f'Processing {processed}/{total} ({name})'
                 if entry:
-                    hashes_by_path[item['filepath']] = entry['hashes']
+                    frames_by_path[item['filepath']] = entry['frames']
                     audio_by_path[item['filepath']] = entry.get('audio_fp')
                     item_by_path[item['filepath']] = item
 
         _save_hash_cache()
-        print(f"[dup] hashed {len(hashes_by_path)}/{total}")
+        print(f"[dup] hashed {len(frames_by_path)}/{total}")
 
         scan_progress[task_id]['message'] = 'Comparing pairs (video + audio)...'
-        groups = _group_all(hashes_by_path, audio_by_path,
+        groups = _group_all(frames_by_path, audio_by_path,
                             item_by_path, THRESHOLD)
         print(f"[dup] found {len(groups)} groups")
 
@@ -514,7 +634,6 @@ def get_duplicate_groups():
             raw = []
         DUPLICATE_GROUPS = []
         for g in raw:
-            # новый формат
             if isinstance(g, dict) and 'files' in g:
                 files = [v for v in g['files']
                          if isinstance(v, dict) and v.get('id') is not None]
@@ -522,8 +641,8 @@ def get_duplicate_groups():
                     DUPLICATE_GROUPS.append({
                         'files': files,
                         'reason': g.get('reason', 'video'),
+                        'matches': g.get('matches', {'video': [], 'audio': []}),
                     })
-            # старый формат — list of files
             elif isinstance(g, list):
                 files = [v for v in g
                          if isinstance(v, dict) and v.get('id') is not None]
@@ -531,6 +650,7 @@ def get_duplicate_groups():
                     DUPLICATE_GROUPS.append({
                         'files': files,
                         'reason': 'video',
+                        'matches': {'video': [], 'audio': []},
                     })
         print(f"[dup] loaded {len(DUPLICATE_GROUPS)} groups from cache")
 
@@ -569,7 +689,11 @@ def get_duplicate_groups():
         if len(new_files) >= 2:
             if len(new_files) != len(g['files']):
                 changed = True
-            cleaned.append({'files': new_files, 'reason': g['reason']})
+            cleaned.append({
+                'files': new_files,
+                'reason': g['reason'],
+                'matches': g.get('matches', {'video': [], 'audio': []}),
+            })
         else:
             changed = True
 
@@ -650,7 +774,11 @@ def move_selected(video_ids):
         new_files = [v for v in g['files']
                      if int(v.get('id', -1)) not in target]
         if len(new_files) >= 2:
-            kept.append({'files': new_files, 'reason': g['reason']})
+            kept.append({
+                'files': new_files,
+                'reason': g['reason'],
+                'matches': g.get('matches', {'video': [], 'audio': []}),
+            })
     DUPLICATE_GROUPS = kept
     _save_groups(kept)
 
