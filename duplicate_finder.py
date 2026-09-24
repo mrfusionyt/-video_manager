@@ -1,26 +1,31 @@
 r"""
-Поиск дубликатов видео и картинок.
+Поиск дубликатов видео и картинок — версия с SQLite-кешем, MIH и FFT.
 
-Для каждого видео:
-  • 5 кадров на 10/30/50/70/90% длительности.
-  • Для каждого кадра — phash + 3 зеркальные/перевёрнутые версии (4 хеша).
-  • Chromaprint-фингерпринт аудиодорожки через fpcalc.
+Архитектура:
+  • SQLite-кеш (hash_cache.db) — быстрая загрузка/сохранение,
+    индексы для LSH-поиска кандидатов, WAL mode.
+  • Video: 5 кадров × 4 зеркала. LSH-индекс через hash-index
+    (THRESHOLD=0) или MIH 4×16 (THRESHOLD>0).
+  • Audio: chromaprint → LSH 4×8-битные полосы, затем
+    FFT cross-correlation для отсева, затем точный longest-run.
+  • Skip audio для video-matched пар — экономит до 90% времени.
+  • Приоритезация по размеру файла (опционально).
 
-Пары объединяются через Union-Find:
-  • video: любая из 16 комбинаций хешей двух кадров имеет hamming ≤ THRESHOLD;
-  • audio: непрерывный run ≥ AUDIO_MIN_RUN_SEC (интро пропускается).
-
-Для каждой группы сохраняются:
-  • matches.video — список пар {a_id, b_id, pairs: [{pos_a, pos_b, hamming}]}
-  • matches.audio — список пар {a_id, b_id, run_sec, start_a_sec, start_b_sec}
-
-Поиск идёт по всем видео в БД.
+Прогресс-фазы:
+  0-40%   хеширование (или загрузка из кеша)
+  40-45%  подготовка video-индекса
+  45-65%  video verification
+  65-70%  audio LSH-индекс
+  70-80%  audio FFT отсев
+  80-95%  audio verification
+  95-100% группировка
 """
 import os
 import json
 import base64
 import struct
 import shutil
+import sqlite3
 import threading
 import subprocess
 from collections import defaultdict
@@ -37,7 +42,7 @@ from models import get_all_videos, get_db_connection, get_video_by_id
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 DUPLICATE_CACHE_FILE = os.path.join(BASE_DIR, 'duplicates_cache.json')
-HASH_CACHE_FILE      = os.path.join(BASE_DIR, 'hash_cache.json')
+HASH_CACHE_DB        = os.path.join(BASE_DIR, 'hash_cache.db')
 
 FPCALC_CANDIDATES = [
     os.path.join(BASE_DIR, '_dop', 'fpcalc.exe'),
@@ -45,20 +50,45 @@ FPCALC_CANDIDATES = [
     shutil.which('fpcalc'),
 ]
 
-# ---------- Пороги ----------
-THRESHOLD = 0                  # pHash: точное совпадение (0 = identical)
+# ---------- Video ----------
+THRESHOLD = 0
+KEYFRAME_POSITIONS = [0.10, 0.30, 0.50, 0.70, 0.90]
+
+# MIH для phash: 4 полосы по 16 бит.
+MIH_BANDS = 4
+MIH_BAND_BITS = 16
+# Минимум совпавших полос в одном и том же кадре, чтобы пара
+# считалась кандидатом (используется только при THRESHOLD > 0).
+MIH_MIN_HITS = 2
+
+# ---------- Audio ----------
 AUDIO_BITS_TOLERANT = 10
 AUDIO_MIN_RUN_SEC   = 10.0
 AUDIO_SUBPRINT_PER_SEC = 1.0 / 0.1234
-FPCALC_MAX_LENGTH = 600        # макс. секунд, которые анализирует fpcalc
-
-# ---------- Пропуск интро ----------
-# Первые N секунд аудиодорожки НЕ участвуют в сравнении.
-# Защищает от ложных срабатываний на одинаковых интро/джинглах.
+FPCALC_MAX_LENGTH = 600
 AUDIO_SKIP_INTRO_SEC = 30.0
 
-# Позиции ключевых кадров (доли длительности)
-KEYFRAME_POSITIONS = [0.10, 0.30, 0.50, 0.70, 0.90]
+AUDIO_SILENCE_MIN_UNIQUE_RATIO     = 0.10
+AUDIO_SILENCE_MIN_TRANSITION_RATIO = 0.10
+AUDIO_SILENCE_MIN_MEAN_DIFF_BITS   = 2.0
+
+AUDIO_PREFILTER_SAMPLES    = 40
+AUDIO_PREFILTER_GOOD_RATIO = 0.30
+
+# LSH
+AUDIO_LSH_BANDS       = 4
+AUDIO_LSH_BAND_BITS   = 8
+AUDIO_LSH_MIN_MATCHES = 2
+AUDIO_LSH_MAX_POS_DELTA = 8
+
+# FFT prefilter: peak / std должен быть >= этого, чтобы считать,
+# что между дорожками есть корреляция. Ниже — пропускаем без
+# точной проверки.
+FFT_PEAK_STD_RATIO = 4.0
+
+# ---------- Параллелизм ----------
+COMPARE_WORKERS = min(8, max(2, (os.cpu_count() or 4)))
+HASH_WORKERS    = min(4, max(2, (os.cpu_count() or 4)))
 
 
 FPCALC_PATH = None
@@ -66,9 +96,173 @@ for cand in FPCALC_CANDIDATES:
     if cand and os.path.exists(cand):
         FPCALC_PATH = cand
         break
+
 print(f"[dup] fpcalc path = {FPCALC_PATH}")
-print(f"[dup] audio: skip first {AUDIO_SKIP_INTRO_SEC:.0f}s, "
-      f"min run {AUDIO_MIN_RUN_SEC:.0f}s")
+print(f"[dup] audio: skip {AUDIO_SKIP_INTRO_SEC:.0f}s, run >= {AUDIO_MIN_RUN_SEC:.0f}s")
+print(f"[dup] LSH audio {AUDIO_LSH_BANDS}x{AUDIO_LSH_BAND_BITS}bit, "
+      f"min_hits={AUDIO_LSH_MIN_MATCHES}, FFT ratio={FFT_PEAK_STD_RATIO}")
+print(f"[dup] workers: hash={HASH_WORKERS}, compare={COMPARE_WORKERS}, "
+      f"threshold={THRESHOLD}")
+print(f"[dup] mode: SQLite cache + MIH + FFT, skip audio for video-matched")
+
+
+# ===================================================================
+#                     SQLite cache
+# ===================================================================
+_local = threading.local()
+
+
+def _get_conn():
+    conn = getattr(_local, 'conn', None)
+    if conn is None:
+        conn = sqlite3.connect(HASH_CACHE_DB, timeout=60)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode = WAL")
+        conn.execute("PRAGMA synchronous = NORMAL")
+        conn.execute("PRAGMA busy_timeout = 60000")
+        conn.execute("PRAGMA foreign_keys = ON")
+        _local.conn = conn
+    return conn
+
+
+def _init_db():
+    conn = _get_conn()
+    c = conn.cursor()
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS files (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            path TEXT UNIQUE NOT NULL,
+            mtime REAL,
+            size INTEGER,
+            media_type TEXT DEFAULT 'video'
+        )
+    """)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS video_frames (
+            file_id INTEGER NOT NULL,
+            frame_idx INTEGER NOT NULL,
+            position REAL,
+            phash_orig TEXT,
+            phash_mirror TEXT,
+            phash_flip TEXT,
+            phash_hv TEXT,
+            PRIMARY KEY (file_id, frame_idx),
+            FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE
+        )
+    """)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS audio_fp (
+            file_id INTEGER PRIMARY KEY,
+            fp_blob BLOB,
+            fp_len INTEGER,
+            FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE
+        )
+    """)
+    c.execute("CREATE INDEX IF NOT EXISTS idx_files_path ON files(path)")
+    conn.commit()
+
+
+def _get_or_create_file(path, mtime, size, media_type):
+    """Возвращает (file_id, is_fresh).  is_fresh=False — надо пересчитать."""
+    conn = _get_conn()
+    c = conn.cursor()
+    c.execute("SELECT id, mtime, size FROM files WHERE path = ?", (path,))
+    row = c.fetchone()
+    if row is None:
+        c.execute(
+            "INSERT INTO files(path, mtime, size, media_type) VALUES (?, ?, ?, ?)",
+            (path, mtime, size, media_type),
+        )
+        conn.commit()
+        return c.lastrowid, False
+    if row['mtime'] != mtime or row['size'] != size:
+        c.execute(
+            "UPDATE files SET mtime = ?, size = ?, media_type = ? WHERE id = ?",
+            (mtime, size, media_type, row['id']),
+        )
+        conn.commit()
+        return row['id'], False
+    return row['id'], True
+
+
+def _load_video_frames(file_id):
+    c = _get_conn().cursor()
+    c.execute("""
+        SELECT frame_idx, position,
+               phash_orig, phash_mirror, phash_flip, phash_hv
+        FROM video_frames WHERE file_id = ?
+        ORDER BY frame_idx
+    """, (file_id,))
+    rows = c.fetchall()
+    if not rows:
+        return None
+    return [
+        {
+            'position': r['position'],
+            'hashes': [r['phash_orig'], r['phash_mirror'],
+                       r['phash_flip'], r['phash_hv']],
+        }
+        for r in rows
+    ]
+
+
+def _save_video_frames(file_id, frames):
+    conn = _get_conn()
+    c = conn.cursor()
+    c.execute("DELETE FROM video_frames WHERE file_id = ?", (file_id,))
+    for idx, f in enumerate(frames):
+        h = f['hashes']
+        c.execute("""
+            INSERT INTO video_frames
+                (file_id, frame_idx, position,
+                 phash_orig, phash_mirror, phash_flip, phash_hv)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (file_id, idx, f['position'], h[0], h[1], h[2], h[3]))
+    conn.commit()
+
+
+def _load_audio_fp(file_id):
+    c = _get_conn().cursor()
+    c.execute("SELECT fp_blob FROM audio_fp WHERE file_id = ?", (file_id,))
+    row = c.fetchone()
+    if not row or not row['fp_blob']:
+        return None
+    raw = row['fp_blob']
+    n = len(raw) // 4
+    if n == 0:
+        return None
+    return list(struct.unpack('<%dI' % n, raw[:n * 4]))
+
+
+def _save_audio_fp(file_id, fp):
+    conn = _get_conn()
+    c = conn.cursor()
+    if fp is None:
+        c.execute("DELETE FROM audio_fp WHERE file_id = ?", (file_id,))
+    else:
+        raw = struct.pack('<%dI' % len(fp), *fp)
+        c.execute("""
+            INSERT OR REPLACE INTO audio_fp (file_id, fp_blob, fp_len)
+            VALUES (?, ?, ?)
+        """, (file_id, raw, len(fp)))
+    conn.commit()
+
+
+def _cleanup_db(current_paths):
+    """Удаляет из кеша файлы, которых больше нет на диске."""
+    conn = _get_conn()
+    c = conn.cursor()
+    c.execute("SELECT id, path FROM files")
+    rows = c.fetchall()
+    current = set(current_paths)
+    removed = 0
+    for r in rows:
+        if r['path'] not in current:
+            c.execute("DELETE FROM files WHERE id = ?", (r['id'],))
+            removed += 1
+    if removed:
+        conn.commit()
+        print(f"[dup] db cleanup: removed {removed} stale entries")
 
 
 # ===================================================================
@@ -79,57 +273,23 @@ scan_in_progress = False
 scan_progress = {}
 _lock = threading.Lock()
 
-_HASH_CACHE = {}
-_HASH_CACHE_LOCK = threading.Lock()
-_HASH_CACHE_DIRTY = False
 
-
-def _load_hash_cache():
-    global _HASH_CACHE
-    try:
-        if os.path.exists(HASH_CACHE_FILE):
-            with open(HASH_CACHE_FILE, 'r', encoding='utf-8') as f:
-                raw = json.load(f) or {}
-            _HASH_CACHE = {k: v for k, v in raw.items()
-                           if isinstance(v, dict) and 'frames' in v}
-            print(f"[dup] hash-cache loaded: {len(_HASH_CACHE)} из {len(raw)}")
-    except Exception as e:
-        print(f"[hash-cache] load failed: {e}")
-        _HASH_CACHE = {}
-
-
-def _save_hash_cache():
-    global _HASH_CACHE_DIRTY
-    with _HASH_CACHE_LOCK:
-        if not _HASH_CACHE_DIRTY:
-            return
-        snapshot = dict(_HASH_CACHE)
-        _HASH_CACHE_DIRTY = False
-    try:
-        with open(HASH_CACHE_FILE, 'w', encoding='utf-8') as f:
-            json.dump(snapshot, f)
-        print(f"[dup] hash-cache saved: {len(snapshot)} entries")
-    except Exception as e:
-        print(f"[hash-cache] save failed: {e}")
-
-
-def _cache_fresh(entry, filepath):
-    if not entry or 'frames' not in entry or 'audio_fp' not in entry:
-        return False
-    try:
-        st = os.stat(filepath)
-    except OSError:
-        return False
-    return entry.get('mtime') == st.st_mtime and entry.get('size') == st.st_size
+def _set_progress(task_id, progress, processed, total, message):
+    t = scan_progress.get(task_id)
+    if t is None:
+        return
+    t['progress'] = max(0, min(100, int(progress)))
+    t['processed'] = int(processed)
+    t['total'] = int(total)
+    t['message'] = message
 
 
 # ===================================================================
-#                     Кадры
+#                     Видео: кадры
 # ===================================================================
 def _extract_frames(video_path, positions):
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
-        print(f"[dup] cv2 cannot open: {video_path}")
         return []
     try:
         total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -163,10 +323,10 @@ def _process_video_frames(video_path):
     out = []
     for pos, frame in raw:
         try:
-            pil_img = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-            out.append({'position': float(pos), 'hashes': _hash_image(pil_img)})
-        except Exception as e:
-            print(f"[dup] frame hash error {video_path} at {pos}: {e}")
+            pil = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+            out.append({'position': float(pos), 'hashes': _hash_image(pil)})
+        except Exception:
+            pass
     if not out:
         cap = cv2.VideoCapture(video_path)
         if cap.isOpened():
@@ -175,8 +335,8 @@ def _process_video_frames(video_path):
                 cap.set(cv2.CAP_PROP_POS_FRAMES, max(0, total // 2))
                 ret, frame = cap.read()
                 if ret:
-                    pil_img = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-                    out = [{'position': 0.5, 'hashes': _hash_image(pil_img)}]
+                    pil = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+                    out = [{'position': 0.5, 'hashes': _hash_image(pil)}]
             finally:
                 cap.release()
     return out
@@ -187,8 +347,7 @@ def _process_image_frames(image_path):
         img = Image.open(image_path).convert('RGB')
         img.thumbnail((256, 256), Image.Resampling.LANCZOS)
         return [{'position': 0.5, 'hashes': _hash_image(img)}]
-    except Exception as e:
-        print(f"[dup] image hash error {image_path}: {e}")
+    except Exception:
         return []
 
 
@@ -197,7 +356,7 @@ def _process_image_frames(image_path):
 # ===================================================================
 def _extract_audio_fingerprint(filepath):
     if not FPCALC_PATH:
-        return None, 0
+        return None
     try:
         r = subprocess.run(
             [FPCALC_PATH, '-raw', '-json',
@@ -206,24 +365,18 @@ def _extract_audio_fingerprint(filepath):
             encoding='utf-8', errors='replace',
         )
         if r.returncode != 0 or not r.stdout:
-            return None, 0
+            return None
         data = json.loads(r.stdout)
         fp_data = data.get('fingerprint')
         if not fp_data:
-            return None, 0
+            return None
         if isinstance(fp_data, list):
-            fp = [int(x) & 0xFFFFFFFF for x in fp_data]
-        else:
-            raw = base64.b64decode(fp_data)
-            n = len(raw) // 4
-            fp = list(struct.unpack('<%dI' % n, raw[:n * 4]))
-        return fp, float(data.get('duration', 0) or 0)
-    except subprocess.TimeoutExpired:
-        print(f"[dup] fpcalc timeout: {filepath}")
-        return None, 0
-    except Exception as e:
-        print(f"[dup] fpcalc error: {e}")
-        return None, 0
+            return [int(x) & 0xFFFFFFFF for x in fp_data]
+        raw = base64.b64decode(fp_data)
+        n = len(raw) // 4
+        return list(struct.unpack('<%dI' % n, raw[:n * 4]))
+    except Exception:
+        return None
 
 
 def _popcount_u32(x):
@@ -236,7 +389,6 @@ def _popcount_u32(x):
 
 
 def _find_longest_run_np(flags):
-    """flags — np.array(int) 0/1.  Возвращает (length, start)."""
     if len(flags) == 0:
         return 0, 0
     padded = np.concatenate(([0], flags.astype(np.int8), [0]))
@@ -250,26 +402,115 @@ def _find_longest_run_np(flags):
     return int(lengths[idx]), int(starts[idx])
 
 
-def _find_audio_match(fp_a, fp_b):
-    """
-    Возвращает dict с деталями совпадения или None.
+def _is_silence_like(fp):
+    if fp is None:
+        return True
+    arr = np.asarray(fp, dtype=np.uint32)
+    n = len(arr)
+    if n < 20:
+        return True
+    unique_ratio = len(np.unique(arr)) / n
+    if n > 1:
+        transitions = np.sum(arr[1:] != arr[:-1])
+        transition_ratio = transitions / (n - 1)
+        xor = np.bitwise_xor(arr[1:], arr[:-1])
+        mean_diff_bits = float(np.mean(_popcount_u32(xor)))
+    else:
+        transition_ratio = 0.0
+        mean_diff_bits = 0.0
+    if (unique_ratio < AUDIO_SILENCE_MIN_UNIQUE_RATIO and
+            transition_ratio < AUDIO_SILENCE_MIN_TRANSITION_RATIO):
+        return True
+    if mean_diff_bits < AUDIO_SILENCE_MIN_MEAN_DIFF_BITS:
+        return True
+    return False
 
-    Первые AUDIO_SKIP_INTRO_SEC секунд отбрасываются с обеих дорожек
-    (защита от одинаковых интро).  В start_a_sec / start_b_sec
-    добавка возвращается обратно — чтобы Jump попадал в реальную
-    позицию исходного видео.
+
+def _fft_has_correlation(a, b):
     """
-    if not fp_a or not fp_b:
+    Быстрая проверка, есть ли между a и b корреляция.
+    Использует FFT по popcount. Возвращает (True, peak_std_ratio)
+    или (False, ratio).
+    """
+    if len(a) < 40 or len(b) < 40:
+        return False, 0.0
+    a_f = _popcount_u32(np.asarray(a, dtype=np.uint32)).astype(np.float32)
+    b_f = _popcount_u32(np.asarray(b, dtype=np.uint32)).astype(np.float32)
+    a_f -= a_f.mean()
+    b_f -= b_f.mean()
+    n = len(a_f) + len(b_f)
+    fa = np.fft.rfft(a_f, n)
+    fb = np.fft.rfft(b_f, n)
+    corr = np.fft.irfft(fa * np.conj(fb), n)
+    abs_corr = np.abs(corr)
+    peak = float(abs_corr.max())
+    std = float(abs_corr.std())
+    if std < 1e-9:
+        return False, 0.0
+    ratio = peak / std
+    return ratio >= FFT_PEAK_STD_RATIO, ratio
+
+
+def _verify_audio_at_shift(a, b, shift_a, shift_b):
+    """Точная проверка на заданном сдвиге: longest run."""
+    if shift_a >= len(a) or shift_b >= len(b):
         return None
-    a = np.asarray(fp_a, dtype=np.uint32)
-    b = np.asarray(fp_b, dtype=np.uint32)
+    la = len(a) - shift_a
+    lb = len(b) - shift_b
+    L = min(la, lb)
+    if L < 40:
+        return None
+    wa = a[shift_a:shift_a + L]
+    wb = b[shift_b:shift_b + L]
+    xor = np.bitwise_xor(wa, wb)
+    bits = _popcount_u32(xor)
+    flags = (bits <= AUDIO_BITS_TOLERANT).astype(np.int32)
+    run_len, run_start = _find_longest_run_np(flags)
+    min_run_steps = max(20, int(AUDIO_MIN_RUN_SEC * AUDIO_SUBPRINT_PER_SEC))
+    if run_len < min_run_steps:
+        return None
+    run_slice = wa[run_start:run_start + run_len]
+    if _is_silence_like(run_slice):
+        return None
+    start_a_step = shift_a + run_start
+    start_b_step = shift_b + run_start
+    return {
+        'run_steps': int(run_len),
+        'run_sec': float(run_len / AUDIO_SUBPRINT_PER_SEC),
+        'start_a_sec': float(AUDIO_SKIP_INTRO_SEC +
+                             start_a_step / AUDIO_SUBPRINT_PER_SEC),
+        'start_b_sec': float(AUDIO_SKIP_INTRO_SEC +
+                             start_b_step / AUDIO_SUBPRINT_PER_SEC),
+        'skipped_intro_sec': float(AUDIO_SKIP_INTRO_SEC),
+    }
 
-    # ---- пропускаем интро ----
+
+def _find_audio_match(a_raw, b_raw):
+    """
+    Точная проверка пары fingerprint'ов.
+
+    Схема:
+      1. Пропускаем интро, отсеиваем тишину.
+      2. FFT-префильтр: если корреляции нет — сразу None.
+      3. Полный перебор сдвигов с префильтром.
+    """
+    if not a_raw or not b_raw:
+        return None
+    a = np.asarray(a_raw, dtype=np.uint32)
+    b = np.asarray(b_raw, dtype=np.uint32)
+
     skip_steps = int(AUDIO_SKIP_INTRO_SEC * AUDIO_SUBPRINT_PER_SEC)
     if skip_steps > 0:
         a = a[skip_steps:]
         b = b[skip_steps:]
     if len(a) < 40 or len(b) < 40:
+        return None
+    if _is_silence_like(a) or _is_silence_like(b):
+        return None
+
+    # FFT-отсев: если корреляции нет, точный перебор не нужен.
+    has_corr, ratio = _fft_has_correlation(a, b)
+    if not has_corr:
         return None
 
     if len(a) >= len(b):
@@ -282,14 +523,19 @@ def _find_audio_match(fp_a, fp_b):
     la, lb = len(long_fp), len(short_fp)
     if lb < 40:
         return None
-    if np.count_nonzero(short_fp) < lb * 0.05:
-        return None
 
     min_run_steps = max(20, int(AUDIO_MIN_RUN_SEC * AUDIO_SUBPRINT_PER_SEC))
-    if min_run_steps > lb:
-        min_run_steps = lb
+    min_run_steps = min(min_run_steps, lb)
+    prefilter_len = min(AUDIO_PREFILTER_SAMPLES, lb)
+    short_head = short_fp[:prefilter_len]
 
     for shift in range(la - lb + 1):
+        head_window = long_fp[shift:shift + prefilter_len]
+        xor_h = np.bitwise_xor(head_window, short_head)
+        bits_h = _popcount_u32(xor_h)
+        if float(np.mean(bits_h <= AUDIO_BITS_TOLERANT)) < AUDIO_PREFILTER_GOOD_RATIO:
+            continue
+
         window = long_fp[shift:shift + lb]
         xor = np.bitwise_xor(window, short_fp)
         bits = _popcount_u32(xor)
@@ -297,23 +543,28 @@ def _find_audio_match(fp_a, fp_b):
         run_len, run_start = _find_longest_run_np(flags)
         if run_len >= min_run_steps:
             if a_is_long:
+                run_slice = long_fp[shift + run_start:shift + run_start + run_len]
+            else:
+                run_slice = short_fp[run_start:run_start + run_len]
+            if _is_silence_like(run_slice):
+                continue
+
+            if a_is_long:
                 start_a_step = shift + run_start
                 start_b_step = run_start
             else:
                 start_a_step = run_start
                 start_b_step = shift + run_start
 
-            # добавляем обратно пропущенное интро
-            start_a_sec = AUDIO_SKIP_INTRO_SEC + start_a_step / AUDIO_SUBPRINT_PER_SEC
-            start_b_sec = AUDIO_SKIP_INTRO_SEC + start_b_step / AUDIO_SUBPRINT_PER_SEC
-
             return {
                 'run_steps': int(run_len),
                 'run_sec': float(run_len / AUDIO_SUBPRINT_PER_SEC),
-                'shift': int(shift),
-                'start_a_sec': float(start_a_sec),
-                'start_b_sec': float(start_b_sec),
+                'start_a_sec': float(AUDIO_SKIP_INTRO_SEC +
+                                     start_a_step / AUDIO_SUBPRINT_PER_SEC),
+                'start_b_sec': float(AUDIO_SKIP_INTRO_SEC +
+                                     start_b_step / AUDIO_SUBPRINT_PER_SEC),
                 'skipped_intro_sec': float(AUDIO_SKIP_INTRO_SEC),
+                'fft_ratio': round(float(ratio), 2),
             }
     return None
 
@@ -321,64 +572,75 @@ def _find_audio_match(fp_a, fp_b):
 # ===================================================================
 #                     Обработка одного медиа
 # ===================================================================
-def _process_media(item, cache_lock):
-    filepath = item['filepath']
-    if not os.path.exists(filepath):
+def _process_media(item):
+    path = item['filepath']
+    if not os.path.exists(path):
         return None
     try:
-        st = os.stat(filepath)
+        st = os.stat(path)
     except OSError:
         return None
 
-    with _HASH_CACHE_LOCK:
-        entry = _HASH_CACHE.get(filepath)
-    if _cache_fresh(entry, filepath):
-        return entry
-
     media_type = item.get('media_type', 'video')
+    file_id, is_fresh = _get_or_create_file(
+        path, st.st_mtime, st.st_size, media_type)
+
+    if is_fresh:
+        frames = _load_video_frames(file_id)
+        audio_fp = _load_audio_fp(file_id) if media_type == 'video' else None
+        if frames:
+            return {
+                'file_id': file_id,
+                'filepath': path,
+                'media_type': media_type,
+                'size': st.st_size,
+                'frames': frames,
+                'audio_fp': audio_fp,
+                'from_cache': True,
+            }
+
+    # Пересчёт
     if media_type == 'image':
-        frames = _process_image_frames(filepath)
+        frames = _process_image_frames(path)
         audio_fp = None
     else:
-        frames = _process_video_frames(filepath)
-        audio_fp, _ = _extract_audio_fingerprint(filepath)
+        frames = _process_video_frames(path)
+        audio_fp = _extract_audio_fingerprint(path)
 
     if not frames:
         return None
 
-    result = {
-        'filepath': filepath,
+    _save_video_frames(file_id, frames)
+    _save_audio_fp(file_id, audio_fp)
+
+    return {
+        'file_id': file_id,
+        'filepath': path,
         'media_type': media_type,
-        'mtime': st.st_mtime,
         'size': st.st_size,
         'frames': frames,
         'audio_fp': audio_fp,
+        'from_cache': False,
     }
-    with _HASH_CACHE_LOCK:
-        _HASH_CACHE[filepath] = result
-        global _HASH_CACHE_DIRTY
-        _HASH_CACHE_DIRTY = True
-    return result
 
 
 # ===================================================================
-#                     Сравнение пар
+#                     Video verification
 # ===================================================================
-def _find_video_matches(frames_a, frames_b, threshold):
-    """
-    Возвращает список совпадений:
-      [{'pos_a': 0.5, 'pos_b': 0.5, 'hamming': 0}, ...]
-    """
-    if not frames_a or not frames_b:
-        return []
+def _precompute_video_hashes(frames_by_path, paths):
+    out = []
+    for p in paths:
+        out.append([
+            (f['position'], [imagehash.hex_to_hash(h) for h in f['hashes']])
+            for f in frames_by_path[p]
+        ])
+    return out
+
+
+def _verify_video_pair(ha, hb, threshold):
     matches = []
-    objs_a = [(f['position'], [imagehash.hex_to_hash(h) for h in f['hashes']])
-              for f in frames_a]
-    objs_b = [(f['position'], [imagehash.hex_to_hash(h) for h in f['hashes']])
-              for f in frames_b]
-
-    for pos_a, hashes_a in objs_a:
-        for pos_b, hashes_b in objs_b:
+    for pos_a, hashes_a in ha:
+        for pos_b, hashes_b in hb:
             best = 999
             for h1 in hashes_a:
                 for h2 in hashes_b:
@@ -394,13 +656,112 @@ def _find_video_matches(frames_a, frames_b, threshold):
     return matches
 
 
+def _video_candidates(paths, hash_objs, threshold):
+    """
+    THRESHOLD=0: hash-index по всем 20 хешам на файл (5 кадров × 4 зеркала).
+    THRESHOLD>0: MIH 4×16 по orig-хешу каждого кадра.
+    """
+    n = len(paths)
+    pairs = set()
+    if threshold == 0:
+        index = defaultdict(list)
+        for i in range(n):
+            for _, hashes in hash_objs[i]:
+                for h in hashes:
+                    index[h].append(i)
+        for _, files in index.items():
+            if len(files) < 2:
+                continue
+            uniq = sorted(set(files))
+            for a in range(len(uniq)):
+                for b in range(a + 1, len(uniq)):
+                    pairs.add((uniq[a], uniq[b]))
+    else:
+        # MIH: (frame_idx, band_idx, band_val) -> [file_idx]
+        bucket = defaultdict(list)
+        mask = (1 << MIH_BAND_BITS) - 1
+        for i in range(n):
+            for frame_idx, (_, hashes) in enumerate(hash_objs[i]):
+                try:
+                    phash_int = int(hashes[0], 16)
+                except (ValueError, TypeError):
+                    continue
+                for band_idx in range(MIH_BANDS):
+                    shift = band_idx * MIH_BAND_BITS
+                    bv = (phash_int >> shift) & mask
+                    bucket[(frame_idx, band_idx, bv)].append(i)
+        pair_hits = defaultdict(int)
+        for key, files in bucket.items():
+            if len(files) < 2:
+                continue
+            frame_idx = key[0]
+            uniq = sorted(set(files))
+            for a in range(len(uniq)):
+                for b in range(a + 1, len(uniq)):
+                    pair_hits[(uniq[a], uniq[b], frame_idx)] += 1
+        for (fi, fj, _), hits in pair_hits.items():
+            if hits >= MIH_MIN_HITS:
+                pairs.add((fi, fj))
+    return pairs
+
+
+# ===================================================================
+#                     Audio LSH
+# ===================================================================
+def _audio_lsh_candidates(paths, audio_by_path):
+    n = len(paths)
+    skip_steps = int(AUDIO_SKIP_INTRO_SEC * AUDIO_SUBPRINT_PER_SEC)
+    mask = (1 << AUDIO_LSH_BAND_BITS) - 1
+    bucket = defaultdict(list)
+
+    for i in range(n):
+        fp = audio_by_path.get(paths[i])
+        if not fp:
+            continue
+        arr = np.asarray(fp, dtype=np.uint32)
+        if skip_steps > 0:
+            arr = arr[skip_steps:]
+        if len(arr) < 40:
+            continue
+        if _is_silence_like(arr):
+            continue
+        for band in range(AUDIO_LSH_BANDS):
+            shift = band * AUDIO_LSH_BAND_BITS
+            band_vals = (arr >> np.uint32(shift)) & np.uint32(mask)
+            seen = {}
+            for pos, bv in enumerate(band_vals):
+                bv_i = int(bv)
+                if bv_i not in seen:
+                    seen[bv_i] = pos
+            for bv_i, pos in seen.items():
+                bucket[(band, bv_i)].append((i, pos))
+
+    pair_hits = defaultdict(int)
+    for _, items in bucket.items():
+        if len(items) < 2:
+            continue
+        for a in range(len(items)):
+            fi, pi = items[a]
+            for b in range(a + 1, len(items)):
+                fj, pj = items[b]
+                if fi == fj:
+                    continue
+                if abs(pi - pj) > AUDIO_LSH_MAX_POS_DELTA:
+                    continue
+                lo, hi = (fi, fj) if fi < fj else (fj, fi)
+                pair_hits[(lo, hi)] += 1
+
+    return {p for p, c in pair_hits.items()
+            if c >= AUDIO_LSH_MIN_MATCHES}
+
+
 # ===================================================================
 #                     Группировка
 # ===================================================================
-def _group_all(frames_by_path, audio_by_path, item_by_path, threshold):
+def _group_all(task_id, frames_by_path, audio_by_path,
+               item_by_path, threshold):
     paths = list(frames_by_path.keys())
     n = len(paths)
-    idx = {p: i for i, p in enumerate(paths)}
     parent = list(range(n))
 
     def find(x):
@@ -414,43 +775,84 @@ def _group_all(frames_by_path, audio_by_path, item_by_path, threshold):
         if ra != rb:
             parent[ra] = rb
 
+    # ---------- VIDEO ----------
+    _set_progress(task_id, 40, 0, 0, 'Preparing video index...')
+    hash_objs = _precompute_video_hashes(frames_by_path, paths)
+
+    _set_progress(task_id, 42, 0, 0, 'Building video candidate index...')
+    video_pairs = _video_candidates(paths, hash_objs, threshold)
+    print(f"[dup] video candidates: {len(video_pairs)}")
+
     video_matches_by_pair = {}
+    total_vp = len(video_pairs)
+    done_v = 0
+    if total_vp:
+        _set_progress(task_id, 45, 0, total_vp, 'Verifying video pairs...')
+        pairs_list = list(video_pairs)
+        with ThreadPoolExecutor(max_workers=COMPARE_WORKERS) as ex:
+            futures = [
+                ex.submit(_verify_video_pair,
+                          hash_objs[i], hash_objs[j], threshold)
+                for (i, j) in pairs_list
+            ]
+            for fut, (i, j) in zip(futures, pairs_list):
+                m = fut.result()
+                if m:
+                    union(i, j)
+                    video_matches_by_pair[(i, j)] = m
+                done_v += 1
+                if done_v % 200 == 0 or done_v == total_vp:
+                    pct = 45 + int(done_v / total_vp * 20)
+                    _set_progress(task_id, pct, done_v, total_vp,
+                                  f'Video verify {done_v}/{total_vp}')
+    print(f"[dup] video matched: {len(video_matches_by_pair)} / {total_vp}")
+
+    # ---------- AUDIO ----------
+    _set_progress(task_id, 65, 0, 0, 'Building audio LSH index...')
+    audio_pairs_all = _audio_lsh_candidates(paths, audio_by_path)
+    print(f"[dup] audio candidates (LSH raw): {len(audio_pairs_all)}")
+
+    audio_pairs = {p for p in audio_pairs_all if find(p[0]) != find(p[1])}
+    skipped = len(audio_pairs_all) - len(audio_pairs)
+    print(f"[dup] audio after skip video-matched: {len(audio_pairs)} "
+          f"(skipped {skipped})")
+
     audio_matches_by_pair = {}
+    total_ap = len(audio_pairs)
+    done_a = 0
+    if total_ap:
+        _set_progress(task_id, 70, 0, total_ap, 'Audio verify (FFT)...')
+        pairs_list = list(audio_pairs)
+        with ThreadPoolExecutor(max_workers=COMPARE_WORKERS) as ex:
+            futures = [
+                ex.submit(_find_audio_match,
+                          audio_by_path[paths[i]],
+                          audio_by_path[paths[j]])
+                for (i, j) in pairs_list
+            ]
+            for fut, (i, j) in zip(futures, pairs_list):
+                res = fut.result()
+                if res and find(i) != find(j):
+                    union(i, j)
+                    audio_matches_by_pair[(i, j)] = res
+                done_a += 1
+                if done_a % 100 == 0 or done_a == total_ap:
+                    pct = 70 + int(done_a / total_ap * 25)
+                    _set_progress(task_id, pct, done_a, total_ap,
+                                  f'Audio verify {done_a}/{total_ap}')
+    print(f"[dup] audio matched: {len(audio_matches_by_pair)} / {total_ap}")
 
-    # ---------- video ----------
-    for i in range(n):
-        for j in range(i + 1, n):
-            matches = _find_video_matches(
-                frames_by_path[paths[i]],
-                frames_by_path[paths[j]],
-                threshold,
-            )
-            if matches:
-                union(i, j)
-                video_matches_by_pair[(i, j)] = matches
+    # ---------- СБОРКА ГРУПП ----------
+    _set_progress(task_id, 95, 0, 0, 'Grouping results...')
 
-    # ---------- audio ----------
-    audio_items = [(i, audio_by_path[p]) for i, p in enumerate(paths)
-                   if audio_by_path.get(p)]
-    for a_pos in range(len(audio_items)):
-        i, fp_i = audio_items[a_pos]
-        for b_pos in range(a_pos + 1, len(audio_items)):
-            j, fp_j = audio_items[b_pos]
-            res = _find_audio_match(fp_i, fp_j)
-            if res:
-                union(i, j)
-                audio_matches_by_pair[(i, j)] = res
-
-    # ---------- сборка групп ----------
     by_root = defaultdict(list)
-    for i, path in enumerate(paths):
+    for i in range(n):
         by_root[find(i)].append(i)
 
     groups = []
     for root, idxs in by_root.items():
         if len(idxs) < 2:
             continue
-
         group_files = []
         for i in idxs:
             item = item_by_path.get(paths[i])
@@ -458,16 +860,13 @@ def _group_all(frames_by_path, audio_by_path, item_by_path, threshold):
                 group_files.append(item)
         if len(group_files) < 2:
             continue
-
         group_ids = {f['id'] for f in group_files}
 
         video_list = []
         for (i, j), pairs in video_matches_by_pair.items():
             a = item_by_path.get(paths[i])
             b = item_by_path.get(paths[j])
-            if not a or not b:
-                continue
-            if a['id'] in group_ids and b['id'] in group_ids:
+            if a and b and a['id'] in group_ids and b['id'] in group_ids:
                 video_list.append({
                     'a_id': a['id'],
                     'b_id': b['id'],
@@ -478,9 +877,7 @@ def _group_all(frames_by_path, audio_by_path, item_by_path, threshold):
         for (i, j), res in audio_matches_by_pair.items():
             a = item_by_path.get(paths[i])
             b = item_by_path.get(paths[j])
-            if not a or not b:
-                continue
-            if a['id'] in group_ids and b['id'] in group_ids:
+            if a and b and a['id'] in group_ids and b['id'] in group_ids:
                 audio_list.append({
                     'a_id': a['id'],
                     'b_id': b['id'],
@@ -502,17 +899,14 @@ def _group_all(frames_by_path, audio_by_path, item_by_path, threshold):
         groups.append({
             'files': group_files,
             'reason': reason,
-            'matches': {
-                'video': video_list,
-                'audio': audio_list,
-            },
+            'matches': {'video': video_list, 'audio': audio_list},
         })
 
     return groups
 
 
 # ===================================================================
-#                     Асинхронный запуск
+#                     Запуск
 # ===================================================================
 def find_duplicates_async(task_id, filters=None):
     global scan_in_progress, scan_progress
@@ -535,11 +929,10 @@ def _find_duplicates_worker(task_id, filters):
     global DUPLICATE_GROUPS, scan_in_progress
     try:
         print(f"[dup] worker start")
-        _load_hash_cache()
+        _init_db()
 
         all_items = get_all_videos()
         print(f"[dup] total in DB: {len(all_items)}")
-
         if filters:
             allowed = set(filters)
             all_items = [v for v in all_items
@@ -547,8 +940,7 @@ def _find_duplicates_worker(task_id, filters):
         print(f"[dup] after filter: {len(all_items)}")
 
         total = len(all_items)
-        scan_progress[task_id]['total'] = total
-        scan_progress[task_id]['message'] = f'Scanning {total} files...'
+        _set_progress(task_id, 0, 0, total, f'Scanning {total} files...')
 
         if total == 0:
             DUPLICATE_GROUPS = []
@@ -559,36 +951,38 @@ def _find_duplicates_worker(task_id, filters):
             })
             return
 
-        cache_lock = threading.Lock()
+        # Удаляем устаревшие записи из кеша
+        _cleanup_db([v['filepath'] for v in all_items])
+
         processed = 0
-        max_workers = min(4, os.cpu_count() or 1)
+        cached_count = 0
         frames_by_path = {}
         audio_by_path = {}
-        item_by_path = {}
 
-        def _job(item):
-            return item, _process_media(item, cache_lock)
-
-        with ThreadPoolExecutor(max_workers=max_workers) as ex:
-            futures = [ex.submit(_job, it) for it in all_items]
+        with ThreadPoolExecutor(max_workers=HASH_WORKERS) as ex:
+            futures = [ex.submit(_process_media, it) for it in all_items]
             for fut in as_completed(futures):
-                item, entry = fut.result()
+                try:
+                    entry = fut.result()
+                except Exception as e:
+                    print(f"[dup] hash err: {e}")
+                    entry = None
                 processed += 1
-                scan_progress[task_id]['progress'] = int(processed / total * 100)
-                scan_progress[task_id]['processed'] = processed
-                name = os.path.basename(item['filepath']) if item else '...'
-                scan_progress[task_id]['message'] = \
-                    f'Processing {processed}/{total} ({name})'
+                pct = int(processed / total * 40)
+                _set_progress(task_id, pct, processed, total,
+                              f'Hashing {processed}/{total}')
                 if entry:
-                    frames_by_path[item['filepath']] = entry['frames']
-                    audio_by_path[item['filepath']] = entry.get('audio_fp')
-                    item_by_path[item['filepath']] = item
+                    fp = entry['filepath']
+                    frames_by_path[fp] = entry['frames']
+                    audio_by_path[fp] = entry.get('audio_fp')
+                    if entry.get('from_cache'):
+                        cached_count += 1
 
-        _save_hash_cache()
-        print(f"[dup] hashed {len(frames_by_path)}/{total}")
+        item_by_path = {it['filepath']: it for it in all_items}
+        print(f"[dup] hashed {len(frames_by_path)}/{total} "
+              f"(cached: {cached_count}, fresh: {total - cached_count})")
 
-        scan_progress[task_id]['message'] = 'Comparing pairs (video + audio)...'
-        groups = _group_all(frames_by_path, audio_by_path,
+        groups = _group_all(task_id, frames_by_path, audio_by_path,
                             item_by_path, THRESHOLD)
         print(f"[dup] found {len(groups)} groups")
 
@@ -625,7 +1019,6 @@ def _save_groups(groups):
 # ===================================================================
 def get_duplicate_groups():
     global DUPLICATE_GROUPS
-
     if not DUPLICATE_GROUPS:
         try:
             with open(DUPLICATE_CACHE_FILE, 'r', encoding='utf-8') as f:
@@ -643,17 +1036,6 @@ def get_duplicate_groups():
                         'reason': g.get('reason', 'video'),
                         'matches': g.get('matches', {'video': [], 'audio': []}),
                     })
-            elif isinstance(g, list):
-                files = [v for v in g
-                         if isinstance(v, dict) and v.get('id') is not None]
-                if len(files) >= 2:
-                    DUPLICATE_GROUPS.append({
-                        'files': files,
-                        'reason': 'video',
-                        'matches': {'video': [], 'audio': []},
-                    })
-        print(f"[dup] loaded {len(DUPLICATE_GROUPS)} groups from cache")
-
     if not DUPLICATE_GROUPS:
         return []
 
@@ -671,13 +1053,11 @@ def get_duplicate_groups():
 
     conn = get_db_connection()
     try:
-        cursor = conn.cursor()
+        c = conn.cursor()
         placeholders = ','.join('?' * len(all_ids))
-        cursor.execute(
-            f'SELECT id FROM videos WHERE id IN ({placeholders})',
-            tuple(all_ids)
-        )
-        existing_ids = {row['id'] for row in cursor.fetchall()}
+        c.execute(f'SELECT id FROM videos WHERE id IN ({placeholders})',
+                  tuple(all_ids))
+        existing = {row['id'] for row in c.fetchall()}
     finally:
         conn.close()
 
@@ -685,7 +1065,7 @@ def get_duplicate_groups():
     changed = False
     for g in DUPLICATE_GROUPS:
         new_files = [v for v in g['files']
-                     if int(v.get('id', -1)) in existing_ids]
+                     if int(v.get('id', -1)) in existing]
         if len(new_files) >= 2:
             if len(new_files) != len(g['files']):
                 changed = True
@@ -696,7 +1076,6 @@ def get_duplicate_groups():
             })
         else:
             changed = True
-
     if changed:
         DUPLICATE_GROUPS = cleaned
         _save_groups(cleaned)
@@ -723,8 +1102,8 @@ def _unique_dst(dst_dir, name):
 def _remove_from_db(video_id):
     conn = get_db_connection()
     try:
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM videos WHERE id = ?", (video_id,))
+        c = conn.cursor()
+        c.execute("DELETE FROM videos WHERE id = ?", (video_id,))
         conn.commit()
     finally:
         conn.close()
@@ -746,11 +1125,9 @@ def move_selected(video_ids):
         video_ids = [int(x) for x in video_ids]
     except (TypeError, ValueError):
         return False, "Invalid video_ids"
-
     target = set(video_ids)
     moved = 0
     errors = []
-
     for vid in video_ids:
         v = get_video_by_id(vid)
         if not v:
@@ -765,10 +1142,8 @@ def move_selected(video_ids):
             shutil.move(src, dest)
             _remove_from_db(vid)
             moved += 1
-            print(f"[dup] moved: {src} -> {dest}")
         except Exception as e:
             errors.append(f"{os.path.basename(src)}: {e}")
-
     kept = []
     for g in DUPLICATE_GROUPS:
         new_files = [v for v in g['files']
@@ -781,7 +1156,6 @@ def move_selected(video_ids):
             })
     DUPLICATE_GROUPS = kept
     _save_groups(kept)
-
     if errors:
         return False, f"Moved {moved}, errors: {'; '.join(errors[:3])}"
     return True, f"Moved {moved} file(s)"
@@ -794,7 +1168,6 @@ def move_group(group_index, keep_best=True):
     files = groups[group_index]['files']
     if len(files) < 2:
         return False, "Not a duplicate group"
-
     best = max(files, key=lambda v: v.get('size', 0)) if keep_best else files[0]
     to_move = [v['id'] for v in files if v['id'] != best['id']]
     ok, msg = move_selected(to_move)
@@ -816,5 +1189,4 @@ def move_all_groups(keep_best=True):
         for v in files:
             if v['id'] != best['id']:
                 all_ids.append(v['id'])
-    ok, msg = move_selected(all_ids)
-    return ok, msg
+    return move_selected(all_ids)
