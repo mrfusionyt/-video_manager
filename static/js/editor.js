@@ -8,7 +8,13 @@
    • Set START / Set END — снять текущую позицию как границу.
    • Preview selection — проиграть выделенный отрезок.
    • Save — отправить start/end на бэкенд, там ffmpeg.
-   • High precision — включает точный seek (без скачков по keyframe).
+   • High precision — включает точный seek.
+
+   ВАЖНО про overwrite на Windows:
+     Пока <video> стримит исходный файл через /video/<id>, серверный
+     send_file держит файл открытым, и os.replace падает с WinError 5.
+     Поэтому перед POST мы делаем video.load() с пустым src — это
+     закрывает HTTP-стрим. Дополнительно сервер ретраит replace.
 
    Конфиг: window.EDITOR_CONFIG.
    ============================================================ */
@@ -96,8 +102,6 @@
     /* ---------------- Seek ---------------- */
     function seekTo(t) {
         t = Math.max(0, Math.min(state.duration, t));
-        // High precision: сначала пауза, потом точный currentTime.
-        // Без этого некоторые браузеры «догоняют» target, но неточно.
         if (chkHighPrecision.checked) {
             video.pause();
         }
@@ -229,7 +233,7 @@
     makeDraggable(tlHandleStart, true);
     makeDraggable(tlHandleEnd, false);
 
-    /* ---------------- Buttons ---------------- */
+    /* ---------------- Кнопки ---------------- */
     btnPlayPause.addEventListener('click', function () {
         if (video.paused) video.play().catch(function () {});
         else video.pause();
@@ -267,60 +271,98 @@
             if (!proceed) return;
         }
 
+        // ★ КРИТИЧНО: выгружаем видео из плеера, чтобы браузер закрыл
+        //   HTTP-стрим на исходный файл. Иначе на Windows os.replace
+        //   упадёт с WinError 5 (Access denied) — файл залочен.
+        try {
+            video.pause();
+            video.removeAttribute('src');
+            video.load();
+        } catch (e) {}
+
         btnSave.disabled = true;
         btnSave.textContent = 'Saving…';
         statusEl.textContent = '⏳ Processing video with ffmpeg…';
         statusEl.className = 'editor-status';
 
-        fetch('/editor/' + VIDEO_ID + '/save', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                start: state.start,
-                end: state.end,
-                mode: mode,
-                overwrite: overwrite,
-            }),
-        })
-            .then(function (r) { return r.json(); })
-            .then(function (data) {
-                if (data.success) {
-                    statusEl.textContent = '✅ Saved: ' + data.filename;
-                    statusEl.className = 'editor-status success';
+        // Небольшая задержка, чтобы браузер успел разорвать соединение.
+        setTimeout(function () {
+            fetch('/editor/' + VIDEO_ID + '/save', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    start: state.start,
+                    end: state.end,
+                    mode: mode,
+                    overwrite: overwrite,
+                }),
+            })
+                .then(function (r) { return r.json(); })
+                .then(function (data) {
+                    if (data.success) {
+                        if (data.fallback) {
+                            statusEl.textContent =
+                                '⚠️ ' + (data.message || 'Saved as new file');
+                            statusEl.className = 'editor-status success';
+                            setTimeout(function () {
+                                window.location.href =
+                                    '/watch/' + VIDEO_ID +
+                                    '?profile=' + encodeURIComponent(CFG.currentProfile || 'female');
+                            }, 2000);
+                            return;
+                        }
 
-                    if (overwrite) {
-                        setTimeout(function () {
-                            video.load();
-                            video.addEventListener('loadedmetadata', function onMeta() {
-                                video.removeEventListener('loadedmetadata', onMeta);
-                                state.duration = video.duration || 0;
-                                state.start = 0;
-                                state.end = state.duration;
-                                tlDuration.textContent = formatTime(state.duration);
-                                updateTimeline();
-                                updateInfo();
-                            });
-                        }, 400);
+                        statusEl.textContent = '✅ Saved: ' + data.filename;
+                        statusEl.className = 'editor-status success';
+
+                        if (overwrite) {
+                            // Перезагружаем видео с cache-buster, чтобы браузер
+                            // взял новый файл, а не закешированный старый.
+                            setTimeout(function () {
+                                var bust = '/video/' + VIDEO_ID + '?v=' + Date.now();
+                                video.setAttribute('src', bust);
+                                video.load();
+                                video.addEventListener('loadedmetadata', function onMeta() {
+                                    video.removeEventListener('loadedmetadata', onMeta);
+                                    state.duration = video.duration || 0;
+                                    state.start = 0;
+                                    state.end = state.duration;
+                                    tlDuration.textContent = formatTime(state.duration);
+                                    updateTimeline();
+                                    updateInfo();
+                                });
+                            }, 400);
+                        } else {
+                            setTimeout(function () {
+                                window.location.href =
+                                    '/watch/' + VIDEO_ID +
+                                    '?profile=' + encodeURIComponent(CFG.currentProfile || 'female');
+                            }, 1200);
+                        }
                     } else {
-                        setTimeout(function () {
-                            window.location.href =
-                                '/watch/' + VIDEO_ID +
-                                '?profile=' + encodeURIComponent(CFG.currentProfile || 'female');
-                        }, 1200);
+                        statusEl.textContent = '❌ ' + (data.error || 'Save failed');
+                        statusEl.className = 'editor-status error';
+
+                        // Возвращаем видео в плеер, раз сохранение провалилось
+                        try {
+                            video.setAttribute('src', '/video/' + VIDEO_ID);
+                            video.load();
+                        } catch (e) {}
                     }
-                } else {
-                    statusEl.textContent = '❌ ' + (data.error || 'Save failed');
+                })
+                .catch(function (e) {
+                    statusEl.textContent = '❌ Network error: ' + e;
                     statusEl.className = 'editor-status error';
-                }
-            })
-            .catch(function (e) {
-                statusEl.textContent = '❌ Network error: ' + e;
-                statusEl.className = 'editor-status error';
-            })
-            .finally(function () {
-                btnSave.disabled = false;
-                btnSave.textContent = '💾 Save trimmed video';
-            });
+                    try {
+                        video.setAttribute('src', '/video/' + VIDEO_ID);
+                        video.load();
+                    } catch (err) {}
+                })
+                .finally(function () {
+                    btnSave.disabled = false;
+                    btnSave.textContent = '💾 Save trimmed video';
+                });
+        }, 350); // ждём разрыва соединения
     });
 
     /* ---------------- Video events ---------------- */
