@@ -15,6 +15,32 @@
             <div class="video-wrapper" id="videoWrapper">
                 <div class="vp-strip" id="vpStrip"></div>
 
+                <!-- Индикатор play/pause (тап по центру) -->
+                <div class="tap-indicator tap-play" id="tapPlayIndicator">
+                    <img id="tapPlayIcon"
+                         src="{{ url_for('serve_image', filename='play.png') }}"
+                         alt="">
+                </div>
+
+                <!-- Индикатор -10s (двойной тап слева) -->
+                <div class="tap-indicator tap-seek tap-seek-left" id="tapSeekBack">
+                    <span class="tap-seek-icon">«</span>
+                    <span class="tap-seek-text">10</span>
+                </div>
+
+                <!-- Индикатор +10s (двойной тап справа) -->
+                <div class="tap-indicator tap-seek tap-seek-right" id="tapSeekForward">
+                    <span class="tap-seek-text">10</span>
+                    <span class="tap-seek-icon">»</span>
+                </div>
+
+                <!-- Превью при скраббинге на мобильном -->
+                <div class="mobile-scrub-tooltip" id="mobileScrubTooltip">
+                    <video class="scrub-video" id="mobileScrubVideo"
+                           muted playsinline preload="metadata"></video>
+                    <span class="scrub-time" id="mobileScrubTime">0:00</span>
+                </div>
+
                 <button type="button" class="mobile-playlist-btn" id="mobilePlaylistBtn" title="Add to playlist">
                     <img src="{{ url_for('serve_image', filename='pln.png') }}" alt="Add to playlist" id="mobilePlaylistIcon">
                 </button>

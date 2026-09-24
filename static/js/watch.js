@@ -1,30 +1,9 @@
 /* ============================================================
    watch.js — JS страницы /watch/<id>
-   ---------------------------------------------
-   Всё, что раньше было инлайн в watch.html:
-     • вертикальная карусель (.vp-strip) с 3 слотами
-     • fullscreen state
-     • зеркалирование (localStorage)
-     • звёзды с волной при наведении
-     • rating panel (мини-звёзды) + rating stars (большие)
-     • bottom sheets: playlists, categories
-     • playlist carousel + dropdown
-     • scrub-tooltip над таймлайном
-     • persist позиции просмотра (localStorage)
-     • swipe up/down в fullscreen (mobile)
-     • бегущая строка для длинных названий плейлистов
-
-   Конфиг приходит из окна как window.WATCH_CONFIG.
-
-   Лента (feed) строится в том же порядке, что и список на
-   странице index с учётом sort / search / folder / category.
-   При переходе на следующее видео все эти параметры
-   передаются в URL — см. buildWatchQuery().
    ============================================================ */
 (function () {
     'use strict';
 
-    /* ====== КОНФИГ ИЗ ШАБЛОНА ====== */
     var CFG = window.WATCH_CONFIG || {};
     var FEED_IDS = CFG.feedIds || [];
     var CURRENT_PROFILE = CFG.currentProfile || 'female';
@@ -53,14 +32,12 @@
     var ICON_PLN      = ICONS.pln;
     var ICON_PLD      = ICONS.pld;
 
-    /* ====== МЕДИА-ЗАПРОСЫ ====== */
     var MOBILE_MQ = window.matchMedia('(max-width: 768px), (max-height: 500px)');
     var IS_MOBILE = MOBILE_MQ.matches;
     MOBILE_MQ.addEventListener('change', function (e) { IS_MOBILE = e.matches; });
 
     var HAS_HOVER = window.matchMedia('(hover: hover)').matches;
 
-    /* ====== СОСТОЯНИЕ ====== */
     var isNavigating = false;
     var isPlaying = true;
     var loopActive = false;
@@ -72,32 +49,19 @@
 
     var video = null;
 
-    var playerState = {
-        volume: 1.0,
-        muted: false,
-        rate: 1.0,
-        loop: false
-    };
+    var playerState = { volume: 1.0, muted: false, rate: 1.0, loop: false };
 
-    /* ====== СБОРКА QUERY ДЛЯ URL /watch/<id> ====== */
     function buildWatchQuery() {
         var parts = ['profile=' + encodeURIComponent(CURRENT_PROFILE)];
-        if (FEED_SORT && FEED_SORT !== 'date') {
-            parts.push('sort=' + encodeURIComponent(FEED_SORT));
-        }
-        if (FEED_SEARCH) {
-            parts.push('search=' + encodeURIComponent(FEED_SEARCH));
-        }
-        if (FEED_FOLDER) {
-            parts.push('folder=' + encodeURIComponent(FEED_FOLDER));
-        }
+        if (FEED_SORT && FEED_SORT !== 'date') parts.push('sort=' + encodeURIComponent(FEED_SORT));
+        if (FEED_SEARCH) parts.push('search=' + encodeURIComponent(FEED_SEARCH));
+        if (FEED_FOLDER) parts.push('folder=' + encodeURIComponent(FEED_FOLDER));
         for (var i = 0; i < FEED_CATEGORIES.length; i++) {
             parts.push('category=' + encodeURIComponent(FEED_CATEGORIES[i]));
         }
         return parts.join('&');
     }
 
-    /* ====== DOM ====== */
     var wrapper = document.getElementById('videoWrapper');
     var vpStrip = document.getElementById('vpStrip');
 
@@ -115,6 +79,14 @@
     var scrubTooltip = document.getElementById('scrubTooltip');
     var scrubVideo = document.getElementById('scrubVideo');
     var scrubTime = document.getElementById('scrubTime');
+
+    var tapPlayIndicator = document.getElementById('tapPlayIndicator');
+    var tapPlayIcon = document.getElementById('tapPlayIcon');
+    var tapSeekBack = document.getElementById('tapSeekBack');
+    var tapSeekForward = document.getElementById('tapSeekForward');
+    var mobileScrubTooltip = document.getElementById('mobileScrubTooltip');
+    var mobileScrubVideo = document.getElementById('mobileScrubVideo');
+    var mobileScrubTime = document.getElementById('mobileScrubTime');
 
     var starBtn = document.getElementById('starBtn');
     var starIcon = document.getElementById('starIcon');
@@ -135,14 +107,13 @@
     var categorySaveBtn = document.getElementById('categorySaveBtn');
 
     /* =========================================================
-       БЕГУЩАЯ СТРОКА ДЛЯ ДЛИННЫХ НАЗВАНИЙ ПЛЕЙЛИСТОВ
+       ПЛЕЙЛИСТЫ: бегущая строка
        ========================================================= */
     function setupPlaylistNameMarquee(nameSpan) {
         if (!nameSpan) return;
         var text = (nameSpan.dataset.pnText || nameSpan.textContent || '').trim();
         if (!text) return;
         nameSpan.dataset.pnText = text;
-
         nameSpan.classList.remove('marquee');
         nameSpan.style.removeProperty('--pn-duration');
         nameSpan.style.removeProperty('--pn-distance');
@@ -155,20 +126,15 @@
             if (textW <= containerW + 1) return;
 
             var gap = 40;
-
             var t1 = document.createElement('span');
-            t1.className = 'pn-text';
-            t1.textContent = text;
-
+            t1.className = 'pn-text'; t1.textContent = text;
             var t2 = document.createElement('span');
             t2.className = 'pn-text pn-dup';
             t2.setAttribute('aria-hidden', 'true');
             t2.textContent = text;
-
             var track = document.createElement('span');
             track.className = 'pn-track';
-            track.appendChild(t1);
-            track.appendChild(t2);
+            track.appendChild(t1); track.appendChild(t2);
 
             nameSpan.textContent = '';
             nameSpan.appendChild(track);
@@ -182,7 +148,7 @@
     }
 
     /* =========================================================
-       PERSISTENCE — сохранение позиции просмотра
+       PERSISTENCE
        ========================================================= */
     var POS_KEY = 'vp_pos_';
     var MIN_SAVE_SECONDS = 3;
@@ -194,7 +160,6 @@
         if (!isFinite(t) || t < MIN_SAVE_SECONDS) return;
         try { localStorage.setItem(POS_KEY + id, String(Math.floor(t))); } catch (e) {}
     }
-
     function loadVideoPosition(id) {
         if (!id) return 0;
         try {
@@ -203,15 +168,12 @@
             return isFinite(n) && n > 0 ? n : 0;
         } catch (e) { return 0; }
     }
-
     function clearVideoPosition(id) {
         if (!id) return;
         try { localStorage.removeItem(POS_KEY + id); } catch (e) {}
     }
-
     function attachPersistence(videoEl, videoId) {
         if (!videoEl || !videoId) return;
-
         videoEl.addEventListener('loadedmetadata', function onMeta() {
             videoEl.removeEventListener('loadedmetadata', onMeta);
             var saved = loadVideoPosition(videoId);
@@ -221,7 +183,6 @@
             if (saved >= dur - END_THRESHOLD) return;
             try { videoEl.currentTime = saved; } catch (e) {}
         });
-
         var lastSaved = -1;
         videoEl.addEventListener('timeupdate', function () {
             if (videoEl.seeking) return;
@@ -231,19 +192,17 @@
                 saveVideoPosition(videoId, t);
             }
         });
-
         videoEl.addEventListener('pause', function () {
             if (videoEl.seeking) return;
             saveVideoPosition(videoId, videoEl.currentTime);
         });
-
         videoEl.addEventListener('ended', function () {
             clearVideoPosition(videoId);
         });
     }
 
     /* =========================================================
-       КАРУСЕЛЬ: 3 СЛОТА, ОДНА ПОЛОСА
+       КАРУСЕЛЬ
        ========================================================= */
     var slideMap = new Map();
     var FEED_DURATION = 300;
@@ -257,14 +216,16 @@
 
         var videoEl = document.createElement('video');
         videoEl.className = 'vp-video';
-        videoEl.playsInline = true;
         videoEl.setAttribute('preload', 'auto');
         videoEl.setAttribute('src', '/video/' + videoId);
+        videoEl.setAttribute('playsinline', '');
+        videoEl.setAttribute('webkit-playsinline', '');
+        videoEl.setAttribute('muted', '');
+        videoEl.playsInline = true;
         videoEl.muted = true;
         videoEl.loop = false;
 
         slideEl.appendChild(videoEl);
-
         attachPersistence(videoEl, videoId);
 
         var entry = { slide: slideEl, video: videoEl, feedIndex: feedIndex, videoId: videoId };
@@ -275,13 +236,11 @@
     function destroySlide(feedIndex) {
         var entry = slideMap.get(feedIndex);
         if (!entry) return;
-
         try {
             if (!entry.video.paused && !entry.video.seeking) {
                 saveVideoPosition(entry.videoId, entry.video.currentTime);
             }
         } catch (e) {}
-
         try { entry.video.pause(); } catch (e) {}
         try { entry.video.removeAttribute('src'); entry.video.load(); } catch (e) {}
         if (entry.slide.parentNode) entry.slide.parentNode.removeChild(entry.slide);
@@ -303,8 +262,7 @@
 
         var existingKeys = Array.from(slideMap.keys());
         for (var k = 0; k < existingKeys.length; k++) {
-            var idx = existingKeys[k];
-            if (!wantSet.has(idx)) destroySlide(idx);
+            if (!wantSet.has(existingKeys[k])) destroySlide(existingKeys[k]);
         }
         for (var j = 0; j < want.length; j++) {
             if (!slideMap.has(want[j])) createSlide(want[j]);
@@ -349,10 +307,8 @@
         }
 
         isNavigating = true;
-
         var want = windowIndices();
         var targetPos = want.indexOf(nextIdx);
-
         var currentEntry = slideMap.get(currentFeedIndex);
         var targetEntry = slideMap.get(nextIdx);
 
@@ -391,7 +347,6 @@
 
         ready.then(function () {
             targetEntry.video.play().catch(function () {});
-
             requestAnimationFrame(function () {
                 vpStrip.style.transition = 'transform ' + FEED_DURATION + 'ms ' + FEED_EASING;
                 vpStrip.style.transform = 'translate3d(0, ' + (-targetPos * 100) + '%, 0)';
@@ -419,10 +374,8 @@
             try { oldEntry.video.pause(); } catch (e) {}
             try { oldEntry.video.currentTime = 0; } catch (e) {}
         }
-
         currentFeedIndex = nextIdx;
         currentVideoId = FEED_IDS[nextIdx];
-
         rebuildWindow(true);
 
         var newEntry = slideMap.get(currentFeedIndex);
@@ -440,6 +393,7 @@
         );
 
         updateScrubSrc(currentVideoId);
+        updateMobileScrubSrc(currentVideoId);
 
         fetch('/watch/' + currentVideoId + '?' + buildWatchQuery(), {
             headers: { 'X-Requested-With': 'XMLHttpRequest' }
@@ -447,25 +401,18 @@
             .then(function (r) { return r.text(); })
             .then(function (html) {
                 var doc = new DOMParser().parseFromString(html, 'text/html');
-
                 var newTitleEl = doc.querySelector('#videoTitle');
                 var oldTitleEl = document.getElementById('videoTitle');
                 if (newTitleEl && oldTitleEl) oldTitleEl.innerHTML = newTitleEl.innerHTML;
-
                 var newAddedEl = doc.querySelector('#videoAdded');
                 var oldAddedEl = document.getElementById('videoAdded');
                 if (newAddedEl && oldAddedEl) oldAddedEl.textContent = newAddedEl.textContent;
-
                 var newRating = doc.querySelectorAll('#ratingStars .star.active').length;
                 currentRating = newRating;
-                updateStarIcon();
-                updateMiniStars();
-                updateBigStars();
-
+                updateStarIcon(); updateMiniStars(); updateBigStars();
                 var newTags = doc.querySelector('.category-tags');
                 var oldTags = document.querySelector('.category-tags');
                 if (newTags && oldTags) oldTags.innerHTML = newTags.innerHTML;
-
                 var newInfo = doc.querySelector('#videoInfoModal .modal-body');
                 var oldInfo = document.querySelector('#videoInfoModal .modal-body');
                 if (newInfo && oldInfo) oldInfo.innerHTML = newInfo.innerHTML;
@@ -479,12 +426,13 @@
         playIcon.src = ICON_PAUSE;
         playIcon.alt = 'Pause';
         isPlaying = true;
-
         isNavigating = false;
     }
 
     /* =========================================================
-       FULLSCREEN STATE
+       FULLSCREEN: только нативный Fullscreen API на wrapper div.
+       Без fallback на video.webkitEnterFullscreen (он открывает
+       нативный плеер и поворачивает видео в ландшафт).
        ========================================================= */
     function getFullscreenElement() {
         return document.fullscreenElement
@@ -503,6 +451,51 @@
         }
     }
 
+    function enterFullscreen() {
+        var req = wrapper.requestFullscreen
+            || wrapper.webkitRequestFullscreen
+            || wrapper.mozRequestFullScreen
+            || wrapper.msRequestFullscreen;
+        if (!req) {
+            console.warn('[watch] Fullscreen API not supported');
+            return;
+        }
+        try {
+            var p = req.call(wrapper);
+            if (p && p.catch) {
+                p.catch(function (err) {
+                    console.warn('[watch] requestFullscreen failed:', err);
+                });
+            }
+        } catch (err) {
+            console.warn('[watch] requestFullscreen threw:', err);
+        }
+    }
+
+    function exitFullscreen() {
+        var exit = document.exitFullscreen
+            || document.webkitExitFullscreen
+            || document.mozCancelFullScreen
+            || document.msExitFullscreen;
+        if (!exit) return;
+        if (!getFullscreenElement()) return;
+        try {
+            var p = exit.call(document);
+            if (p && p.catch) {
+                p.catch(function (err) {
+                    console.warn('[watch] exitFullscreen failed:', err);
+                });
+            }
+        } catch (err) {
+            console.warn('[watch] exitFullscreen threw:', err);
+        }
+    }
+
+    function toggleFullscreen() {
+        if (getFullscreenElement()) exitFullscreen();
+        else enterFullscreen();
+    }
+
     /* =========================================================
        ЗЕРКАЛИРОВАНИЕ
        ========================================================= */
@@ -518,13 +511,11 @@
             entry.video.style.transform = isMirrored ? 'scaleX(-1)' : '';
         });
     }
-
     function toggleMirror() {
         isMirrored = !isMirrored;
         try { localStorage.setItem(MIRROR_STORAGE_KEY, isMirrored ? '1' : '0'); } catch (e) {}
         applyMirrorState();
     }
-
     document.addEventListener('click', function (e) {
         var btn = e.target.closest('#mirrorBtn');
         if (!btn) return;
@@ -534,27 +525,24 @@
     });
 
     /* =========================================================
-       ОЦЕНКИ + ВОЛНА
+       РЕЙТИНГ
        ========================================================= */
     function updateStarIcon() {
         if (!starIcon) return;
         starIcon.classList.toggle('inactive', !(currentRating > 0));
     }
-
     function updateMiniStars() {
         starsMini.forEach(function (s) {
             var val = parseInt(s.dataset.value, 10);
             s.classList.toggle('active', val <= currentRating);
         });
     }
-
     function updateBigStars() {
         document.querySelectorAll('#ratingStars .star').forEach(function (s) {
             var val = parseInt(s.dataset.value, 10);
             s.classList.toggle('active', val <= currentRating);
         });
     }
-
     function openRatingPanel() { if (!ratingPanel) return; isRatingPanelOpen = true; ratingPanel.classList.add('open'); }
     function closeRatingPanel() { if (!ratingPanel) return; isRatingPanelOpen = false; ratingPanel.classList.remove('open'); clearStarWave(starsMini); }
     function toggleRatingPanel() { if (isRatingPanelOpen) closeRatingPanel(); else openRatingPanel(); }
@@ -569,9 +557,7 @@
             .then(function (data) {
                 if (data.success) {
                     currentRating = val;
-                    updateStarIcon();
-                    updateMiniStars();
-                    updateBigStars();
+                    updateStarIcon(); updateMiniStars(); updateBigStars();
                     setTimeout(closeRatingPanel, 300);
                 }
             })
@@ -579,14 +565,12 @@
     }
 
     var STAR_WAVE_DELAY = 30;
-
     function clearStarWave(stars) {
         stars.forEach(function (s) {
             s.style.transitionDelay = '0ms';
             s.classList.remove('hover-active');
         });
     }
-
     function attachStarWave(stars) {
         if (!stars || !stars.length) return;
         stars.forEach(function (star, idx) {
@@ -603,50 +587,37 @@
             });
         });
     }
-
     var bigStars = document.querySelectorAll('#ratingStars .star');
     attachStarWave(bigStars);
     var ratingStarsContainer = document.getElementById('ratingStars');
     if (ratingStarsContainer) {
-        ratingStarsContainer.addEventListener('mouseleave', function () {
-            clearStarWave(bigStars);
-        });
+        ratingStarsContainer.addEventListener('mouseleave', function () { clearStarWave(bigStars); });
     }
-
     attachStarWave(starsMini);
     if (ratingPanel) {
-        ratingPanel.addEventListener('mouseleave', function () {
-            clearStarWave(starsMini);
-        });
+        ratingPanel.addEventListener('mouseleave', function () { clearStarWave(starsMini); });
     }
-
     if (starBtn) {
         starBtn.addEventListener('click', function (e) {
             e.preventDefault(); e.stopPropagation();
             toggleRatingPanel();
         });
     }
-
     starsMini.forEach(function (s) {
         s.addEventListener('click', function (e) {
             e.preventDefault(); e.stopPropagation();
             setRating(parseInt(this.dataset.value, 10));
         });
     });
-
     document.addEventListener('click', function (e) {
         if (!isRatingPanelOpen) return;
         if (e.target.closest('#ratingPanel')) return;
         if (e.target.closest('#starBtn')) return;
         closeRatingPanel();
     });
-
     bigStars.forEach(function (star) {
-        star.addEventListener('click', function () {
-            setRating(parseInt(this.dataset.value, 10));
-        });
+        star.addEventListener('click', function () { setRating(parseInt(this.dataset.value, 10)); });
     });
-
     updateStarIcon();
     updateMiniStars();
 
@@ -660,6 +631,7 @@
     function hideControls() {
         clearTimeout(controlsTimeout);
         controlsTimeout = setTimeout(function () {
+            if (video && video.paused) return;
             wrapper.classList.remove('show-controls');
         }, 3000);
     }
@@ -690,7 +662,6 @@
         playlistSheet.classList.remove('open');
         playlistSheetOverlay.classList.remove('open');
     }
-
     if (playlistSheetClose) {
         playlistSheetClose.addEventListener('click', function (e) { e.stopPropagation(); closePlaylistSheet(); });
     }
@@ -714,26 +685,21 @@
         categorySheet.classList.remove('open');
         categorySheetOverlay.classList.remove('open');
     }
-
     if (categorySheetClose) {
         categorySheetClose.addEventListener('click', function (e) { e.stopPropagation(); closeCategorySheet(); });
     }
     if (categorySheetOverlay) {
         categorySheetOverlay.addEventListener('click', function () { closeCategorySheet(); });
     }
-    if (categorySaveBtn) {
-        categorySaveBtn.addEventListener('click', saveCategories);
-    }
+    if (categorySaveBtn) categorySaveBtn.addEventListener('click', saveCategories);
 
     function loadCategoriesForModal() {
         var listEl = document.getElementById('watchCatSheetList');
         if (!listEl) return;
-
         if (!ALL_CATEGORIES || ALL_CATEGORIES.length === 0) {
             listEl.innerHTML = '<div class="mp-empty">No categories yet.<br>Add them in Settings.</div>';
             return;
         }
-
         listEl.innerHTML = '';
         ALL_CATEGORIES.forEach(function (cat) {
             var item = document.createElement('label');
@@ -755,11 +721,9 @@
         document.querySelectorAll('#watchCatSheetList input[type="checkbox"]:checked').forEach(function (cb) {
             checked.push(parseInt(cb.value, 10));
         });
-
         categorySaveBtn.disabled = true;
         var origText = categorySaveBtn.textContent;
         categorySaveBtn.textContent = 'Saving...';
-
         fetch('/video/' + currentVideoId + '/set_categories', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -812,9 +776,7 @@
                 }
                 if (typeof info.rating === 'number') {
                     currentRating = info.rating;
-                    updateStarIcon();
-                    updateMiniStars();
-                    updateBigStars();
+                    updateStarIcon(); updateMiniStars(); updateBigStars();
                 }
             })
             .catch(function (err) { console.error('refreshVideoInfo', err); });
@@ -851,34 +813,6 @@
         muteIcon.alt = video.muted ? 'Mute' : 'Unmute';
     }
 
-    function toggleFullscreen() {
-        var fsElement = getFullscreenElement();
-        if (!fsElement) {
-            var req = wrapper.requestFullscreen
-                || wrapper.webkitRequestFullscreen
-                || wrapper.mozRequestFullScreen
-                || wrapper.msRequestFullscreen;
-            if (req) {
-                try {
-                    var result = req.call(wrapper);
-                    if (result && result.catch) result.catch(function (err) {
-                        console.warn('[watch] requestFullscreen rejected:', err);
-                    });
-                } catch (err) {
-                    console.warn('[watch] requestFullscreen threw:', err);
-                }
-            } else if (video && video.webkitEnterFullscreen) {
-                video.webkitEnterFullscreen();
-            }
-        } else {
-            var exit = document.exitFullscreen
-                || document.webkitExitFullscreen
-                || document.mozCancelFullScreen
-                || document.msExitFullscreen;
-            if (exit) exit.call(document);
-        }
-    }
-
     function toggleLoop() {
         loopActive = !loopActive;
         playerState.loop = loopActive;
@@ -900,25 +834,24 @@
         isPlaying = true;
         playIcon.src = ICON_PAUSE;
         playIcon.alt = 'Pause';
+        hideControls();
     }, true);
-
     vpStrip.addEventListener('pause', function (e) {
         if (!isCurrentVideoTarget(e.target)) return;
         isPlaying = false;
         playIcon.src = ICON_PLAY;
         playIcon.alt = 'Play';
+        showControls();
+        clearTimeout(controlsTimeout);
     }, true);
-
     vpStrip.addEventListener('timeupdate', function (e) {
         if (!isCurrentVideoTarget(e.target)) return;
         updateProgress();
     }, true);
-
     vpStrip.addEventListener('loadedmetadata', function (e) {
         if (!isCurrentVideoTarget(e.target)) return;
         updateProgress();
     }, true);
-
     vpStrip.addEventListener('volumechange', function (e) {
         if (!isCurrentVideoTarget(e.target)) return;
         playerState.volume = e.target.volume;
@@ -926,28 +859,19 @@
         muteIcon.src = e.target.muted ? ICON_MUTE : ICON_UNMUTE;
         muteIcon.alt = e.target.muted ? 'Mute' : 'Unmute';
     }, true);
-
     vpStrip.addEventListener('ratechange', function (e) {
         if (!isCurrentVideoTarget(e.target)) return;
         playerState.rate = e.target.playbackRate;
     }, true);
 
-    var hadTouchMove = false;
-    wrapper.addEventListener('touchstart', function () { hadTouchMove = false; }, { passive: true });
-    wrapper.addEventListener('touchmove', function () { hadTouchMove = true; }, { passive: true });
-
     wrapper.addEventListener('click', function (e) {
+        if (IS_MOBILE) return;
         var targetVideo = e.target.closest('.vp-video');
         if (!targetVideo) return;
-        if (IS_MOBILE) {
-            if (hadTouchMove) { hadTouchMove = false; return; }
-            toggleControlsVisibility();
-        } else {
-            togglePlay();
-        }
+        togglePlay();
     });
-
     wrapper.addEventListener('dblclick', function (e) {
+        if (IS_MOBILE) return;
         var targetVideo = e.target.closest('.vp-video');
         if (!targetVideo) return;
         toggleFullscreen();
@@ -1015,7 +939,7 @@
     }
 
     /* =========================================================
-       ТАЙМЛАЙН + PREVIEW-КАДР (SCRUB)
+       SCRUB: DESKTOP + MOBILE по таймлайну
        ========================================================= */
     function formatTime(t) {
         if (!isFinite(t) || t < 0) t = 0;
@@ -1031,17 +955,22 @@
         scrubVideo.src = url;
         try { scrubVideo.load(); } catch (e) {}
     }
+    function updateMobileScrubSrc(videoId) {
+        if (!mobileScrubVideo) return;
+        var url = '/video/' + videoId;
+        if (mobileScrubVideo.src && mobileScrubVideo.src.indexOf(url) !== -1) return;
+        mobileScrubVideo.src = url;
+        try { mobileScrubVideo.load(); } catch (e) {}
+    }
 
     var scrubSeeking = false;
     var scrubPending = null;
-
     function requestScrubFrame(time) {
         if (scrubSeeking) { scrubPending = time; return; }
         scrubSeeking = true;
         try { scrubVideo.currentTime = time; }
         catch (e) { scrubSeeking = false; }
     }
-
     if (scrubVideo) {
         scrubVideo.addEventListener('seeked', function () {
             scrubSeeking = false;
@@ -1057,15 +986,11 @@
         var rect = progressTrack.getBoundingClientRect();
         var pct = (clientX - rect.left) / rect.width;
         pct = Math.max(0, Math.min(1, pct));
-
         var trackWidth = rect.width;
         var tipWidth = scrubTooltip.offsetWidth || 168;
-
         var leftPx = pct * trackWidth - tipWidth / 2;
         leftPx = Math.max(-8, Math.min(trackWidth - tipWidth + 8, leftPx));
-
         scrubTooltip.style.left = (leftPx + tipWidth / 2) + 'px';
-
         return pct;
     }
 
@@ -1083,11 +1008,9 @@
             updateScrubSrc(currentVideoId);
             scrubTooltip.classList.add('visible');
         });
-
         progressTrack.addEventListener('mouseleave', function () {
             scrubTooltip.classList.remove('visible');
         });
-
         progressTrack.addEventListener('mousemove', function (e) {
             if (!video || !video.duration) return;
             var pct = positionScrubTooltip(e.clientX);
@@ -1098,9 +1021,9 @@
     }
 
     var isScrubbing = false;
-
     progressTrack.addEventListener('mousedown', function (e) {
         if (!video || !video.duration) return;
+        if (IS_MOBILE) return;
         e.preventDefault();
         isScrubbing = true;
         var rect = progressTrack.getBoundingClientRect();
@@ -1108,7 +1031,6 @@
         pct = Math.max(0, Math.min(1, pct));
         seekToPct(pct);
     });
-
     document.addEventListener('mousemove', function (e) {
         if (!isScrubbing) return;
         if (!video || !video.duration) return;
@@ -1117,13 +1039,10 @@
         pct = Math.max(0, Math.min(1, pct));
         seekToPct(pct);
     });
-
-    document.addEventListener('mouseup', function () {
-        isScrubbing = false;
-    });
-
+    document.addEventListener('mouseup', function () { isScrubbing = false; });
     progressTrack.addEventListener('click', function (e) {
         if (isScrubbing) return;
+        if (IS_MOBILE) return;
         if (!video || !video.duration) return;
         var rect = progressTrack.getBoundingClientRect();
         var pct = (e.clientX - rect.left) / rect.width;
@@ -1131,8 +1050,383 @@
         seekToPct(pct);
     });
 
+    /* --- mobile touch drag на таймлайне --- */
+    var mScrubActive = false;
+    var mScrubWasPlaying = false;
+    var mScrubSeeking = false;
+    var mScrubPending = null;
+
+    function mScrubRequestFrame(time) {
+        if (!mobileScrubVideo) return;
+        if (mobileScrubVideo.readyState < 1) {
+            mScrubPending = time;
+            return;
+        }
+        if (mScrubSeeking) { mScrubPending = time; return; }
+        mScrubSeeking = true;
+        try { mobileScrubVideo.currentTime = time; }
+        catch (e) { mScrubSeeking = false; }
+    }
+    if (mobileScrubVideo) {
+        mobileScrubVideo.addEventListener('seeked', function () {
+            mScrubSeeking = false;
+            if (mScrubPending !== null) {
+                var t = mScrubPending;
+                mScrubPending = null;
+                mScrubRequestFrame(t);
+            }
+        });
+        mobileScrubVideo.addEventListener('loadedmetadata', function () {
+            if (mScrubPending !== null) {
+                var t = mScrubPending;
+                mScrubPending = null;
+                mScrubRequestFrame(t);
+            }
+        });
+    }
+
+    function pctFromClientX(clientX) {
+        var rect = progressTrack.getBoundingClientRect();
+        var pct = (clientX - rect.left) / rect.width;
+        return Math.max(0, Math.min(1, pct));
+    }
+
+    function applyMobileTimelineScrub(clientX) {
+        if (!video || !video.duration) return;
+        var pct = pctFromClientX(clientX);
+        var targetTime = pct * video.duration;
+
+        try { video.currentTime = targetTime; } catch (e) {}
+        mScrubRequestFrame(targetTime);
+        mobileScrubTime.textContent = formatTime(targetTime);
+
+        progressFill.style.width = (pct * 100) + '%';
+        saveVideoPosition(currentVideoId, targetTime);
+    }
+
+    function onTimelineTouchStart(e) {
+        if (!IS_MOBILE) return;
+        if (!video || !video.duration) return;
+        if (e.touches.length !== 1) return;
+        e.preventDefault();
+        e.stopPropagation();
+
+        mScrubActive = true;
+        mScrubWasPlaying = !video.paused;
+        if (!video.paused) video.pause();
+
+        updateMobileScrubSrc(currentVideoId);
+        mobileScrubTooltip.classList.add('visible');
+        showControls();
+
+        applyMobileTimelineScrub(e.touches[0].clientX);
+    }
+    function onTimelineTouchMove(e) {
+        if (!mScrubActive) return;
+        if (e.touches.length !== 1) return;
+        e.preventDefault();
+        e.stopPropagation();
+        applyMobileTimelineScrub(e.touches[0].clientX);
+    }
+    function onTimelineTouchEnd(e) {
+        if (!mScrubActive) return;
+        mScrubActive = false;
+        e.preventDefault();
+        e.stopPropagation();
+        mobileScrubTooltip.classList.remove('visible');
+        mScrubPending = null;
+        if (mScrubWasPlaying && video) {
+            video.play().catch(function () {});
+        }
+        mScrubWasPlaying = false;
+    }
+
+    progressTrack.addEventListener('touchstart', onTimelineTouchStart, { passive: false });
+    progressTrack.addEventListener('touchmove', onTimelineTouchMove, { passive: false });
+    progressTrack.addEventListener('touchend', onTimelineTouchEnd, { passive: false });
+    progressTrack.addEventListener('touchcancel', onTimelineTouchEnd, { passive: false });
+
+    var progressContainer = progressTrack.parentNode;
+    if (progressContainer) {
+        progressContainer.addEventListener('touchstart', function (e) {
+            if (!IS_MOBILE) return;
+            if (!video || !video.duration) return;
+            if (mScrubActive) return;
+            if (e.touches.length !== 1) return;
+            e.preventDefault();
+            e.stopPropagation();
+            mScrubActive = true;
+            mScrubWasPlaying = !video.paused;
+            if (!video.paused) video.pause();
+            updateMobileScrubSrc(currentVideoId);
+            mobileScrubTooltip.classList.add('visible');
+            showControls();
+            applyMobileTimelineScrub(e.touches[0].clientX);
+        }, { passive: false });
+        progressContainer.addEventListener('touchmove', function (e) {
+            if (!mScrubActive) return;
+            if (e.touches.length !== 1) return;
+            e.preventDefault();
+            e.stopPropagation();
+            applyMobileTimelineScrub(e.touches[0].clientX);
+        }, { passive: false });
+        progressContainer.addEventListener('touchend', onTimelineTouchEnd, { passive: false });
+        progressContainer.addEventListener('touchcancel', onTimelineTouchEnd, { passive: false });
+    }
+
     /* =========================================================
-       СВАЙПЫ
+       МОБИЛЬНЫЕ ЖЕСТЫ по видео-области
+       ========================================================= */
+    var TAP_MAX_MOVE = 12;
+    var DOUBLE_TAP_DELAY = 260;
+    var SEEK_STEP = 10;
+    var TAP_INDICATOR_MS = 550;
+    var SCRUB_THRESHOLD_PX = 15;
+    var SCRUB_ZONE_BOTTOM_RATIO = 0.5;
+
+    var touchSession = null;
+    var lastTapTime = 0;
+    var lastTapZone = null;
+    var singleTapTimer = null;
+    var tapIndicatorTimer = null;
+    var tapSeekTimers = {};
+
+    var mobileScrubWasPlaying = false;
+    var mobileScrubState = { seeking: false, pending: null };
+
+    function mobileRequestScrubFrame(time) {
+        if (!mobileScrubVideo) return;
+        if (mobileScrubVideo.readyState < 1) {
+            mobileScrubState.pending = time;
+            return;
+        }
+        if (mobileScrubState.seeking) { mobileScrubState.pending = time; return; }
+        mobileScrubState.seeking = true;
+        try { mobileScrubVideo.currentTime = time; }
+        catch (e) { mobileScrubState.seeking = false; }
+    }
+    if (mobileScrubVideo) {
+        mobileScrubVideo.addEventListener('seeked', function () {
+            mobileScrubState.seeking = false;
+            if (mobileScrubState.pending !== null) {
+                var t = mobileScrubState.pending;
+                mobileScrubState.pending = null;
+                mobileRequestScrubFrame(t);
+            }
+        });
+        mobileScrubVideo.addEventListener('loadedmetadata', function () {
+            if (mobileScrubState.pending !== null) {
+                var t = mobileScrubState.pending;
+                mobileScrubState.pending = null;
+                mobileRequestScrubFrame(t);
+            }
+        });
+    }
+
+    function getTapZone(x, w) {
+        if (x < w / 3) return 'left';
+        if (x > w * 2 / 3) return 'right';
+        return 'center';
+    }
+    function isInteractiveTarget(el) {
+        if (!el || !el.closest) return false;
+        return !!(
+            el.closest('button') ||
+            el.closest('input') ||
+            el.closest('select') ||
+            el.closest('a') ||
+            el.closest('.rating-panel') ||
+            el.closest('.playlist-sheet') ||
+            el.closest('.progress-bar-track') ||
+            el.closest('.progress-container') ||
+            el.closest('.mobile-playlist-btn') ||
+            el.closest('.mobile-category-btn') ||
+            el.closest('.mobile-star-btn') ||
+            el.closest('.custom-controls')
+        );
+    }
+
+    function onTouchStart(e) {
+        if (!IS_MOBILE) return;
+        if (e.touches.length !== 1) { touchSession = null; return; }
+        if (isPlaylistSheetOpen || isCategorySheetOpen) { touchSession = null; return; }
+        if (isInteractiveTarget(e.target)) { touchSession = null; return; }
+
+        var touch = e.touches[0];
+        var rect = wrapper.getBoundingClientRect();
+        var relX = touch.clientX - rect.left;
+        var relY = touch.clientY - rect.top;
+
+        touchSession = {
+            startClientX: touch.clientX,
+            startClientY: touch.clientY,
+            startTime: Date.now(),
+            w: rect.width,
+            h: rect.height,
+            zone: getTapZone(relX, rect.width),
+            inScrubZone: relY > rect.height * SCRUB_ZONE_BOTTOM_RATIO,
+            moved: false,
+            scrubbing: false,
+            ended: false
+        };
+    }
+
+    function onTouchMove(e) {
+        if (!touchSession || touchSession.ended) return;
+        if (e.touches.length !== 1) { touchSession.ended = true; return; }
+
+        var touch = e.touches[0];
+        var dx = touch.clientX - touchSession.startClientX;
+        var dy = touch.clientY - touchSession.startClientY;
+
+        if (Math.abs(dx) > TAP_MAX_MOVE || Math.abs(dy) > TAP_MAX_MOVE) {
+            touchSession.moved = true;
+        }
+
+        if (touchSession.inScrubZone &&
+            !touchSession.scrubbing &&
+            Math.abs(dx) > SCRUB_THRESHOLD_PX &&
+            Math.abs(dx) > Math.abs(dy)) {
+            touchSession.scrubbing = true;
+            startMobileScrub();
+        }
+
+        if (touchSession.scrubbing) {
+            updateMobileScrub(touch.clientX);
+            if (e.cancelable) e.preventDefault();
+            return;
+        }
+    }
+
+    function onTouchEnd(e) {
+        if (!touchSession) return;
+        if (touchSession.ended) { touchSession = null; return; }
+
+        if (touchSession.scrubbing) {
+            endMobileScrub();
+            touchSession = null;
+            return;
+        }
+        if (touchSession.moved) {
+            touchSession = null;
+            return;
+        }
+
+        var zone = touchSession.zone;
+        var now = Date.now();
+        var dt = now - lastTapTime;
+        touchSession = null;
+
+        if (dt < DOUBLE_TAP_DELAY && zone === lastTapZone) {
+            if (singleTapTimer) { clearTimeout(singleTapTimer); singleTapTimer = null; }
+            handleDoubleTap(zone);
+            lastTapTime = 0;
+            lastTapZone = null;
+        } else {
+            lastTapTime = now;
+            lastTapZone = zone;
+            if (singleTapTimer) clearTimeout(singleTapTimer);
+            var capturedZone = zone;
+            singleTapTimer = setTimeout(function () {
+                singleTapTimer = null;
+                handleSingleTap(capturedZone);
+                lastTapTime = 0;
+                lastTapZone = null;
+            }, DOUBLE_TAP_DELAY);
+        }
+    }
+
+    function handleSingleTap(zone) {
+        if (!video) return;
+        if (zone === 'center') {
+            var wasPlaying = !video.paused;
+            togglePlay();
+            showTapPlayIndicator(wasPlaying);
+            showControls();
+            hideControls();
+        } else {
+            toggleControlsVisibility();
+        }
+    }
+    function handleDoubleTap(zone) {
+        if (!video) return;
+        if (zone === 'left') {
+            video.currentTime = Math.max(0, video.currentTime - SEEK_STEP);
+            showSeekIndicator('back');
+            showControls();
+            hideControls();
+        } else if (zone === 'right') {
+            var dur = (video.duration && isFinite(video.duration)) ? video.duration : 0;
+            var t2 = Math.min(dur ? dur - 0.05 : video.currentTime + SEEK_STEP,
+                              video.currentTime + SEEK_STEP);
+            video.currentTime = t2;
+            showSeekIndicator('forward');
+            showControls();
+            hideControls();
+        } else {
+            var wasPlaying = !video.paused;
+            togglePlay();
+            showTapPlayIndicator(wasPlaying);
+            showControls();
+            hideControls();
+        }
+    }
+
+    function showTapPlayIndicator(wasPlaying) {
+        if (!tapPlayIndicator || !tapPlayIcon) return;
+        tapPlayIcon.src = wasPlaying ? ICON_PAUSE : ICON_PLAY;
+        tapPlayIndicator.classList.add('show');
+        if (tapIndicatorTimer) clearTimeout(tapIndicatorTimer);
+        tapIndicatorTimer = setTimeout(function () {
+            tapPlayIndicator.classList.remove('show');
+        }, TAP_INDICATOR_MS);
+    }
+    function showSeekIndicator(dir) {
+        var el = dir === 'back' ? tapSeekBack : tapSeekForward;
+        if (!el) return;
+        el.classList.add('show');
+        var key = dir === 'back' ? 'back' : 'forward';
+        if (tapSeekTimers[key]) clearTimeout(tapSeekTimers[key]);
+        tapSeekTimers[key] = setTimeout(function () {
+            el.classList.remove('show');
+        }, TAP_INDICATOR_MS);
+    }
+
+    function startMobileScrub() {
+        if (!video || !video.duration) return;
+        updateMobileScrubSrc(currentVideoId);
+        mobileScrubTooltip.classList.add('visible');
+        mobileScrubWasPlaying = !video.paused;
+        if (!video.paused) video.pause();
+        updateProgress();
+    }
+    function updateMobileScrub(clientX) {
+        if (!video || !video.duration) return;
+        var rect = wrapper.getBoundingClientRect();
+        var relX = clientX - rect.left;
+        var pct = relX / rect.width;
+        pct = Math.max(0, Math.min(1, pct));
+        var targetTime = pct * video.duration;
+        video.currentTime = targetTime;
+        mobileRequestScrubFrame(targetTime);
+        mobileScrubTime.textContent = formatTime(targetTime);
+        updateProgress();
+    }
+    function endMobileScrub() {
+        mobileScrubTooltip.classList.remove('visible');
+        if (video && mobileScrubWasPlaying) {
+            video.play().catch(function () {});
+        }
+        mobileScrubWasPlaying = false;
+        mobileScrubState.pending = null;
+    }
+
+    wrapper.addEventListener('touchstart', onTouchStart, { passive: true });
+    wrapper.addEventListener('touchmove', onTouchMove, { passive: false });
+    wrapper.addEventListener('touchend', onTouchEnd, { passive: true });
+
+    /* =========================================================
+       FEED NAVIGATION — свайп по Y (в fullscreen)
        ========================================================= */
     var FEED_THRESHOLD = 70;
     var FEED_MAX_X = 70;
@@ -1143,21 +1437,28 @@
         if (!IS_MOBILE) { feedSwipeState = null; return; }
         if (!isFullscreen) { feedSwipeState = null; return; }
         if (e.touches.length !== 1) { feedSwipeState = null; return; }
+        if (isInteractiveTarget(e.target)) { feedSwipeState = null; return; }
+        if (mScrubActive) { feedSwipeState = null; return; }
+
         feedSwipeState = {
             startY: e.touches[0].clientY,
             startX: e.touches[0].clientX,
             candidate: true
         };
     }
-
     function feedTouchMove(e) {
         if (!feedSwipeState) return;
         if (e.touches.length !== 1) { feedSwipeState.candidate = false; return; }
         var dy = e.touches[0].clientY - feedSwipeState.startY;
         var dx = e.touches[0].clientX - feedSwipeState.startX;
-        if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 20) feedSwipeState.candidate = false;
+        if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 20) {
+            feedSwipeState.candidate = false;
+            return;
+        }
+        if (feedSwipeState.candidate && Math.abs(dy) > 10 && e.cancelable) {
+            e.preventDefault();
+        }
     }
-
     function feedTouchEnd(e) {
         if (isPlaylistSheetOpen || isCategorySheetOpen) { feedSwipeState = null; return; }
         if (!IS_MOBILE) { feedSwipeState = null; return; }
@@ -1173,7 +1474,7 @@
     }
 
     wrapper.addEventListener('touchstart', feedTouchStart, { passive: true });
-    wrapper.addEventListener('touchmove', feedTouchMove, { passive: true });
+    wrapper.addEventListener('touchmove', feedTouchMove, { passive: false });
     wrapper.addEventListener('touchend', feedTouchEnd, { passive: true });
 
     var wheelLocked = false;
@@ -1206,7 +1507,6 @@
         clearTimeout(toastTimer);
         toastTimer = setTimeout(function () { toastEl.classList.remove('show'); }, 1500);
     }
-
     function showFeedHint() {
         if (!IS_MOBILE) return;
         if (FEED_IDS.length <= 1) return;
@@ -1227,7 +1527,6 @@
     function onFullscreenChange() {
         var wasFullscreen = isFullscreen;
         updateFullscreenState();
-
         if (isFullscreen && !wasFullscreen) {
             wrapper.classList.remove('show-controls');
             clearTimeout(controlsTimeout);
@@ -1251,13 +1550,13 @@
     document.addEventListener('webkitfullscreenchange', onFullscreenChange);
     document.addEventListener('mozfullscreenchange', onFullscreenChange);
     document.addEventListener('MSFullscreenChange', onFullscreenChange);
-
     updateFullscreenState();
 
     /* =========================================================
-       POPSTATE
+       POPSTATE / UNLOAD
        ========================================================= */
     window.addEventListener('popstate', function (e) {
+        if (getFullscreenElement()) exitFullscreen();
         var state = e.state;
         if (state && state.videoId !== undefined) {
             var newId = state.videoId;
@@ -1277,7 +1576,6 @@
                         old.video.pause();
                     } catch (err) {}
                 }
-
                 currentFeedIndex = newIdx;
                 currentVideoId = newId;
                 rebuildWindow(true);
@@ -1288,6 +1586,7 @@
                     video.play().catch(function () {});
                 }
                 updateScrubSrc(currentVideoId);
+                updateMobileScrubSrc(currentVideoId);
                 updateMobilePlaylistButtonState();
                 refreshVideoInfo(currentVideoId);
             } else {
@@ -1307,7 +1606,6 @@
             } catch (e) {}
         }
     });
-
     document.addEventListener('visibilitychange', function () {
         if (!document.hidden) return;
         if (video && currentVideoId) {
@@ -1349,7 +1647,6 @@
                 }
                 data.playlists.forEach(function (pl) {
                     mobilePlaylistData[pl.id] = pl.video_in_playlist;
-
                     var item = document.createElement('div');
                     item.className = 'mp-item' + (pl.video_in_playlist ? ' in-playlist' : '');
                     item.dataset.playlistId = pl.id;
@@ -1362,12 +1659,10 @@
                     var count = document.createElement('div');
                     count.className = 'mp-count';
                     count.textContent = (pl.video_count || 0) + ' videos';
-                    info.appendChild(name);
-                    info.appendChild(count);
+                    info.appendChild(name); info.appendChild(count);
 
                     var toggle = document.createElement('button');
-                    toggle.type = 'button';
-                    toggle.className = 'mp-toggle';
+                    toggle.type = 'button'; toggle.className = 'mp-toggle';
                     toggle.textContent = pl.video_in_playlist ? '✓' : '+';
                     toggle.addEventListener('click', function (e) {
                         e.stopPropagation();
@@ -1375,21 +1670,16 @@
                     });
 
                     var del = document.createElement('button');
-                    del.type = 'button';
-                    del.className = 'mp-delete';
-                    del.title = 'Delete playlist';
+                    del.type = 'button'; del.className = 'mp-delete'; del.title = 'Delete playlist';
                     var delImg = document.createElement('img');
-                    delImg.src = ICON_BIN;
-                    delImg.alt = 'Delete';
+                    delImg.src = ICON_BIN; delImg.alt = 'Delete';
                     del.appendChild(delImg);
                     del.addEventListener('click', function (e) {
                         e.stopPropagation();
                         deletePlaylistMobile(pl.id, pl.name);
                     });
 
-                    item.appendChild(info);
-                    item.appendChild(toggle);
-                    item.appendChild(del);
+                    item.appendChild(info); item.appendChild(toggle); item.appendChild(del);
                     listEl.appendChild(item);
                 });
             })
@@ -1470,8 +1760,7 @@
     if (mobilePlaylistBtn) {
         mobilePlaylistBtn.addEventListener('click', function (e) {
             e.stopPropagation();
-            showControls();
-            hideControls();
+            showControls(); hideControls();
             openPlaylistSheet();
         });
         var createBtn = document.getElementById('mobilePlaylistCreateBtn');
@@ -1488,8 +1777,7 @@
     if (mobileCategoryBtn) {
         mobileCategoryBtn.addEventListener('click', function (e) {
             e.stopPropagation();
-            showControls();
-            hideControls();
+            showControls(); hideControls();
             openCategorySheet();
         });
     }
@@ -1548,9 +1836,7 @@
                         var ext = coverVideo.filename.split('.').pop().toLowerCase();
                         if (['mp4', 'avi', 'mkv', 'mov', 'wmv', 'flv', 'webm', 'm4v'].indexOf(ext) !== -1) {
                             var vid = document.createElement('video');
-                            vid.muted = true;
-                            vid.playsInline = true;
-                            vid.preload = 'metadata';
+                            vid.muted = true; vid.playsInline = true; vid.preload = 'metadata';
                             var src = document.createElement('source');
                             src.src = '/video/' + coverVideo.id;
                             src.type = 'video/mp4';
@@ -1582,31 +1868,25 @@
                     actionsDiv.className = 'playlist-actions';
 
                     var coverBtn = document.createElement('button');
-                    coverBtn.className = 'btn-cover';
-                    coverBtn.title = 'Set cover';
+                    coverBtn.className = 'btn-cover'; coverBtn.title = 'Set cover';
                     var coverImg = document.createElement('img');
-                    coverImg.src = ICON_PIC;
-                    coverImg.alt = 'Set cover';
+                    coverImg.src = ICON_PIC; coverImg.alt = 'Set cover';
                     coverBtn.appendChild(coverImg);
                     coverBtn.addEventListener('click', function (e) { e.stopPropagation(); openCoverModal(pl.id); });
                     actionsDiv.appendChild(coverBtn);
 
                     var renameBtn = document.createElement('button');
-                    renameBtn.className = 'btn-rename';
-                    renameBtn.title = 'Rename playlist';
+                    renameBtn.className = 'btn-rename'; renameBtn.title = 'Rename playlist';
                     var renameImg = document.createElement('img');
-                    renameImg.src = ICON_PENCIL;
-                    renameImg.alt = 'Rename';
+                    renameImg.src = ICON_PENCIL; renameImg.alt = 'Rename';
                     renameBtn.appendChild(renameImg);
                     renameBtn.addEventListener('click', function (e) { e.stopPropagation(); openRenameModal(pl.id, pl.name); });
                     actionsDiv.appendChild(renameBtn);
 
                     var delBtn = document.createElement('button');
-                    delBtn.className = 'btn-delete';
-                    delBtn.title = 'Delete playlist';
+                    delBtn.className = 'btn-delete'; delBtn.title = 'Delete playlist';
                     var delImg = document.createElement('img');
-                    delImg.src = ICON_BIN;
-                    delImg.alt = 'Delete';
+                    delImg.src = ICON_BIN; delImg.alt = 'Delete';
                     delBtn.appendChild(delImg);
                     delBtn.addEventListener('click', function (e) {
                         e.stopPropagation();
@@ -1658,7 +1938,6 @@
         }
         container.scrollTo({ left: targetScroll, behavior: 'smooth' });
     }
-
     carouselPrevBtn.addEventListener('click', function () { scrollCarousel('prev'); });
     carouselNextBtn.addEventListener('click', function () { scrollCarousel('next'); });
 
@@ -1694,7 +1973,6 @@
         var grid = document.getElementById('playlistCoverGrid');
         grid.innerHTML = '<div class="text-muted" style="grid-column:1/-1; padding:20px;">Loading videos...</div>';
         modal.show();
-
         fetch('/playlist/' + playlistId + '/videos')
             .then(function (res) { return res.json(); })
             .then(function (data) {
@@ -1710,12 +1988,9 @@
                     var ext = v.filename.split('.').pop().toLowerCase();
                     if (['mp4', 'avi', 'mkv', 'mov', 'wmv', 'flv', 'webm', 'm4v'].indexOf(ext) !== -1) {
                         var vid = document.createElement('video');
-                        vid.muted = true;
-                        vid.playsInline = true;
-                        vid.preload = 'metadata';
+                        vid.muted = true; vid.playsInline = true; vid.preload = 'metadata';
                         var src = document.createElement('source');
-                        src.src = '/video/' + v.id;
-                        src.type = 'video/mp4';
+                        src.src = '/video/' + v.id; src.type = 'video/mp4';
                         vid.appendChild(src);
                         item.appendChild(vid);
                     } else {
@@ -1785,7 +2060,6 @@
             })
             .catch(function (err) { console.error('Error:', err); });
     }
-
     document.getElementById('confirmDeleteBtn').addEventListener('click', confirmDeletePlaylist);
 
     var dropdownMenu = document.getElementById('playlistDropdownMenu');
@@ -1807,7 +2081,6 @@
                 });
                 addNew.appendChild(addNewLink);
                 dropdownMenu.appendChild(addNew);
-
                 if (data.playlists && data.playlists.length > 0) {
                     var divider = document.createElement('li');
                     divider.className = 'dropdown-divider';
@@ -1928,9 +2201,17 @@
     }
 
     updateScrubSrc(currentVideoId);
+    updateMobileScrubSrc(currentVideoId);
 
     applyMirrorState();
     loadPlaylists(1);
+
+    if (IS_MOBILE) {
+        setTimeout(function () {
+            showControls();
+            hideControls();
+        }, 350);
+    }
 
     /* =========================================================
        HOVER-ПРЕВЬЮ ДЛЯ РЕКОМЕНДАЦИЙ
@@ -1948,7 +2229,6 @@
             v.currentTime = 0;
             v.pause();
         }
-
         function startPreviewOnHover(v) {
             if (!v.duration || isNaN(v.duration) || v.duration === Infinity) {
                 v.addEventListener('loadedmetadata', function onMeta() {

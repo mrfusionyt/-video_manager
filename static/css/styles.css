@@ -393,6 +393,7 @@ a:hover { color: #b0d0ff; }
     padding: 0;
     margin: 0;
     line-height: 0;
+    touch-action: none;
 }
 .custom-controls .progress-bar-track {
     width: 100%;
@@ -404,6 +405,7 @@ a:hover { color: #b0d0ff; }
     transition: height var(--tr);
     align-self: center;
     margin: 0;
+    touch-action: none;
 }
 .custom-controls .progress-bar-track:hover { height: 6px; }
 .custom-controls .progress-fill {
@@ -698,11 +700,23 @@ img#starIcon.inactive { filter: grayscale(1) brightness(0.55); opacity: 0.75; }
 @media (max-width: 768px), (max-height: 500px) {
     .right-panel { border-radius: var(--radius); height: auto; }
 
-    .watch-container .video-wrapper { max-height: 100vh; aspect-ratio: auto; height: 100vh; }
+    /* Вне fullscreen: окно с фиксированной высотой, видео внутри contain */
+    .watch-container .video-wrapper {
+        height: 60vh;
+        max-height: 91vh;
+        aspect-ratio: auto;
+    }
+    /* В fullscreen: полный экран */
     .watch-container .video-wrapper:fullscreen,
     .watch-container .video-wrapper:-webkit-full-screen,
     .watch-container .video-wrapper:-moz-full-screen,
-    .watch-container .video-wrapper:-ms-fullscreen { max-height: 100vh !important; height: 100vh !important; }
+    .watch-container .video-wrapper:-ms-fullscreen,
+    .watch-container .video-wrapper.is-pseudo-fullscreen {
+        width: 100vw !important;
+        height: 100vh !important;
+        max-height: 100vh !important;
+        aspect-ratio: auto !important;
+    }
 
     .custom-controls { padding: 12px 14px 8px 14px; }
 
@@ -723,6 +737,9 @@ img#starIcon.inactive { filter: grayscale(1) brightness(0.55); opacity: 0.75; }
     .custom-controls .progress-container {
         height: var(--ctrl-btn-size-mobile);
     }
+    /* Толще полоса на мобильном для удобства пальца */
+    .custom-controls .progress-bar-track { height: 8px; }
+    .custom-controls .progress-bar-track:hover { height: 8px; }
     .custom-controls .controls-row #nextBtn { display: none !important; }
 
     .scrub-tooltip { display: none !important; }
@@ -1421,4 +1438,131 @@ textarea.form-control-dark::placeholder { color: #aaa !important; }
     color: var(--text-muted);
     font-size: 0.72rem;
     flex-shrink: 0;
+}
+
+
+/* ============================================================
+   23. WATCH: МОБИЛЬНЫЕ ЖЕСТЫ (tap / dbltap / scrub)
+   ============================================================ */
+
+.tap-indicator {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%) scale(0.75);
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.18s ease, transform 0.18s ease;
+    z-index: 26;
+    color: #fff;
+    background: rgba(0, 0, 0, 0.5);
+    border-radius: 50%;
+    width: 90px;
+    height: 90px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    text-shadow: 0 2px 8px rgba(0,0,0,0.85);
+    backdrop-filter: blur(2px);
+    -webkit-backdrop-filter: blur(2px);
+}
+.tap-indicator.show {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+}
+.tap-indicator img {
+    width: 48px;
+    height: 48px;
+    object-fit: contain;
+    filter: drop-shadow(0 2px 8px rgba(0,0,0,0.85));
+    pointer-events: none;
+}
+
+.tap-indicator.tap-seek {
+    flex-direction: column;
+    width: 80px;
+    height: 80px;
+    font-size: 0.95rem;
+    gap: 2px;
+}
+.tap-indicator.tap-seek-left  { left: 18%; }
+.tap-indicator.tap-seek-right { left: 82%; }
+.tap-indicator .tap-seek-icon {
+    font-size: 1.6rem;
+    line-height: 1;
+}
+.tap-indicator .tap-seek-text {
+    font-size: 0.85rem;
+    line-height: 1;
+    letter-spacing: 0.03em;
+}
+
+.mobile-scrub-tooltip {
+    position: absolute;
+    bottom: 90px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 168px;
+    background: #0f0f0f;
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: var(--radius);
+    padding: 5px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.85);
+    pointer-events: none;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.15s ease, visibility 0s linear 0.15s;
+    z-index: 30;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    line-height: 1;
+}
+.mobile-scrub-tooltip.visible {
+    opacity: 1;
+    visibility: visible;
+    transition: opacity 0.15s ease, visibility 0s;
+}
+.mobile-scrub-tooltip .scrub-video {
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    object-fit: cover;
+    background: #000;
+    border-radius: 4px;
+    display: block;
+}
+.mobile-scrub-tooltip .scrub-time {
+    font-size: 0.72rem;
+    color: var(--text-primary);
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    padding: 2px 0 1px 0;
+}
+
+@media (hover: hover) and (pointer: fine) {
+    .tap-indicator,
+    .mobile-scrub-tooltip { display: none !important; }
+}
+
+@media (max-width: 768px), (max-height: 500px) {
+    .mobile-scrub-tooltip { bottom: 100px; }
+    .tap-indicator { width: 82px; height: 82px; }
+    .tap-indicator img { width: 42px; height: 42px; }
+    .tap-indicator.tap-seek { width: 72px; height: 72px; }
+}
+
+
+/* ============================================================
+   24. WATCH: мобильные жесты — вспомогательные стили
+   ---- Pseudo-fullscreen удалён. Fullscreen — только нативный
+        (через Fullscreen API на .video-wrapper).             ----
+   ============================================================ */
+
+@media (max-width: 768px), (max-height: 500px) {
+    .mobile-scrub-tooltip { bottom: 100px; }
+    .tap-indicator { width: 82px; height: 82px; }
+    .tap-indicator img { width: 42px; height: 42px; }
+    .tap-indicator.tap-seek { width: 72px; height: 72px; }
 }
