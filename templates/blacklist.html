@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+
+{% block title %}Ignored pairs{% endblock %}
+{% block page_title %}Ignored pairs{% endblock %}
+
+{% block content %}
+<div class="mb-3 d-flex align-items-center gap-2 flex-wrap">
+    <a href="{{ url_for('settings', tab='duplicates', profile=current_profile) }}" class="btn-add">← Back to Duplicates</a>
+    <button id="clearAllBtn" class="btn-add" style="background:#7a1f29;">Clear all</button>
+</div>
+
+<p class="text-muted">
+    Files в этих парах больше НЕ будут считаться дубликатами при следующих сканах.
+</p>
+
+{% if pairs %}
+    <div class="blacklist-box">
+        {% for p in pairs %}
+            <div class="blacklist-item" data-a="{{ p.path_a }}" data-b="{{ p.path_b }}">
+                <div class="bl-paths">
+                    <div class="bl-path" title="{{ p.path_a }}">{{ p.path_a }}</div>
+                    <div class="bl-path" title="{{ p.path_b }}">{{ p.path_b }}</div>
+                </div>
+                <div class="bl-meta">{{ p.created_at[:19] if p.created_at else '' }}</div>
+                <button class="btn-mini btn-restore">↺ Restore</button>
+            </div>
+        {% endfor %}
+    </div>
+{% else %}
+    <p class="text-muted">No ignored pairs yet.</p>
+{% endif %}
+
+<script>
+(function () {
+    document.querySelectorAll('.btn-restore').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            var item = this.closest('.blacklist-item');
+            var a = item.dataset.a, b = item.dataset.b;
+            fetch('/unignore_pair', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({path_a: a, path_b: b})
+            }).then(function (r) { return r.json(); })
+            .then(function (data) {
+                if (data.success) {
+                    item.style.opacity = '0.4';
+                    btn.textContent = 'restored';
+                    btn.disabled = true;
+                }
+            });
+        });
+    });
+
+    document.getElementById('clearAllBtn').addEventListener('click', function () {
+        if (!confirm('Clear ALL ignored pairs? Files may become duplicates again.')) return;
+        fetch('/clear_ignored', {method: 'POST', headers: {'Content-Type': 'application/json'}})
+            .then(function () { location.reload(); });
+    });
+})();
+</script>
+{% endblock %}

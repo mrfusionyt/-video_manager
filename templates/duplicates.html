@@ -7,6 +7,7 @@
 <div class="mb-3">
     <div class="d-flex align-items-center gap-2 flex-wrap">
         <a href="{{ url_for('settings', tab='libraries', profile=current_profile) }}" class="btn-add">← Back to Settings</a>
+        <a href="{{ url_for('duplicates_blacklist_page', profile=current_profile) }}" class="btn-mini">🚫 Ignored pairs</a>
         <button id="refreshDuplicates" class="btn-add">Refresh</button>
     </div>
 </div>
@@ -37,16 +38,12 @@
             <span class="value">{{ total_files }}</span>
         </div>
         <div class="stats-item">
-            <span class="label">Will be kept (best quality)</span>
+            <span class="label">Will be kept</span>
             <span class="value green">{{ total_keep }}</span>
         </div>
         <div class="stats-item">
             <span class="label">Will be moved</span>
             <span class="value red">{{ total_move }}</span>
-        </div>
-        <div class="stats-item">
-            <span class="label">Size to keep</span>
-            <span class="value green">{{ (total_size_keep / (1024**2))|round(2) }} MB</span>
         </div>
         <div class="stats-item">
             <span class="label">Size to move</span>
@@ -80,18 +77,19 @@
                 <div class="group-title">
                     <span>Group #{{ loop.index }} ({{ files|length }} files)</span>
                     {% if reason == 'video' %}
-                        <span class="reason-badge video" title="Совпал видеокадр">video</span>
+                        <span class="reason-badge video">video</span>
                     {% elif reason == 'audio' %}
-                        <span class="reason-badge audio" title="Совпала аудиодорожка">audio</span>
+                        <span class="reason-badge audio">audio</span>
                     {% elif reason == 'video+audio' %}
-                        <span class="reason-badge both" title="Совпали видео и аудио">video+audio</span>
+                        <span class="reason-badge both">video+audio</span>
                     {% endif %}
 
                     <a class="btn-mini" href="{{ url_for('compare_group', group_index=outer_idx, profile=current_profile) }}"
-                       target="_blank" title="Открыть сравнительный плеер">▶ Compare</a>
+                       target="_blank">▶ Compare</a>
                     <button type="button" class="btn-mini" onclick="selectAllInGroup({{ outer_idx }})">Select all</button>
                     <button type="button" class="btn-mini" onclick="deselectAllInGroup({{ outer_idx }})">Deselect all</button>
                     <button class="btn-move-group" data-group-index="{{ outer_idx }}">Move duplicates (keep best)</button>
+                    <button class="btn-not-dup" data-group-index="{{ outer_idx }}">🚫 Not a duplicate (ignore group)</button>
                     <span class="status-msg" id="status-{{ outer_idx }}"></span>
                 </div>
 
@@ -107,19 +105,16 @@
                             {% set ext = (video.filename or '').split('.')[-1].lower() %}
                             {% if ext in ['mp4','avi','mkv','mov','wmv','flv','webm','m4v','mpg','mpeg'] %}
                                 <a href="{{ url_for('watch', video_id=video.id, profile=current_profile) }}"
-                                   target="_blank" title="Open video">
+                                   target="_blank">
                                     <img class="duplicate-preview"
                                          src="{{ url_for('thumbnail', video_id=video.id) }}"
-                                         alt="{{ video.filename }}"
-                                         loading="lazy">
+                                         alt="{{ video.filename }}" loading="lazy">
                                 </a>
                             {% elif ext in ['jpg','jpeg','png','bmp','gif','tiff','webp'] %}
-                                <a href="{{ url_for('video_file', video_id=video.id) }}"
-                                   target="_blank" title="Open image">
+                                <a href="{{ url_for('video_file', video_id=video.id) }}" target="_blank">
                                     <img class="duplicate-preview"
                                          src="{{ url_for('video_file', video_id=video.id) }}"
-                                         alt="{{ video.filename }}"
-                                         loading="lazy">
+                                         alt="{{ video.filename }}" loading="lazy">
                                 </a>
                             {% else %}
                                 <div class="duplicate-preview placeholder-q">?</div>
@@ -129,9 +124,6 @@
                         <div class="duplicate-info">
                             <div class="filename" title="{{ video.filepath }}">
                                 {{ video.filename }}
-                                {% if video.mode %}
-                                    <span class="badge bg-danger ms-1">{{ video.mode | mode_name }}</span>
-                                {% endif %}
                                 {% if video.id == best.id %}<span style="color:#dc3545;">★ Best</span>{% endif %}
                             </div>
                             <div class="size">
@@ -162,6 +154,12 @@
 
     function getSelectedIds() {
         return Array.from(document.querySelectorAll('.dup-checkbox:checked'))
+            .map(function (cb) { return parseInt(cb.dataset.videoId, 10); })
+            .filter(function (x) { return !isNaN(x); });
+    }
+
+    function getGroupIds(idx) {
+        return Array.from(document.querySelectorAll('.dup-checkbox[data-group="' + idx + '"]'))
             .map(function (cb) { return parseInt(cb.dataset.videoId, 10); })
             .filter(function (x) { return !isNaN(x); });
     }
@@ -214,7 +212,7 @@
                     pf.style.width = data.progress + '%';
                     pt.textContent = (data.message || '') + ' (' + data.progress + '%)';
                 } else {
-                    pt.textContent = (data.message || 'Unknown status') + ' [' + data.status + ']';
+                    pt.textContent = (data.message || 'Unknown') + ' [' + data.status + ']';
                 }
             };
             es.onerror = function () { es.close(); };
@@ -229,18 +227,16 @@
                     return;
                 }
                 if (!confirm('Move ' + ids.length + ' selected file(s) to !Duplicates?')) return;
-                document.getElementById('status-all').textContent = 'Moving ' + ids.length + ' file(s)...';
+                document.getElementById('status-all').textContent = 'Moving...';
                 fetch('/move_selected_duplicates', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({video_ids: ids})
-                })
-                .then(function (r) { return r.json(); })
+                }).then(function (r) { return r.json(); })
                 .then(function (data) {
                     document.getElementById('status-all').textContent = data.message || 'Done';
                     if (data.success) setTimeout(function () { location.reload(); }, 1200);
-                })
-                .catch(function (err) {
+                }).catch(function (err) {
                     document.getElementById('status-all').textContent = 'Error: ' + err;
                 });
             });
@@ -249,23 +245,48 @@
         document.querySelectorAll('.btn-move-group').forEach(function (btn) {
             btn.addEventListener('click', function () {
                 var gi = this.dataset.groupIndex;
-                var statusSpan = document.getElementById('status-' + gi);
-                statusSpan.textContent = 'Moving...';
+                var sp = document.getElementById('status-' + gi);
+                sp.textContent = 'Moving...';
                 fetch('/move_duplicates', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({group_index: parseInt(gi, 10)})
-                })
-                .then(function (r) { return r.json(); })
+                }).then(function (r) { return r.json(); })
                 .then(function (data) {
-                    statusSpan.textContent = data.message;
+                    sp.textContent = data.message;
                     if (data.success) {
-                        var groupDiv = document.getElementById('group-' + gi);
-                        if (groupDiv) groupDiv.style.display = 'none';
+                        var gd = document.getElementById('group-' + gi);
+                        if (gd) gd.style.display = 'none';
                         setTimeout(function () { location.reload(); }, 1200);
                     }
-                })
-                .catch(function (err) { statusSpan.textContent = 'Error: ' + err; });
+                }).catch(function (err) { sp.textContent = 'Error: ' + err; });
+            });
+        });
+
+        // 🚫 Not a duplicate (whole group)
+        document.querySelectorAll('.btn-not-dup').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                var gi = this.dataset.groupIndex;
+                var ids = getGroupIds(gi);
+                if (ids.length < 2) return;
+                if (!confirm('Mark all ' + (ids.length * (ids.length - 1) / 2) +
+                             ' pair(s) in this group as NOT duplicates?\n\n' +
+                             'These files will never be compared with each other again.')) return;
+                var sp = document.getElementById('status-' + gi);
+                sp.textContent = 'Marking...';
+                fetch('/ignore_group', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({video_ids: ids})
+                }).then(function (r) { return r.json(); })
+                .then(function (data) {
+                    sp.textContent = data.message || 'Done';
+                    if (data.success) {
+                        var gd = document.getElementById('group-' + gi);
+                        if (gd) gd.style.display = 'none';
+                        setTimeout(function () { location.reload(); }, 1200);
+                    }
+                }).catch(function (err) { sp.textContent = 'Error: ' + err; });
             });
         });
 
@@ -279,8 +300,7 @@
                 .then(function (data) {
                     document.getElementById('status-all').textContent = data.message;
                     if (data.success) setTimeout(function () { location.reload(); }, 1200);
-                })
-                .catch(function (err) {
+                }).catch(function (err) {
                     document.getElementById('status-all').textContent = 'Error: ' + err;
                 });
             });

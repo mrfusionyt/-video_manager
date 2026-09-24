@@ -19,7 +19,7 @@
     <div class="compare-actions">
         <button type="button" class="btn-mini" id="playAllBtn">▶ Play all</button>
         <button type="button" class="btn-mini" id="pauseAllBtn">⏸ Pause all</button>
-        <button type="button" class="btn-mini" id="syncBtn" title="Выровнять по первому плееру">⟲ Sync</button>
+        <button type="button" class="btn-mini" id="syncBtn">⟲ Sync</button>
         <button type="button" class="btn-mini" id="muteAllBtn">🔇 Mute all</button>
         <button type="button" class="btn-mini" id="unmuteAllBtn">🔊 Unmute all</button>
         <a href="{{ url_for('settings', tab='duplicates', profile=current_profile) }}" class="btn-mini">← Back</a>
@@ -30,7 +30,7 @@
     {% for v in files %}
         {% set ext = (v.filename or '').split('.')[-1].lower() %}
         {% set is_video = ext in ['mp4','avi','mkv','mov','wmv','flv','webm','m4v','mpg','mpeg'] %}
-        <div class="compare-cell" data-video-id="{{ v.id }}" data-duration="{{ v.duration or 0 }}">
+        <div class="compare-cell" data-video-id="{{ v.id }}">
             <div class="compare-header">
                 <span class="compare-name" title="{{ v.filepath }}">{{ v.filename }}</span>
                 <span class="compare-meta">
@@ -38,37 +38,28 @@
                     {% if v.duration %} • {{ (v.duration // 60) }}:{{ '%02d' % (v.duration % 60) }}{% endif %}
                 </span>
             </div>
-
             <div class="compare-media">
                 {% if is_video %}
                     <video class="compare-video"
                            data-video-id="{{ v.id }}"
                            src="{{ url_for('video_file', video_id=v.id) }}"
-                           preload="metadata" playsinline muted
-                           controls></video>
+                           preload="metadata" playsinline muted controls></video>
                 {% elif ext in ['jpg','jpeg','png','bmp','gif','tiff','webp'] %}
-                    <img class="compare-video" src="{{ url_for('video_file', video_id=v.id) }}"
-                         alt="{{ v.filename }}">
+                    <img class="compare-video" src="{{ url_for('video_file', video_id=v.id) }}">
                 {% else %}
                     <div class="compare-video placeholder-q">?</div>
                 {% endif %}
             </div>
-
             <div class="compare-controls">
-                <label class="compare-mute">
-                    <input type="checkbox" class="cb-mute" data-video-id="{{ v.id }}"> mute
-                </label>
-                <label class="compare-vol">
-                    vol <input type="range" class="rg-vol" min="0" max="1" step="0.05" value="1"
-                              data-video-id="{{ v.id }}">
-                </label>
+                <label><input type="checkbox" class="cb-mute" data-video-id="{{ v.id }}"> mute</label>
+                <label>vol <input type="range" class="rg-vol" min="0" max="1" step="0.05" value="1"
+                                       data-video-id="{{ v.id }}"></label>
                 <span class="compare-time">0:00 / 0:00</span>
             </div>
         </div>
     {% endfor %}
 </div>
 
-<!-- ================= KEY MATCHES ================= -->
 {% set total_matches = video_matches|length + audio_matches|length %}
 {% if total_matches > 0 %}
 <div class="compare-matches">
@@ -80,21 +71,18 @@
         {% for m in video_matches %}
             <div class="match-pair">
                 <div class="match-files">
-                    <span class="match-file-name" title="{{ file_names.get(m.a_id, m.a_id) }}">
-                        {{ file_names.get(m.a_id, m.a_id) }}
-                    </span>
+                    <span class="match-file-name">{{ file_names.get(m.a_id, m.a_id) }}</span>
                     <span class="match-arrow">↔</span>
-                    <span class="match-file-name" title="{{ file_names.get(m.b_id, m.b_id) }}">
-                        {{ file_names.get(m.b_id, m.b_id) }}
-                    </span>
+                    <span class="match-file-name">{{ file_names.get(m.b_id, m.b_id) }}</span>
                     <span class="match-count">{{ m.pairs|length }} match(es)</span>
+                    <button class="btn-not-dup"
+                            data-a-id="{{ m.a_id }}" data-b-id="{{ m.b_id }}">🚫 Not a pair</button>
                 </div>
                 {% for p in m.pairs %}
                     <div class="match-row">
                         <span class="match-label">
                             кадр <b>{{ (p.pos_a * 100)|round|int }}%</b>
-                            ↔
-                            кадр <b>{{ (p.pos_b * 100)|round|int }}%</b>
+                            ↔ <b>{{ (p.pos_b * 100)|round|int }}%</b>
                             <span class="match-hamming">(hamming {{ p.hamming }})</span>
                         </span>
                         <button type="button" class="btn-mini"
@@ -114,24 +102,18 @@
         {% for m in audio_matches %}
             <div class="match-pair">
                 <div class="match-files">
-                    <span class="match-file-name" title="{{ file_names.get(m.a_id, m.a_id) }}">
-                        {{ file_names.get(m.a_id, m.a_id) }}
-                    </span>
+                    <span class="match-file-name">{{ file_names.get(m.a_id, m.a_id) }}</span>
                     <span class="match-arrow">↔</span>
-                    <span class="match-file-name" title="{{ file_names.get(m.b_id, m.b_id) }}">
-                        {{ file_names.get(m.b_id, m.b_id) }}
-                    </span>
+                    <span class="match-file-name">{{ file_names.get(m.b_id, m.b_id) }}</span>
+                    <button class="btn-not-dup"
+                            data-a-id="{{ m.a_id }}" data-b-id="{{ m.b_id }}">🚫 Not a pair</button>
                 </div>
                 <div class="match-row">
                     <span class="match-label">
-                        <b>{{ m.start_a_sec|round(1) }}s</b>
-                        ↔
-                        <b>{{ m.start_b_sec|round(1) }}s</b>
+                        <b>{{ m.start_a_sec|round(1) }}s</b> ↔ <b>{{ m.start_b_sec|round(1) }}s</b>
                         <span class="match-hamming">
                             (длина {{ m.run_sec|round(1) }}s
-                            {% if m.skipped_intro_sec %}
-                                • интро {{ m.skipped_intro_sec|round|int }}s пропущено
-                            {% endif %})
+                            {% if m.skipped_intro_sec %} • интро {{ m.skipped_intro_sec|round|int }}s пропущено{% endif %})
                         </span>
                     </span>
                     <button type="button" class="btn-mini"
@@ -154,17 +136,14 @@
 
     function fmt(t) {
         if (!isFinite(t) || t < 0) t = 0;
-        var m = Math.floor(t / 60);
-        var s = Math.floor(t % 60);
+        var m = Math.floor(t / 60), s = Math.floor(t % 60);
         return m + ':' + (s < 10 ? '0' : '') + s;
     }
 
     videos.forEach(function (v) {
         var cell = v.closest('.compare-cell');
         var timeEl = cell.querySelector('.compare-time');
-        function update() {
-            timeEl.textContent = fmt(v.currentTime) + ' / ' + fmt(v.duration);
-        }
+        function update() { timeEl.textContent = fmt(v.currentTime) + ' / ' + fmt(v.duration); }
         v.addEventListener('timeupdate', update);
         v.addEventListener('loadedmetadata', update);
         update();
@@ -172,16 +151,14 @@
 
     document.querySelectorAll('.cb-mute').forEach(function (cb) {
         cb.addEventListener('change', function () {
-            var v = document.querySelector(
-                'video[data-video-id="' + this.dataset.videoId + '"]');
+            var v = document.querySelector('video[data-video-id="' + this.dataset.videoId + '"]');
             if (v) v.muted = this.checked;
         });
     });
 
     document.querySelectorAll('.rg-vol').forEach(function (rg) {
         rg.addEventListener('input', function () {
-            var v = document.querySelector(
-                'video[data-video-id="' + this.dataset.videoId + '"]');
+            var v = document.querySelector('video[data-video-id="' + this.dataset.videoId + '"]');
             if (v) v.volume = parseFloat(this.value);
         });
     });
@@ -190,32 +167,15 @@
         return document.querySelector('video[data-video-id="' + id + '"]');
     }
 
-    // Jump к моменту видео-совпадения: pos_a и pos_b — доли 0..1
     window.jumpVideo = function (aId, bId, posA, posB) {
-        var va = getVideoById(aId);
-        var vb = getVideoById(bId);
-        if (va && va.duration) {
-            try { va.currentTime = posA * va.duration; } catch (e) {}
-            va.play().catch(function () {});
-        }
-        if (vb && vb.duration) {
-            try { vb.currentTime = posB * vb.duration; } catch (e) {}
-            vb.play().catch(function () {});
-        }
+        var va = getVideoById(aId), vb = getVideoById(bId);
+        if (va && va.duration) { try { va.currentTime = posA * va.duration; } catch (e) {} va.play().catch(function () {}); }
+        if (vb && vb.duration) { try { vb.currentTime = posB * vb.duration; } catch (e) {} vb.play().catch(function () {}); }
     };
-
-    // Jump к моменту аудио-совпадения: secA и secB — секунды
     window.jumpAudio = function (aId, bId, secA, secB) {
-        var va = getVideoById(aId);
-        var vb = getVideoById(bId);
-        if (va) {
-            try { va.currentTime = secA; } catch (e) {}
-            va.play().catch(function () {});
-        }
-        if (vb) {
-            try { vb.currentTime = secB; } catch (e) {}
-            vb.play().catch(function () {});
-        }
+        var va = getVideoById(aId), vb = getVideoById(bId);
+        if (va) { try { va.currentTime = secA; } catch (e) {} va.play().catch(function () {}); }
+        if (vb) { try { vb.currentTime = secB; } catch (e) {} vb.play().catch(function () {}); }
     };
 
     document.getElementById('playAllBtn').addEventListener('click', function () {
@@ -232,22 +192,41 @@
         videos.forEach(function (v) { v.muted = false; });
         document.querySelectorAll('.cb-mute').forEach(function (cb) { cb.checked = false; });
     });
-
     document.getElementById('syncBtn').addEventListener('click', function () {
         if (!videos.length) return;
         var t = videos[0].currentTime || 0;
-        videos.forEach(function (v, i) {
-            if (i === 0) return;
-            try { v.currentTime = t; } catch (e) {}
-        });
+        videos.forEach(function (v, i) { if (i > 0) { try { v.currentTime = t; } catch (e) {} } });
         videos.forEach(function (v) { v.play().catch(function () {}); });
     });
 
-    videos.forEach(function (v) {
-        v.addEventListener('click', function (e) {
-            if (e.offsetY > v.clientHeight - 40) return;
-            if (v.paused) v.play().catch(function () {});
-            else v.pause();
+    // 🚫 Not a pair — помечаем пару в blacklist
+    document.querySelectorAll('.btn-not-dup').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            var aId = parseInt(this.dataset.aId, 10);
+            var bId = parseInt(this.dataset.bId, 10);
+            if (!aId || !bId) return;
+            if (!confirm('Mark this pair as NOT duplicates?')) return;
+            var self = this;
+            self.disabled = true;
+            self.textContent = 'Marking...';
+            fetch('/ignore_pair', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({a_id: aId, b_id: bId})
+            }).then(function (r) { return r.json(); })
+            .then(function (data) {
+                if (data.success) {
+                    self.textContent = '🚫 Ignored';
+                } else {
+                    self.disabled = false;
+                    self.textContent = '🚫 Not a pair';
+                    alert('Error: ' + data.message);
+                }
+            }).catch(function (err) {
+                self.disabled = false;
+                self.textContent = '🚫 Not a pair';
+                alert('Error: ' + err);
+            });
         });
     });
 
@@ -259,9 +238,7 @@
             if (anyPlaying) videos.forEach(function (v) { v.pause(); });
             else videos.forEach(function (v) { v.play().catch(function () {}); });
         }
-        if (e.key === 's' || e.key === 'S') {
-            document.getElementById('syncBtn').click();
-        }
+        if (e.key === 's' || e.key === 'S') document.getElementById('syncBtn').click();
     });
 })();
 </script>

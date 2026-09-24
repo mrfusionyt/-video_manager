@@ -1363,3 +1363,62 @@ textarea.form-control-dark::placeholder { color: #aaa !important; }
 
     .match-file-name { max-width: 100%; }
 }
+
+
+/* ============================================================
+   22. IGNORED PAIRS (blacklist)
+   ============================================================ */
+
+.btn-not-dup {
+    background: #6c757d;
+    border: 1px solid #444;
+    color: #fff;
+    font-size: 0.72rem;
+    padding: 2px 8px;
+    border-radius: var(--radius);
+    cursor: pointer;
+    text-decoration: none;
+    margin-left: 4px;
+}
+.btn-not-dup:hover { background: #5a6268; color: #fff; }
+.btn-not-dup:disabled {
+    opacity: 0.7;
+    cursor: default;
+    background: var(--red-active);
+    border-color: var(--red-active);
+}
+
+.blacklist-box {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 12px;
+}
+.blacklist-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: var(--bg-surface);
+    border-radius: var(--radius);
+    padding: 8px 12px;
+    font-size: 0.8rem;
+}
+.blacklist-item .bl-paths {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.blacklist-item .bl-path {
+    color: var(--text-primary);
+    word-break: break-all;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.blacklist-item .bl-meta {
+    color: var(--text-muted);
+    font-size: 0.72rem;
+    flex-shrink: 0;
+}

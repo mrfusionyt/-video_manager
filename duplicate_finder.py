@@ -1,22 +1,24 @@
 r"""
-Поиск дубликатов видео и картинок — версия с SQLite-кешем, MIH и FFT.
+Поиск дубликатов видео и картинок — версия с SQLite-кешем, MIH, FFT
+и blacklist пар.
 
 Архитектура:
-  • SQLite-кеш (hash_cache.db) — быстрая загрузка/сохранение,
-    индексы для LSH-поиска кандидатов, WAL mode.
-  • Video: 5 кадров × 4 зеркала. LSH-индекс через hash-index
-    (THRESHOLD=0) или MIH 4×16 (THRESHOLD>0).
-  • Audio: chromaprint → LSH 4×8-битные полосы, затем
-    FFT cross-correlation для отсева, затем точный longest-run.
-  • Skip audio для video-matched пар — экономит до 90% времени.
-  • Приоритезация по размеру файла (опционально).
+  • SQLite-кеш (hash_cache.db): files / video_frames / audio_fp /
+    ignored_pairs (пары, помеченные «не дубликаты»).
+  • Video: 5 кадров × 4 зеркала. LSH через hash-index (THRESHOLD=0)
+    или MIH 4×16 (THRESHOLD>0).
+  • Audio: chromaprint → LSH 4×8 бит → FFT-префильтр → точный longest-run.
+  • Skip audio для video-matched пар.
+  • Paры из ignored_pairs исключаются из группировки:
+      – при новом скане;
+      – при загрузке из duplicates_cache.json.
 
 Прогресс-фазы:
   0-40%   хеширование (или загрузка из кеша)
   40-45%  подготовка video-индекса
   45-65%  video verification
   65-70%  audio LSH-индекс
-  70-80%  audio FFT отсев
+  70-80%  audio FFT отсев (внутри verify)
   80-95%  audio verification
   95-100% группировка
 """
@@ -54,11 +56,8 @@ FPCALC_CANDIDATES = [
 THRESHOLD = 0
 KEYFRAME_POSITIONS = [0.10, 0.30, 0.50, 0.70, 0.90]
 
-# MIH для phash: 4 полосы по 16 бит.
 MIH_BANDS = 4
 MIH_BAND_BITS = 16
-# Минимум совпавших полос в одном и том же кадре, чтобы пара
-# считалась кандидатом (используется только при THRESHOLD > 0).
 MIH_MIN_HITS = 2
 
 # ---------- Audio ----------
@@ -75,15 +74,11 @@ AUDIO_SILENCE_MIN_MEAN_DIFF_BITS   = 2.0
 AUDIO_PREFILTER_SAMPLES    = 40
 AUDIO_PREFILTER_GOOD_RATIO = 0.30
 
-# LSH
 AUDIO_LSH_BANDS       = 4
 AUDIO_LSH_BAND_BITS   = 8
 AUDIO_LSH_MIN_MATCHES = 2
 AUDIO_LSH_MAX_POS_DELTA = 8
 
-# FFT prefilter: peak / std должен быть >= этого, чтобы считать,
-# что между дорожками есть корреляция. Ниже — пропускаем без
-# точной проверки.
 FFT_PEAK_STD_RATIO = 4.0
 
 # ---------- Параллелизм ----------
@@ -103,13 +98,19 @@ print(f"[dup] LSH audio {AUDIO_LSH_BANDS}x{AUDIO_LSH_BAND_BITS}bit, "
       f"min_hits={AUDIO_LSH_MIN_MATCHES}, FFT ratio={FFT_PEAK_STD_RATIO}")
 print(f"[dup] workers: hash={HASH_WORKERS}, compare={COMPARE_WORKERS}, "
       f"threshold={THRESHOLD}")
-print(f"[dup] mode: SQLite cache + MIH + FFT, skip audio for video-matched")
 
 
 # ===================================================================
 #                     SQLite cache
 # ===================================================================
 _local = threading.local()
+
+
+def _normalize_path(p):
+    try:
+        return os.path.normcase(os.path.abspath(p))
+    except Exception:
+        return p
 
 
 def _get_conn():
@@ -158,12 +159,23 @@ def _init_db():
             FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE
         )
     """)
+    # ★ Blacklist пар, которые НЕ надо считать дубликатами.
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS ignored_pairs (
+            path_a TEXT NOT NULL,
+            path_b TEXT NOT NULL,
+            note TEXT DEFAULT '',
+            created_at TEXT,
+            PRIMARY KEY (path_a, path_b)
+        )
+    """)
     c.execute("CREATE INDEX IF NOT EXISTS idx_files_path ON files(path)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_ignored_a ON ignored_pairs(path_a)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_ignored_b ON ignored_pairs(path_b)")
     conn.commit()
 
 
 def _get_or_create_file(path, mtime, size, media_type):
-    """Возвращает (file_id, is_fresh).  is_fresh=False — надо пересчитать."""
     conn = _get_conn()
     c = conn.cursor()
     c.execute("SELECT id, mtime, size FROM files WHERE path = ?", (path,))
@@ -249,7 +261,6 @@ def _save_audio_fp(file_id, fp):
 
 
 def _cleanup_db(current_paths):
-    """Удаляет из кеша файлы, которых больше нет на диске."""
     conn = _get_conn()
     c = conn.cursor()
     c.execute("SELECT id, path FROM files")
@@ -263,6 +274,93 @@ def _cleanup_db(current_paths):
     if removed:
         conn.commit()
         print(f"[dup] db cleanup: removed {removed} stale entries")
+
+
+# ===================================================================
+#                     Blacklist (ignored_pairs)
+# ===================================================================
+def _pair_key(p_a, p_b):
+    """Возвращает отсортированную пару нормализованных путей."""
+    a = _normalize_path(p_a)
+    b = _normalize_path(p_b)
+    return (a, b) if a < b else (b, a)
+
+
+def mark_pair_not_duplicate(path_a, path_b, note=''):
+    """Помечает пару файлов как «не дубликаты». Идемпотентно."""
+    if not path_a or not path_b:
+        return False, "Empty path"
+    a, b = _pair_key(path_a, path_b)
+    conn = _get_conn()
+    try:
+        c = conn.cursor()
+        c.execute("""
+            INSERT OR REPLACE INTO ignored_pairs (path_a, path_b, note, created_at)
+            VALUES (?, ?, ?, ?)
+        """, (a, b, note or '', _now_iso()))
+        conn.commit()
+    finally:
+        pass
+    return True, "Ignored"
+
+
+def unmark_pair_not_duplicate(path_a, path_b):
+    if not path_a or not path_b:
+        return False
+    a, b = _pair_key(path_a, path_b)
+    conn = _get_conn()
+    try:
+        c = conn.cursor()
+        c.execute(
+            "DELETE FROM ignored_pairs WHERE path_a = ? AND path_b = ?",
+            (a, b),
+        )
+        conn.commit()
+    finally:
+        pass
+    return True
+
+
+def list_ignored_pairs():
+    _init_db()
+    conn = _get_conn()
+    try:
+        c = conn.cursor()
+        c.execute("""
+            SELECT path_a, path_b, note, created_at
+            FROM ignored_pairs
+            ORDER BY created_at DESC
+        """)
+        return [dict(r) for r in c.fetchall()]
+    finally:
+        pass
+
+
+def clear_ignored_pairs():
+    conn = _get_conn()
+    try:
+        c = conn.cursor()
+        c.execute("DELETE FROM ignored_pairs")
+        conn.commit()
+    finally:
+        pass
+
+
+def _load_blacklist():
+    """Загружает все пары как set(normalized_path_a, normalized_path_b)."""
+    _init_db()
+    conn = _get_conn()
+    try:
+        c = conn.cursor()
+        c.execute("SELECT path_a, path_b FROM ignored_pairs")
+        return {(r['path_a'], r['path_b']) for r in c.fetchall()}
+    finally:
+        pass
+
+
+def _now_iso():
+    import datetime
+    return datetime.datetime.now().isoformat()
 
 
 # ===================================================================
@@ -427,11 +525,6 @@ def _is_silence_like(fp):
 
 
 def _fft_has_correlation(a, b):
-    """
-    Быстрая проверка, есть ли между a и b корреляция.
-    Использует FFT по popcount. Возвращает (True, peak_std_ratio)
-    или (False, ratio).
-    """
     if len(a) < 40 or len(b) < 40:
         return False, 0.0
     a_f = _popcount_u32(np.asarray(a, dtype=np.uint32)).astype(np.float32)
@@ -451,49 +544,7 @@ def _fft_has_correlation(a, b):
     return ratio >= FFT_PEAK_STD_RATIO, ratio
 
 
-def _verify_audio_at_shift(a, b, shift_a, shift_b):
-    """Точная проверка на заданном сдвиге: longest run."""
-    if shift_a >= len(a) or shift_b >= len(b):
-        return None
-    la = len(a) - shift_a
-    lb = len(b) - shift_b
-    L = min(la, lb)
-    if L < 40:
-        return None
-    wa = a[shift_a:shift_a + L]
-    wb = b[shift_b:shift_b + L]
-    xor = np.bitwise_xor(wa, wb)
-    bits = _popcount_u32(xor)
-    flags = (bits <= AUDIO_BITS_TOLERANT).astype(np.int32)
-    run_len, run_start = _find_longest_run_np(flags)
-    min_run_steps = max(20, int(AUDIO_MIN_RUN_SEC * AUDIO_SUBPRINT_PER_SEC))
-    if run_len < min_run_steps:
-        return None
-    run_slice = wa[run_start:run_start + run_len]
-    if _is_silence_like(run_slice):
-        return None
-    start_a_step = shift_a + run_start
-    start_b_step = shift_b + run_start
-    return {
-        'run_steps': int(run_len),
-        'run_sec': float(run_len / AUDIO_SUBPRINT_PER_SEC),
-        'start_a_sec': float(AUDIO_SKIP_INTRO_SEC +
-                             start_a_step / AUDIO_SUBPRINT_PER_SEC),
-        'start_b_sec': float(AUDIO_SKIP_INTRO_SEC +
-                             start_b_step / AUDIO_SUBPRINT_PER_SEC),
-        'skipped_intro_sec': float(AUDIO_SKIP_INTRO_SEC),
-    }
-
-
 def _find_audio_match(a_raw, b_raw):
-    """
-    Точная проверка пары fingerprint'ов.
-
-    Схема:
-      1. Пропускаем интро, отсеиваем тишину.
-      2. FFT-префильтр: если корреляции нет — сразу None.
-      3. Полный перебор сдвигов с префильтром.
-    """
     if not a_raw or not b_raw:
         return None
     a = np.asarray(a_raw, dtype=np.uint32)
@@ -508,7 +559,6 @@ def _find_audio_match(a_raw, b_raw):
     if _is_silence_like(a) or _is_silence_like(b):
         return None
 
-    # FFT-отсев: если корреляции нет, точный перебор не нужен.
     has_corr, ratio = _fft_has_correlation(a, b)
     if not has_corr:
         return None
@@ -599,7 +649,6 @@ def _process_media(item):
                 'from_cache': True,
             }
 
-    # Пересчёт
     if media_type == 'image':
         frames = _process_image_frames(path)
         audio_fp = None
@@ -657,10 +706,6 @@ def _verify_video_pair(ha, hb, threshold):
 
 
 def _video_candidates(paths, hash_objs, threshold):
-    """
-    THRESHOLD=0: hash-index по всем 20 хешам на файл (5 кадров × 4 зеркала).
-    THRESHOLD>0: MIH 4×16 по orig-хешу каждого кадра.
-    """
     n = len(paths)
     pairs = set()
     if threshold == 0:
@@ -677,7 +722,6 @@ def _video_candidates(paths, hash_objs, threshold):
                 for b in range(a + 1, len(uniq)):
                     pairs.add((uniq[a], uniq[b]))
     else:
-        # MIH: (frame_idx, band_idx, band_val) -> [file_idx]
         bucket = defaultdict(list)
         mask = (1 << MIH_BAND_BITS) - 1
         for i in range(n):
@@ -764,6 +808,15 @@ def _group_all(task_id, frames_by_path, audio_by_path,
     n = len(paths)
     parent = list(range(n))
 
+    blacklist = _load_blacklist()
+    print(f"[dup] ignored_pairs loaded: {len(blacklist)}")
+
+    def is_ignored(i, j):
+        a = paths[i]
+        b = paths[j]
+        key = _pair_key(a, b)
+        return key in blacklist
+
     def find(x):
         while parent[x] != x:
             parent[x] = parent[parent[x]]
@@ -782,6 +835,10 @@ def _group_all(task_id, frames_by_path, audio_by_path,
     _set_progress(task_id, 42, 0, 0, 'Building video candidate index...')
     video_pairs = _video_candidates(paths, hash_objs, threshold)
     print(f"[dup] video candidates: {len(video_pairs)}")
+
+    # Фильтр blacklist
+    video_pairs = {p for p in video_pairs if not is_ignored(p[0], p[1])}
+    print(f"[dup] video candidates after blacklist: {len(video_pairs)}")
 
     video_matches_by_pair = {}
     total_vp = len(video_pairs)
@@ -812,10 +869,16 @@ def _group_all(task_id, frames_by_path, audio_by_path,
     audio_pairs_all = _audio_lsh_candidates(paths, audio_by_path)
     print(f"[dup] audio candidates (LSH raw): {len(audio_pairs_all)}")
 
+    # skip video-matched
     audio_pairs = {p for p in audio_pairs_all if find(p[0]) != find(p[1])}
-    skipped = len(audio_pairs_all) - len(audio_pairs)
     print(f"[dup] audio after skip video-matched: {len(audio_pairs)} "
-          f"(skipped {skipped})")
+          f"(skipped {len(audio_pairs_all) - len(audio_pairs)})")
+
+    # skip blacklist
+    before_bl = len(audio_pairs)
+    audio_pairs = {p for p in audio_pairs if not is_ignored(p[0], p[1])}
+    print(f"[dup] audio after blacklist: {len(audio_pairs)} "
+          f"(removed {before_bl - len(audio_pairs)})")
 
     audio_matches_by_pair = {}
     total_ap = len(audio_pairs)
@@ -951,7 +1014,6 @@ def _find_duplicates_worker(task_id, filters):
             })
             return
 
-        # Удаляем устаревшие записи из кеша
         _cleanup_db([v['filepath'] for v in all_items])
 
         processed = 0
@@ -1017,6 +1079,95 @@ def _save_groups(groups):
 # ===================================================================
 #                     Геттеры
 # ===================================================================
+def _rebuild_groups_from_matches(group):
+    """
+    Пересобирает группы внутри одного cached group с учётом blacklist.
+    Возвращает список групп (может быть > 1, если группа раскололась).
+    """
+    files = group.get('files', [])
+    if len(files) < 2:
+        return []
+    matches = group.get('matches', {}) or {}
+    video_matches = matches.get('video', []) or []
+    audio_matches = matches.get('audio', []) or []
+
+    # path -> file
+    path_by_id = {}
+    for f in files:
+        path_by_id[f['id']] = f.get('filepath', '')
+    id_list = [f['id'] for f in files]
+    idx = {vid: i for i, vid in enumerate(id_list)}
+    n = len(id_list)
+    parent = list(range(n))
+
+    def find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(a, b):
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[ra] = rb
+
+    blacklist = _load_blacklist()
+    used_video_pairs = []
+    used_audio_pairs = []
+
+    def is_ignored_by_id(a_id, b_id):
+        pa = path_by_id.get(a_id, '')
+        pb = path_by_id.get(b_id, '')
+        if not pa or not pb:
+            return False
+        return _pair_key(pa, pb) in blacklist
+
+    for m in video_matches:
+        a_id = m.get('a_id')
+        b_id = m.get('b_id')
+        if a_id in idx and b_id in idx:
+            if not is_ignored_by_id(a_id, b_id):
+                union(idx[a_id], idx[b_id])
+                used_video_pairs.append(m)
+    for m in audio_matches:
+        a_id = m.get('a_id')
+        b_id = m.get('b_id')
+        if a_id in idx and b_id in idx:
+            if not is_ignored_by_id(a_id, b_id):
+                union(idx[a_id], idx[b_id])
+                used_audio_pairs.append(m)
+
+    by_root = defaultdict(list)
+    for i, vid in enumerate(id_list):
+        by_root[find(i)].append(vid)
+
+    result = []
+    for root, vids in by_root.items():
+        if len(vids) < 2:
+            continue
+        vids_set = set(vids)
+        sub_files = [path_by_id[v] for v in vids if v in path_by_id]
+        sub_files = [f for f in files if f['id'] in vids_set]
+        sub_video = [m for m in used_video_pairs
+                     if m['a_id'] in vids_set and m['b_id'] in vids_set]
+        sub_audio = [m for m in used_audio_pairs
+                     if m['a_id'] in vids_set and m['b_id'] in vids_set]
+        if sub_video and sub_audio:
+            r = 'video+audio'
+        elif sub_video:
+            r = 'video'
+        elif sub_audio:
+            r = 'audio'
+        else:
+            continue
+        result.append({
+            'files': sub_files,
+            'reason': r,
+            'matches': {'video': sub_video, 'audio': sub_audio},
+        })
+    return result
+
+
 def get_duplicate_groups():
     global DUPLICATE_GROUPS
     if not DUPLICATE_GROUPS:
@@ -1061,24 +1212,29 @@ def get_duplicate_groups():
     finally:
         conn.close()
 
+    # 1) чистим несуществующие файлы
     cleaned = []
-    changed = False
     for g in DUPLICATE_GROUPS:
         new_files = [v for v in g['files']
                      if int(v.get('id', -1)) in existing]
         if len(new_files) >= 2:
-            if len(new_files) != len(g['files']):
-                changed = True
             cleaned.append({
                 'files': new_files,
                 'reason': g['reason'],
                 'matches': g.get('matches', {'video': [], 'audio': []}),
             })
-        else:
-            changed = True
-    if changed:
-        DUPLICATE_GROUPS = cleaned
-        _save_groups(cleaned)
+
+    # 2) пересобираем каждую группу с учётом blacklist
+    final = []
+    for g in cleaned:
+        final.extend(_rebuild_groups_from_matches(g))
+
+    if len(final) != len(DUPLICATE_GROUPS):
+        DUPLICATE_GROUPS = final
+        _save_groups(final)
+    else:
+        DUPLICATE_GROUPS = final
+
     return DUPLICATE_GROUPS
 
 
@@ -1190,3 +1346,53 @@ def move_all_groups(keep_best=True):
             if v['id'] != best['id']:
                 all_ids.append(v['id'])
     return move_selected(all_ids)
+
+
+# ===================================================================
+#                     Blacklist API для views
+# ===================================================================
+def mark_group_ignored(video_ids, note=''):
+    """Помечает все пары внутри группы как ignored."""
+    if not video_ids or len(video_ids) < 2:
+        return False, "Need >= 2 files", 0
+    paths = []
+    for vid in video_ids:
+        v = get_video_by_id(int(vid))
+        if v and v.get('filepath'):
+            paths.append(v['filepath'])
+    if len(paths) < 2:
+        return False, "Files not found", 0
+
+    count = 0
+    for i in range(len(paths)):
+        for j in range(i + 1, len(paths)):
+            ok, _ = mark_pair_not_duplicate(paths[i], paths[j], note)
+            if ok:
+                count += 1
+
+    # Обновляем кеш групп: заново читаем, пересобираем с blacklist
+    global DUPLICATE_GROUPS
+    DUPLICATE_GROUPS = []  # сбросить, чтобы get_duplicate_groups перечитал
+    get_duplicate_groups()
+
+    return True, f"Ignored {count} pairs", count
+
+
+def mark_pair_by_ids(id_a, id_b, note=''):
+    a = get_video_by_id(int(id_a))
+    b = get_video_by_id(int(id_b))
+    if not a or not b:
+        return False, "File not found"
+    ok, msg = mark_pair_not_duplicate(a['filepath'], b['filepath'], note)
+    global DUPLICATE_GROUPS
+    DUPLICATE_GROUPS = []
+    get_duplicate_groups()
+    return ok, msg
+
+
+def unmark_pair_by_paths(path_a, path_b):
+    ok = unmark_pair_not_duplicate(path_a, path_b)
+    global DUPLICATE_GROUPS
+    DUPLICATE_GROUPS = []
+    get_duplicate_groups()
+    return ok
