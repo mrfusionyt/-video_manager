@@ -1,0 +1,62 @@
+{# ============================================================
+   Компактная пагинация с ellipsis.
+
+   Использование в шаблоне:
+
+       {% from "_pagination.html" import pagination %}
+       {% call(p) pagination(page, total_pages) %}
+           {{ url_for('index', page=p, profile=current_profile,
+                      sort=sort, search=search, folder=folder,
+                      category=selected_categories) }}
+       {% endcall %}
+
+   caller — Jinja-обёртка: блок, переданный внутрь {% call %},
+   становится вызываемым. caller(p) возвращает готовую строку URL.
+
+   paginate_range — глобальная функция из helpers/pagination.py,
+   зарегистрирована в app.jinja_env.globals.
+   ============================================================ #}
+
+{% macro pagination(page, total_pages) %}
+    {% if total_pages > 1 %}
+    <nav aria-label="Page navigation" class="mt-3">
+        <ul class="pagination justify-content-center">
+            {% if page > 1 %}
+                <li class="page-item">
+                    <a class="page-link" href="{{ caller(page - 1) }}">‹ Prev</a>
+                </li>
+            {% else %}
+                <li class="page-item disabled">
+                    <span class="page-link">‹ Prev</span>
+                </li>
+            {% endif %}
+
+            {% for p in paginate_range(page, total_pages) %}
+                {% if p == '...' %}
+                    <li class="page-item disabled">
+                        <span class="page-link">…</span>
+                    </li>
+                {% elif p == page %}
+                    <li class="page-item active">
+                        <span class="page-link">{{ p }}</span>
+                    </li>
+                {% else %}
+                    <li class="page-item">
+                        <a class="page-link" href="{{ caller(p) }}">{{ p }}</a>
+                    </li>
+                {% endif %}
+            {% endfor %}
+
+            {% if page < total_pages %}
+                <li class="page-item">
+                    <a class="page-link" href="{{ caller(page + 1) }}">Next ›</a>
+                </li>
+            {% else %}
+                <li class="page-item disabled">
+                    <span class="page-link">Next ›</span>
+                </li>
+            {% endif %}
+        </ul>
+    </nav>
+    {% endif %}
+{% endmacro %}

@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_pagination.html" import pagination %}
 
 {% block title %}{{ artist.name }}{% endblock %}
 {% block page_title %}{{ artist.name }}{% endblock %}
@@ -7,7 +8,7 @@
 <div class="artist-info">
     <div>
         <h4>{{ artist.name }}</h4>
-        <div class="meta">{{ videos|length }} video(s) in this artist</div>
+        <div class="meta">{{ total_videos }} video(s) in this artist</div>
     </div>
     <div class="actions">
         <button class="btn-artist" onclick="openAddVideos()">+ Add videos</button>
@@ -45,6 +46,9 @@
     </div>
     {% endfor %}
 </div>
+
+{% call(p) pagination(page, total_pages) %}{{ url_for('artist_view', artist_id=artist.id, page=p, profile=current_profile) }}{% endcall %}
+
 {% else %}
 <div class="empty-msg">
     <p>No videos in this artist yet.</p>

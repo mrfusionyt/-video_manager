@@ -13,6 +13,7 @@ from flask import (
 
 from models import get_all_videos, get_video_by_id
 from helpers.profiles import get_current_profile, profile_to_mode
+from config import ITEMS_PER_PAGE
 
 # Top-level artists.py (не путать с views.artists)
 from artists import (
@@ -124,25 +125,42 @@ def register(app):
         if not artist:
             abort(404)
 
-        # Видео текущего артиста (для основного грида)
+        # Видео текущего артиста
         video_ids = get_artist_video_ids(artist_id)
-        videos = []
+        all_artist_videos = []
         for vid in video_ids:
             v = get_video_by_id(vid)
             if v:
-                videos.append(v)
+                all_artist_videos.append(v)
 
-        videos.sort(key=lambda x: x.get('added', ''), reverse=True)
+        all_artist_videos.sort(key=lambda x: x.get('added', ''), reverse=True)
+
+        # --- Пагинация ---
+        per_page = ITEMS_PER_PAGE
+        total_videos = len(all_artist_videos)
+        total_pages = max(1, (total_videos + per_page - 1) // per_page)
+
+        page = request.args.get('page', 1, type=int)
+        if page < 1:
+            page = 1
+        if page > total_pages:
+            page = total_pages
+
+        start = (page - 1) * per_page
+        page_videos = all_artist_videos[start:start + per_page]
 
         # Видео, доступные для добавления: всё, что НЕ привязано
-        # ни к одному артисту этого профиля (включая текущего).
+        # ни к одному артисту этого профиля.
         all_videos = get_all_videos(mode=current_mode)
         assigned_ids = get_all_assigned_video_ids(mode=current_mode)
         available = [v for v in all_videos if v['id'] not in assigned_ids]
 
         return render_template('artist.html',
                                artist=artist,
-                               videos=videos,
+                               videos=page_videos,
+                               total_videos=total_videos,
+                               page=page,
+                               total_pages=total_pages,
                                available_videos=available)
 
     @app.route('/artists/<int:artist_id>/videos')

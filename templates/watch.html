@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_pagination.html" import pagination %}
 
 {% block title %}{{ video.filename }}{% endblock %}
 {% block page_title %}
@@ -246,27 +247,7 @@
             </div>
 
             {% if total_rec_pages > 1 %}
-            <nav aria-label="Recommendations pagination">
-                <ul class="pagination justify-content-center">
-                    {% if rec_page > 1 %}
-                    <li class="page-item">
-                        <a class="page-link" href="{{ url_for('watch', video_id=video.id, rec_page=rec_page-1, profile=current_profile) }}">Previous</a>
-                    </li>
-                    {% endif %}
-                    {% for p in range(1, total_rec_pages+1) %}
-                        {% if p == rec_page %}
-                            <li class="page-item active"><span class="page-link">{{ p }}</span></li>
-                        {% else %}
-                            <li class="page-item"><a class="page-link" href="{{ url_for('watch', video_id=video.id, rec_page=p, profile=current_profile) }}">{{ p }}</a></li>
-                        {% endif %}
-                    {% endfor %}
-                    {% if rec_page < total_rec_pages %}
-                    <li class="page-item">
-                        <a class="page-link" href="{{ url_for('watch', video_id=video.id, rec_page=rec_page+1, profile=current_profile) }}">Next</a>
-                    </li>
-                    {% endif %}
-                </ul>
-            </nav>
+                {% call(p) pagination(rec_page, total_rec_pages) %}{{ url_for('watch', video_id=video.id, rec_page=p, profile=current_profile) }}{% endcall %}
             {% endif %}
         </div>
     </div>

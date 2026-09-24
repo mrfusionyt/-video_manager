@@ -21,6 +21,7 @@ from artists import init_artists_db, get_all_artists
 from scanner import scan_libraries
 from config import app_config, DARK_MODE, MODE_LABELS
 from helpers.profiles import get_current_profile, profile_to_mode
+from helpers.pagination import paginate_range
 from addon.instagram_downloader import instagram_bp, set_post_download_hook
 from addon.youtube_downloader import youtube_bp
 from views import register_all
@@ -38,6 +39,9 @@ app.config["DOP_DIR"] = resource_path("_dop")
 
 # Deno для yt-dlp: добавляем _dop в PATH при старте
 os.environ["PATH"] = app.config["DOP_DIR"] + os.pathsep + os.environ.get("PATH", "")
+
+# Jinja-глобал для пагинации
+app.jinja_env.globals['paginate_range'] = paginate_range
 
 init_db()
 init_artists_db()

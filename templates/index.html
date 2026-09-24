@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_pagination.html" import pagination %}
 
 {% block title %}Home{% endblock %}
 {% block page_title %}
@@ -73,28 +74,8 @@
 </div>
 
 <div id="paginationContainer" class="mt-3">
-    {% if total_pages > 1 and sort not in ['top10','top50','top100'] %}
-    <nav aria-label="Page navigation">
-        <ul class="pagination justify-content-center" id="paginationList">
-            {% if page > 1 %}
-            <li class="page-item">
-                <a class="page-link" href="{{ url_for('index', page=page-1, category=selected_categories, sort=sort, search=search, folder=folder, profile=current_profile) }}">Previous</a>
-            </li>
-            {% endif %}
-            {% for p in range(1, total_pages+1) %}
-                {% if p == page %}
-                    <li class="page-item active"><span class="page-link">{{ p }}</span></li>
-                {% else %}
-                    <li class="page-item"><a class="page-link" href="{{ url_for('index', page=p, category=selected_categories, sort=sort, search=search, folder=folder, profile=current_profile) }}">{{ p }}</a></li>
-                {% endif %}
-            {% endfor %}
-            {% if page < total_pages %}
-            <li class="page-item">
-                <a class="page-link" href="{{ url_for('index', page=page+1, category=selected_categories, sort=sort, search=search, folder=folder, profile=current_profile) }}">Next</a>
-            </li>
-            {% endif %}
-        </ul>
-    </nav>
+    {% if sort not in ['top10','top50','top100'] %}
+        {% call(p) pagination(page, total_pages) %}{{ url_for('index', page=p, category=selected_categories, sort=sort, search=search, folder=folder, profile=current_profile) }}{% endcall %}
     {% endif %}
 </div>
 
