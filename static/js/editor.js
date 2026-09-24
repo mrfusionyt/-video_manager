@@ -7,10 +7,10 @@
    • Покадровое перемещение (◀| |▶), шаг = 1/FPS.
    • Set START / Set END — снять текущую позицию как границу.
    • Preview selection — проиграть выделенный отрезок.
-   • Save — отправить start/end на бэкенд, там ffmpeg.
+   • Save — модалка с настройками (Fast/Accurate, overwrite).
    • High precision — включает точный seek.
 
-   ВАЖНО про overwrite на Windows:
+   Про overwrite на Windows:
      Пока <video> стримит исходный файл через /video/<id>, серверный
      send_file держит файл открытым, и os.replace падает с WinError 5.
      Поэтому перед POST мы делаем video.load() с пустым src — это
@@ -43,7 +43,6 @@
     var statusEl = document.getElementById('editorStatus');
 
     var chkHighPrecision = document.getElementById('chkHighPrecision');
-    var chkOverwrite = document.getElementById('chkOverwrite');
 
     var btnPlayPause = document.getElementById('btnPlayPause');
     var btnStepBack = document.getElementById('btnStepBack');
@@ -55,6 +54,16 @@
     var btnPreview = document.getElementById('btnPreview');
     var btnReset = document.getElementById('btnReset');
     var btnSave = document.getElementById('btnSave');
+
+    /* ---- Модалка сохранения ---- */
+    var saveModalEl = document.getElementById('saveModal');
+    var saveModal = saveModalEl ? new bootstrap.Modal(saveModalEl) : null;
+    var saveInfoStart = document.getElementById('saveInfoStart');
+    var saveInfoEnd = document.getElementById('saveInfoEnd');
+    var saveInfoDuration = document.getElementById('saveInfoDuration');
+    var saveStatusEl = document.getElementById('saveStatus');
+    var confirmSaveBtn = document.getElementById('confirmSaveBtn');
+    var chkOverwrite = document.getElementById('chkOverwrite');
 
     var state = {
         start: 0,
@@ -247,7 +256,7 @@
     btnPreview.addEventListener('click', previewSelection);
     btnReset.addEventListener('click', resetSelection);
 
-    /* ---------------- Save ---------------- */
+    /* ---------------- Модалка сохранения ---------------- */
     btnSave.addEventListener('click', function () {
         if (state.end - state.start < FRAME_STEP) {
             statusEl.textContent = '❌ Selection is too small';
@@ -255,115 +264,160 @@
             return;
         }
 
-        var modeEl = document.querySelector('input[name="save-mode"]:checked');
-        var mode = modeEl ? modeEl.value : 'fast';
-        var overwrite = chkOverwrite.checked;
-
-        if (overwrite && !confirm('Overwrite the original file? This cannot be undone.')) {
-            return;
-        }
-        if (mode === 'fast' && !overwrite) {
-            var proceed = confirm(
-                'Fast mode uses stream copy — trim points will snap to the ' +
-                'nearest keyframes and might be a few seconds off.\n\n' +
-                'Continue?'
-            );
-            if (!proceed) return;
-        }
-
-        // ★ КРИТИЧНО: выгружаем видео из плеера, чтобы браузер закрыл
-        //   HTTP-стрим на исходный файл. Иначе на Windows os.replace
-        //   упадёт с WinError 5 (Access denied) — файл залочен.
-        try {
-            video.pause();
-            video.removeAttribute('src');
-            video.load();
-        } catch (e) {}
-
-        btnSave.disabled = true;
-        btnSave.textContent = 'Saving…';
-        statusEl.textContent = '⏳ Processing video with ffmpeg…';
+        statusEl.textContent = '';
         statusEl.className = 'editor-status';
 
-        // Небольшая задержка, чтобы браузер успел разорвать соединение.
-        setTimeout(function () {
-            fetch('/editor/' + VIDEO_ID + '/save', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    start: state.start,
-                    end: state.end,
-                    mode: mode,
-                    overwrite: overwrite,
-                }),
-            })
-                .then(function (r) { return r.json(); })
-                .then(function (data) {
-                    if (data.success) {
-                        if (data.fallback) {
-                            statusEl.textContent =
-                                '⚠️ ' + (data.message || 'Saved as new file');
-                            statusEl.className = 'editor-status success';
-                            setTimeout(function () {
-                                window.location.href =
-                                    '/watch/' + VIDEO_ID +
-                                    '?profile=' + encodeURIComponent(CFG.currentProfile || 'female');
-                            }, 2000);
-                            return;
-                        }
+        // Заполняем сводку в модалке
+        if (saveInfoStart) saveInfoStart.textContent = formatTime(state.start);
+        if (saveInfoEnd) saveInfoEnd.textContent = formatTime(state.end);
+        if (saveInfoDuration) {
+            saveInfoDuration.textContent = formatTime(Math.max(0, state.end - state.start));
+        }
 
-                        statusEl.textContent = '✅ Saved: ' + data.filename;
-                        statusEl.className = 'editor-status success';
+        // Сбрасываем статус модалки
+        if (saveStatusEl) {
+            saveStatusEl.textContent = '';
+            saveStatusEl.className = 'save-status';
+        }
 
-                        if (overwrite) {
-                            // Перезагружаем видео с cache-buster, чтобы браузер
-                            // взял новый файл, а не закешированный старый.
-                            setTimeout(function () {
-                                var bust = '/video/' + VIDEO_ID + '?v=' + Date.now();
-                                video.setAttribute('src', bust);
-                                video.load();
-                                video.addEventListener('loadedmetadata', function onMeta() {
-                                    video.removeEventListener('loadedmetadata', onMeta);
-                                    state.duration = video.duration || 0;
-                                    state.start = 0;
-                                    state.end = state.duration;
-                                    tlDuration.textContent = formatTime(state.duration);
-                                    updateTimeline();
-                                    updateInfo();
-                                });
-                            }, 400);
+        // Возвращаем кнопку в исходное состояние
+        if (confirmSaveBtn) {
+            confirmSaveBtn.disabled = false;
+            confirmSaveBtn.textContent = 'Save';
+        }
+
+        if (saveModal) saveModal.show();
+    });
+
+    if (confirmSaveBtn) {
+        confirmSaveBtn.addEventListener('click', function () {
+            var modeEl = document.querySelector('input[name="save-mode"]:checked');
+            var mode = modeEl ? modeEl.value : 'fast';
+            var overwrite = chkOverwrite ? chkOverwrite.checked : true;
+
+            if (overwrite) {
+                if (!confirm('Overwrite the original file? This cannot be undone.')) {
+                    return;
+                }
+            }
+            if (mode === 'fast' && !overwrite) {
+                var proceed = confirm(
+                    'Fast mode uses stream copy — trim points will snap to the ' +
+                    'nearest keyframes and might be a few seconds off.\n\n' +
+                    'Continue?'
+                );
+                if (!proceed) return;
+            }
+
+            // ★ КРИТИЧНО: выгружаем видео из плеера, чтобы браузер закрыл
+            //   HTTP-стрим на исходный файл. Иначе на Windows os.replace
+            //   упадёт с WinError 5 (Access denied) — файл залочен.
+            try {
+                video.pause();
+                video.removeAttribute('src');
+                video.load();
+            } catch (e) {}
+
+            confirmSaveBtn.disabled = true;
+            confirmSaveBtn.textContent = 'Saving…';
+            if (saveStatusEl) {
+                saveStatusEl.textContent = '⏳ Processing video with ffmpeg…';
+                saveStatusEl.className = 'save-status';
+            }
+
+            // Небольшая задержка, чтобы браузер успел разорвать соединение.
+            setTimeout(function () {
+                fetch('/editor/' + VIDEO_ID + '/save', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        start: state.start,
+                        end: state.end,
+                        mode: mode,
+                        overwrite: overwrite,
+                    }),
+                })
+                    .then(function (r) { return r.json(); })
+                    .then(function (data) {
+                        if (data.success) {
+                            if (data.fallback) {
+                                if (saveStatusEl) {
+                                    saveStatusEl.textContent =
+                                        '⚠️ ' + (data.message || 'Saved as new file');
+                                    saveStatusEl.className = 'save-status success';
+                                }
+                                setTimeout(function () {
+                                    if (saveModal) saveModal.hide();
+                                    window.location.href =
+                                        '/watch/' + VIDEO_ID +
+                                        '?profile=' + encodeURIComponent(CFG.currentProfile || 'female');
+                                }, 1800);
+                                return;
+                            }
+
+                            if (saveStatusEl) {
+                                saveStatusEl.textContent = '✅ Saved: ' + data.filename;
+                                saveStatusEl.className = 'save-status success';
+                            }
+
+                            if (overwrite) {
+                                // Перезагружаем видео с cache-buster,
+                                // чтобы браузер взял новый файл.
+                                setTimeout(function () {
+                                    if (saveModal) saveModal.hide();
+                                    var bust = '/video/' + VIDEO_ID + '?v=' + Date.now();
+                                    video.setAttribute('src', bust);
+                                    video.load();
+                                    video.addEventListener('loadedmetadata', function onMeta() {
+                                        video.removeEventListener('loadedmetadata', onMeta);
+                                        state.duration = video.duration || 0;
+                                        state.start = 0;
+                                        state.end = state.duration;
+                                        tlDuration.textContent = formatTime(state.duration);
+                                        updateTimeline();
+                                        updateInfo();
+                                    });
+                                    statusEl.textContent = '✅ Saved: ' + data.filename;
+                                    statusEl.className = 'editor-status success';
+                                }, 500);
+                            } else {
+                                setTimeout(function () {
+                                    if (saveModal) saveModal.hide();
+                                    window.location.href =
+                                        '/watch/' + VIDEO_ID +
+                                        '?profile=' + encodeURIComponent(CFG.currentProfile || 'female');
+                                }, 1200);
+                            }
                         } else {
-                            setTimeout(function () {
-                                window.location.href =
-                                    '/watch/' + VIDEO_ID +
-                                    '?profile=' + encodeURIComponent(CFG.currentProfile || 'female');
-                            }, 1200);
-                        }
-                    } else {
-                        statusEl.textContent = '❌ ' + (data.error || 'Save failed');
-                        statusEl.className = 'editor-status error';
+                            if (saveStatusEl) {
+                                saveStatusEl.textContent = '❌ ' + (data.error || 'Save failed');
+                                saveStatusEl.className = 'save-status error';
+                            }
+                            confirmSaveBtn.disabled = false;
+                            confirmSaveBtn.textContent = 'Save';
 
-                        // Возвращаем видео в плеер, раз сохранение провалилось
+                            // Возвращаем видео в плеер, раз сохранение провалилось
+                            try {
+                                video.setAttribute('src', '/video/' + VIDEO_ID);
+                                video.load();
+                            } catch (e) {}
+                        }
+                    })
+                    .catch(function (e) {
+                        if (saveStatusEl) {
+                            saveStatusEl.textContent = '❌ Network error: ' + e;
+                            saveStatusEl.className = 'save-status error';
+                        }
+                        confirmSaveBtn.disabled = false;
+                        confirmSaveBtn.textContent = 'Save';
                         try {
                             video.setAttribute('src', '/video/' + VIDEO_ID);
                             video.load();
-                        } catch (e) {}
-                    }
-                })
-                .catch(function (e) {
-                    statusEl.textContent = '❌ Network error: ' + e;
-                    statusEl.className = 'editor-status error';
-                    try {
-                        video.setAttribute('src', '/video/' + VIDEO_ID);
-                        video.load();
-                    } catch (err) {}
-                })
-                .finally(function () {
-                    btnSave.disabled = false;
-                    btnSave.textContent = '💾 Save trimmed video';
-                });
-        }, 350); // ждём разрыва соединения
-    });
+                        } catch (err) {}
+                    });
+            }, 350); // ждём разрыва соединения
+        });
+    }
 
     /* ---------------- Video events ---------------- */
     video.addEventListener('loadedmetadata', function () {
@@ -385,7 +439,17 @@
 
     /* ---------------- Keyboard ---------------- */
     document.addEventListener('keydown', function (e) {
-        if (e.target.tagName === 'INPUT') return;
+        // Не перехватываем, если фокус в поле ввода
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+        // Не перехватываем, если открыта модалка сохранения
+        if (saveModalEl && saveModalEl.classList.contains('show')) {
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                if (saveModal) saveModal.hide();
+            }
+            return;
+        }
+
         if (e.key === 'ArrowLeft') {
             e.preventDefault();
             stepFrame(-1);

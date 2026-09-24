@@ -1,11 +1,16 @@
 """
-Настройки, скачивание VR, раздача VR-файлов, прогресс-стримы.
+Настройки, скачивание VR, раздача VR-файлов, прогресс-стримы,
+перезапуск сервера.
 """
 import os
+import sys
 import json
 import uuid
+import time
 import sqlite3
 import mimetypes
+import threading
+import subprocess
 
 import yt_dlp
 from flask import (
@@ -64,6 +69,95 @@ def _duplicates_stats(groups):
         'total_size_keep': total_size_keep,
         'total_size_move': total_size_move,
     }
+
+
+# ===================================================================
+#                     RESTART SERVER
+# ===================================================================
+#  Как работает:
+#
+#  A) Если приложение запущено через run.bat — bat экспортирует
+#     VM_SUPERVISED_BY_BAT=1. В этом случае мы просто делаем
+#     os._exit(42), а bat сам поднимает python заново в том же окне.
+#     Это самый чистый сценарий: сервер живёт в том же cmd,
+#     пользователь видит логи, фоновых "висящих" python не остаётся.
+#
+#  B) Если приложение запущено вручную (`python app.py` или .exe) —
+#     переменной нет. Тогда запускаем новый процесс через Popen
+#     (DETACHED_PROCESS) и убиваем старый. Работает и в dev, и в EXE.
+#
+RESTART_EXIT_CODE = 42
+
+
+def _spawn_restart():
+    """
+    Инициирует перезапуск сервера.
+
+    Вызывается в фоновом потоке, чтобы сначала успеть отдать HTTP-ответ
+    клиенту. Сам процесс завершается мгновенно.
+    """
+    # -------- Сценарий A: под управлением run.bat ----------------------
+    if os.environ.get('VM_SUPERVISED_BY_BAT') == '1':
+        print(f"[restart] supervised by run.bat, exiting with code "
+              f"{RESTART_EXIT_CODE}")
+        # Даём буферам шанс сброситься
+        try:
+            sys.stdout.flush()
+            sys.stderr.flush()
+        except Exception:
+            pass
+        # Небольшая пауза, чтобы HTTP-ответ успел уйти
+        time.sleep(0.4)
+        os._exit(RESTART_EXIT_CODE)
+        return  # pragma: no cover
+
+    # -------- Сценарий B: запуск вручную (dev или EXE) -----------------
+    try:
+        if getattr(sys, 'frozen', False):
+            # PyInstaller EXE: [app.exe] + переданные аргументы
+            cmd = [sys.executable] + list(sys.argv[1:])
+        else:
+            # dev: [python.exe] + [app.py]
+            cmd = [sys.executable] + list(sys.argv)
+
+        # Абсолютный cwd, чтобы app.py нашёлся при любом рабочем каталоге
+        base_dir = os.path.abspath(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        )
+
+        kwargs = {
+            'close_fds': True,
+            'stdin': subprocess.DEVNULL,
+            'stdout': subprocess.DEVNULL,
+            'stderr': subprocess.DEVNULL,
+            'cwd': base_dir,
+        }
+        if sys.platform == 'win32':
+            DETACHED_PROCESS = 0x00000008
+            CREATE_NEW_PROCESS_GROUP = 0x00000200
+            kwargs['creationflags'] = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+
+        proc = subprocess.Popen(cmd, **kwargs)
+        print(f"[restart] new process spawned pid={proc.pid} cmd={cmd}")
+
+        # Даём новому процессу время подняться и проверить, что он жив
+        time.sleep(1.5)
+        if proc.poll() is not None:
+            print(f"[restart] new process died immediately "
+                  f"(rc={proc.returncode}), NOT killing old server")
+            return  # оставляем старый сервер работать
+    except Exception as e:
+        print(f"[restart] failed to spawn new process: {e}")
+        return  # не убиваем текущий сервер, если не удалось запустить новый
+
+    # -------- Убиваем старый процесс -----------------------------------
+    print("[restart] exiting old process")
+    try:
+        sys.stdout.flush()
+        sys.stderr.flush()
+    except Exception:
+        pass
+    os._exit(0)
 
 
 def register(app):
@@ -161,6 +255,27 @@ def register(app):
                                    tab=tab,
                                    task_id=task_id,
                                    scan_running=is_scan_in_progress())
+
+    # ------------------------------------------------------------------
+    #                    RESTART SERVER
+    # ------------------------------------------------------------------
+    @app.route('/restart_server', methods=['POST'])
+    def restart_server():
+        """
+        Перезапускает Flask-сервер.
+
+        Ответ отдаём сразу — клиент сам ждёт, пока сервер вернётся
+        (polling HEAD / каждые 0.9 секунды из JS).
+        """
+        print("[restart] requested by client")
+        supervised = os.environ.get('VM_SUPERVISED_BY_BAT') == '1'
+        print(f"[restart] supervised_by_bat={supervised}")
+        threading.Thread(target=_spawn_restart, daemon=True).start()
+        return jsonify({
+            'success': True,
+            'supervised': supervised,
+            'message': 'Server is restarting…',
+        })
 
     @app.route('/scan_progress/<task_id>')
     def scan_progress_stream(task_id):
