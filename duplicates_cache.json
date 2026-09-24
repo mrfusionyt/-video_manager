@@ -1,1 +1,97 @@
-[]
+[
+  {
+    "files": [
+      {
+        "id": 308,
+        "library_id": 27,
+        "filename": "IMG_3918.MP4",
+        "filepath": "C:\\Users\\\u0410\u0434\u043c\u0438\u043d\u0438\u0441\u0442\u0440\u0430\u0442\u043e\u0440\\Downloads\\bbb\\IMG_3918.MP4",
+        "duration": 6,
+        "size": 1860731,
+        "added": "2026-09-16T13:53:45.358985",
+        "rating": 2,
+        "orientation": "vertical",
+        "media_type": "video",
+        "width": 576,
+        "height": 1248,
+        "codec": "h264",
+        "bitrate": 2400297,
+        "fps": 60.0,
+        "mode": 1,
+        "folder_path": null,
+        "folder": "C:\\Users\\\u0410\u0434\u043c\u0438\u043d\u0438\u0441\u0442\u0440\u0430\u0442\u043e\u0440\\Downloads\\bbb",
+        "library_name": "bbb",
+        "categories": []
+      },
+      {
+        "id": 317,
+        "library_id": 27,
+        "filename": "IMG_3918 \u2014 \u043a\u043e\u043f\u0438\u044f.MP4",
+        "filepath": "C:\\Users\\\u0410\u0434\u043c\u0438\u043d\u0438\u0441\u0442\u0440\u0430\u0442\u043e\u0440\\Downloads\\bbb\\IMG_3918 \u2014 \u043a\u043e\u043f\u0438\u044f.MP4",
+        "duration": 6,
+        "size": 1860731,
+        "added": "2026-09-24T13:21:43.911025",
+        "rating": 0,
+        "orientation": "vertical",
+        "media_type": "video",
+        "width": 576,
+        "height": 1248,
+        "codec": "h264",
+        "bitrate": 2400297,
+        "fps": 60.0,
+        "mode": 1,
+        "folder_path": null,
+        "folder": "C:\\Users\\\u0410\u0434\u043c\u0438\u043d\u0438\u0441\u0442\u0440\u0430\u0442\u043e\u0440\\Downloads\\bbb",
+        "library_name": "bbb",
+        "categories": []
+      }
+    ],
+    "reason": "video",
+    "matches": {
+      "video": [
+        {
+          "a_id": 308,
+          "b_id": 317,
+          "pairs": [
+            {
+              "pos_a": 0.1,
+              "pos_b": 0.1,
+              "hamming": 0
+            },
+            {
+              "pos_a": 0.3,
+              "pos_b": 0.3,
+              "hamming": 0
+            },
+            {
+              "pos_a": 0.3,
+              "pos_b": 0.9,
+              "hamming": 0
+            },
+            {
+              "pos_a": 0.5,
+              "pos_b": 0.5,
+              "hamming": 0
+            },
+            {
+              "pos_a": 0.7,
+              "pos_b": 0.7,
+              "hamming": 0
+            },
+            {
+              "pos_a": 0.9,
+              "pos_b": 0.3,
+              "hamming": 0
+            },
+            {
+              "pos_a": 0.9,
+              "pos_b": 0.9,
+              "hamming": 0
+            }
+          ]
+        }
+      ],
+      "audio": []
+    }
+  }
+]
