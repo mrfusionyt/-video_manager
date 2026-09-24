@@ -178,7 +178,7 @@
                         <a href="#" onclick="window.history.back(); return false;" class="btn-nav icon-only" title="Back">
                             <img src="{{ url_for('serve_image', filename='back.png') }}" alt="Back">
                         </a>
-                    {% elif request.endpoint == 'settings' or request.endpoint == 'edit_video' or request.endpoint == 'artist_view' or request.endpoint == 'tools_page' %}
+                    {% elif request.endpoint == 'settings' or request.endpoint == 'edit_video' or request.endpoint == 'artist_view' or request.endpoint == 'tools_page' or request.endpoint == 'editor_page' %}
                         <a href="{{ url_for('index', profile=current_profile) }}" class="btn-nav icon-only" title="Back">
                             <img src="{{ url_for('serve_image', filename='back.png') }}" alt="Back">
                         </a>
@@ -207,6 +207,102 @@
     </div>
 
     <div class="mobile-drawer-body">
+
+    {% if request.endpoint == 'settings' %}
+        {# ============================================================
+           SETTINGS PAGE — компактное мобильное меню:
+             1. Videos (на главную)
+             2. Профиль (переключатель)
+             3. Табы настроек + Tools
+           ============================================================ #}
+
+        <div class="drawer-section">
+            <ul class="drawer-nav">
+                <li>
+                    <a href="{{ url_for('index', profile=current_profile) }}">
+                        <img src="{{ url_for('serve_image', filename='video.png') }}" alt="" class="drawer-icon">
+                        <span>Videos</span>
+                    </a>
+                </li>
+            </ul>
+        </div>
+
+        <div class="drawer-section">
+            <div class="drawer-section-title">Profile</div>
+            <button type="button" class="drawer-btn primary"
+                    onclick="switchProfile('{{ 'transgender' if current_profile == 'female' else 'female' }}')">
+                Switch to {{ 'Transgender' if current_profile == 'female' else 'Female' }}
+            </button>
+        </div>
+
+        <div class="drawer-section">
+            <div class="drawer-section-title">Settings</div>
+            <ul class="drawer-nav">
+                {% for item in settings_tabs %}
+                <li>
+                    <a href="{{ url_for('settings', tab=item.id, profile=current_profile) }}"
+                       class="{% if request.args.get('tab', 'libraries') == item.id %}active{% endif %}">
+                        <span>{{ item.label }}</span>
+                    </a>
+                </li>
+                {% endfor %}
+                <li>
+                    <a href="{{ url_for('tools_page', profile=current_profile) }}"
+                       class="{% if request.endpoint == 'tools_page' %}active{% endif %}">
+                        <span>Tools</span>
+                    </a>
+                </li>
+            </ul>
+        </div>
+
+    {% elif request.endpoint == 'tools_page' %}
+        {# ============================================================
+           TOOLS PAGE — компактное мобильное меню:
+             1. Videos (на главную)
+             2. Профиль
+             3. Навигация по Tools / Settings
+           ============================================================ #}
+
+        <div class="drawer-section">
+            <ul class="drawer-nav">
+                <li>
+                    <a href="{{ url_for('index', profile=current_profile) }}">
+                        <img src="{{ url_for('serve_image', filename='video.png') }}" alt="" class="drawer-icon">
+                        <span>Videos</span>
+                    </a>
+                </li>
+            </ul>
+        </div>
+
+        <div class="drawer-section">
+            <div class="drawer-section-title">Profile</div>
+            <button type="button" class="drawer-btn primary"
+                    onclick="switchProfile('{{ 'transgender' if current_profile == 'female' else 'female' }}')">
+                Switch to {{ 'Transgender' if current_profile == 'female' else 'Female' }}
+            </button>
+        </div>
+
+        <div class="drawer-section">
+            <div class="drawer-section-title">Tools</div>
+            <ul class="drawer-nav">
+                <li>
+                    <a href="{{ url_for('tools_page', profile=current_profile) }}" class="active">
+                        <span>Maintenance</span>
+                    </a>
+                </li>
+                <li>
+                    <a href="{{ url_for('settings', profile=current_profile) }}">
+                        <span>← Back to Settings</span>
+                    </a>
+                </li>
+            </ul>
+        </div>
+
+    {% else %}
+        {# ============================================================
+           ОБЩЕЕ МЕНЮ — как было раньше
+           ============================================================ #}
+
         <div class="drawer-section">
             <div class="drawer-section-title">Navigation</div>
             <ul class="drawer-nav">
@@ -341,6 +437,8 @@
                 Switch to {{ 'Transgender' if current_profile == 'female' else 'Female' }}
             </button>
         </div>
+
+    {% endif %}
     </div>
 </aside>
 
