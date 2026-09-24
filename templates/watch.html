@@ -175,8 +175,12 @@
                     </ul>
                 </div>
             </div>
-            <p class="text-secondary mb-1">
+            <p class="text-secondary mb-1 d-flex align-items-center gap-2 flex-wrap">
                 <small>Added: <span id="videoAdded">{{ video.added[:10] if video.added else '—' }}</span></small>
+                <a href="{{ url_for('editor_page', video_id=video.id, profile=current_profile) }}"
+                   class="btn btn-secondary btn-sm">
+                    ✂ Editor
+                </a>
             </p>
         </div>
     </div>

@@ -5,6 +5,7 @@ def register_all(app):
     from . import playlists
     from . import artists
     from . import duplicates
+    from . import editor
 
     main.register(app)
     watch.register(app)
@@ -12,3 +13,4 @@ def register_all(app):
     playlists.register(app)
     artists.register(app)
     duplicates.register(app)
+    editor.register(app)
