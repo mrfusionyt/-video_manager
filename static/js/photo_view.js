@@ -4,7 +4,7 @@
    • Поворот 90° (по кругу)
    • Fullscreen на stage
    • Клавиатура: ← → (nav), + −, R, F, Esc, 0 (reset)
-   • Свайпы ←/→ на мобильных (не мешают зуму)
+   • Свайпы ←/→ на мобильных (только при zoom == 1)
    • Клик по звезде — сохраняет рейтинг, обновляет UI
    Конфиг: window.PHOTO_VIEW_CONFIG
    ============================================================ */
@@ -42,7 +42,6 @@
     var ZOOM_STEP = 0.25;
 
     function updateTransform() {
-        // rotate + translate + scale
         image.style.transform =
             'translate(' + offsetX + 'px, ' + offsetY + 'px) ' +
             'rotate(' + rotation + 'deg) ' +
@@ -95,6 +94,19 @@
     function zoomOut() { setZoom(zoom - ZOOM_STEP); }
     function rotate()  { rotation = (rotation + 90) % 360; updateTransform(); }
 
+    function goPrev() {
+        if (!prevId) return;
+        var params = new URLSearchParams(window.location.search);
+        params.set('profile', currentProfile);
+        window.location.href = '/photo/' + prevId + '?' + params.toString();
+    }
+    function goNext() {
+        if (!nextId) return;
+        var params = new URLSearchParams(window.location.search);
+        params.set('profile', currentProfile);
+        window.location.href = '/photo/' + nextId + '?' + params.toString();
+    }
+
     /* ---------------- Кнопки ---------------- */
     if (btnZoomIn)     btnZoomIn.addEventListener('click', function(e){ e.stopPropagation(); zoomIn(); });
     if (btnZoomOut)    btnZoomOut.addEventListener('click', function(e){ e.stopPropagation(); zoomOut(); });
@@ -110,7 +122,6 @@
 
     /* ---------------- Клик по stage: toggle zoom ---------------- */
     imageWrap.addEventListener('click', function (e) {
-        // Клик по кнопкам уже остановлен. Тут только клик по картинке/фону.
         if (e.target.closest('.pv-nav') || e.target.closest('.pv-icon-btn')) return;
         if (zoom > 1.0) {
             setZoom(1.0);
@@ -137,9 +148,6 @@
         dragStartOffsetX = offsetX;
         dragStartOffsetY = offsetY;
         stage.style.cursor = 'grabbing';
-        if (e.pointerId !== undefined && stage.setPointerCapture) {
-            try { stage.setPointerCapture(e.pointerId); } catch (err) {}
-        }
     }
     function onPointerMove(e) {
         if (!isDragging) return;
@@ -149,13 +157,10 @@
         clampOffsets();
         updateTransform();
     }
-    function onPointerUp(e) {
+    function onPointerUp() {
         if (!isDragging) return;
         isDragging = false;
         stage.style.cursor = '';
-        if (e.pointerId !== undefined && stage.releasePointerCapture) {
-            try { stage.releasePointerCapture(e.pointerId); } catch (err) {}
-        }
     }
     function _getPoint(e) {
         if (e.touches && e.touches[0]) {
@@ -208,11 +213,11 @@
         switch (e.key) {
             case 'ArrowLeft':
                 e.preventDefault();
-                if (prevId) navigateTo(prevId);
+                goPrev();
                 break;
             case 'ArrowRight':
                 e.preventDefault();
-                if (nextId) navigateTo(nextId);
+                goNext();
                 break;
             case '+':
             case '=':
@@ -244,16 +249,27 @@
         }
     });
 
-    /* ---------------- Свайпы ←/→ ---------------- */
-    var SWIPE_MIN_X = 60;
-    var SWIPE_MAX_Y = 80;
+    /* ============================================================
+       СВАЙПЫ ←/→ (только при zoom == 1.0, чтобы не мешать pan'у)
+       ============================================================ */
+    var SWIPE_MIN_X = 60;       // минимальная дистанция по X, px
+    var SWIPE_MAX_Y = 80;       // максимальное отклонение по Y, px
+    var SWIPE_MAX_TIME = 700;   // макс. время жеста, мс
+
     var swipeStartX = null;
     var swipeStartY = null;
     var swipeStartTime = 0;
 
     stage.addEventListener('touchstart', function (e) {
+        // Мультитач (pinch) — не свайп
         if (e.touches.length !== 1) { swipeStartX = null; return; }
-        if (zoom > 1.0) { swipeStartX = null; return; }  // при зуме — pan, не свайп
+        // При зуме работает pan, а не свайп
+        if (zoom > 1.0) { swipeStartX = null; return; }
+        // Игнор, если палец на кнопке
+        if (e.target.closest('.pv-nav') || e.target.closest('.pv-icon-btn')) {
+            swipeStartX = null;
+            return;
+        }
         swipeStartX = e.touches[0].clientX;
         swipeStartY = e.touches[0].clientY;
         swipeStartTime = Date.now();
@@ -261,24 +277,28 @@
 
     stage.addEventListener('touchend', function (e) {
         if (swipeStartX === null) return;
-        if (!e.changedTouches || !e.changedTouches.length) { swipeStartX = null; return; }
+        if (!e.changedTouches || !e.changedTouches.length) {
+            swipeStartX = null;
+            return;
+        }
         var t = e.changedTouches[0];
         var dx = t.clientX - swipeStartX;
         var dy = t.clientY - swipeStartY;
         var dt = Date.now() - swipeStartTime;
         swipeStartX = null;
-        if (dt > 700) return;
-        if (Math.abs(dx) < SWIPE_MIN_X) return;
-        if (Math.abs(dy) > SWIPE_MAX_Y) return;
-        if (dx > 0 && prevId) navigateTo(prevId);
-        else if (dx < 0 && nextId) navigateTo(nextId);
+
+        if (dt > SWIPE_MAX_TIME) return;                       // слишком долго — это не свайп
+        if (Math.abs(dx) < SWIPE_MIN_X) return;                // слишком короткий
+        if (Math.abs(dy) > SWIPE_MAX_Y) return;                // вертикальный жест — не наш
+        if (Math.abs(dy) > Math.abs(dx) * 0.7) return;         // наклон — не наш
+
+        if (dx > 0) goPrev();
+        else        goNext();
     }, { passive: true });
 
-    function navigateTo(id) {
-        var params = new URLSearchParams(window.location.search);
-        params.set('profile', currentProfile);
-        window.location.href = '/photo/' + id + '?' + params.toString();
-    }
+    stage.addEventListener('touchcancel', function () {
+        swipeStartX = null;
+    }, { passive: true });
 
     /* ---------------- Рейтинг ---------------- */
     var ratingEl = document.getElementById('pvRating');
@@ -324,7 +344,6 @@
     }
 
     /* ---------------- Init ---------------- */
-    // Сброс transform при загрузке картинки
     image.addEventListener('load', function () {
         resetView();
     });
