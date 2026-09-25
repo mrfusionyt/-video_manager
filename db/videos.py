@@ -1,6 +1,3 @@
-# ===================================================================
-# Файл 1: db/videos.py
-# ===================================================================
 """CRUD для таблицы videos."""
 import os
 import sqlite3
@@ -16,7 +13,7 @@ def _batch_load_categories(cursor, video_ids, chunk_size=500):
         chunk = video_ids[i:i + chunk_size]
         placeholders = ','.join('?' * len(chunk))
         cursor.execute(f'''
-            SELECT vc.video_id, c.id, c.name
+            SELECT vc.video_id, c.id, c.name, c.media_type
             FROM video_categories vc
             JOIN categories c ON c.id = vc.category_id
             WHERE vc.video_id IN ({placeholders})
@@ -26,6 +23,7 @@ def _batch_load_categories(cursor, video_ids, chunk_size=500):
             result.setdefault(vid, []).append({
                 'id': row['id'],
                 'name': row['name'],
+                'media_type': row['media_type'],
             })
     return result
 
@@ -87,7 +85,10 @@ def delete_video(video_id):
         conn.close()
 
 
-def get_all_videos(mode=None, sort_by='id', folder=None):
+def get_all_videos(mode=None, media_type=None, sort_by='id', folder=None):
+    """
+    media_type: 'video' | 'image' | None (все).
+    """
     conn = get_db_connection()
     try:
         cursor = conn.cursor()
@@ -96,6 +97,9 @@ def get_all_videos(mode=None, sort_by='id', folder=None):
         if mode is not None:
             where_parts.append('v.mode = ?')
             params.append(mode)
+        if media_type is not None:
+            where_parts.append('v.media_type = ?')
+            params.append(media_type)
         if folder:
             where_parts.append('v.folder = ?')
             params.append(folder)
@@ -193,17 +197,25 @@ _ORDER_BY_MAP = {
     'top10': 'v.rating DESC',
     'top50': 'v.rating DESC',
     'top100': 'v.rating DESC',
+    # для фото сортировка по имени удобнее
+    'filename_asc': 'v.filename COLLATE NOCASE ASC',
+    'filename_desc': 'v.filename COLLATE NOCASE DESC',
 }
 _TOP_LIMIT = {'top10': 10, 'top50': 50, 'top100': 100}
 
 
-def query_videos_paged(mode=None, sort='date', search='', folder='',
-                       category_ids=None, page=1, per_page=15):
+def query_videos_paged(mode=None, media_type=None, sort='date', search='',
+                       folder='', category_ids=None, page=1, per_page=15):
+    """
+    media_type: 'video' | 'image' | None.
+    Если category_ids задан — возвращает (None, None) (пусть Python-fallback).
+    """
     if category_ids:
         return None, None
     order_clause = _ORDER_BY_MAP.get(sort)
     if order_clause is None:
         return None, None
+
     where_parts = []
     params = []
     if search:
@@ -212,15 +224,20 @@ def query_videos_paged(mode=None, sort='date', search='', folder='',
     elif mode is not None:
         where_parts.append('v.mode = ?')
         params.append(mode)
+    if media_type is not None:
+        where_parts.append('v.media_type = ?')
+        params.append(media_type)
     if folder:
         where_parts.append('v.folder = ?')
         params.append(folder)
     where_sql = ('WHERE ' + ' AND '.join(where_parts)) if where_parts else ''
+
     conn = get_db_connection()
     try:
         cursor = conn.cursor()
         cursor.execute(f'SELECT COUNT(*) AS cnt FROM videos v {where_sql}', params)
         total = cursor.fetchone()['cnt']
+
         if sort in _TOP_LIMIT:
             limit = _TOP_LIMIT[sort]
             pagination_sql = f'LIMIT {limit}'
@@ -228,6 +245,7 @@ def query_videos_paged(mode=None, sort='date', search='', folder='',
             limit = per_page
             offset = max(0, (page - 1) * per_page)
             pagination_sql = f'LIMIT {limit} OFFSET {offset}'
+
         cursor.execute(f'''
             SELECT v.*, l.name as library_name
             FROM videos v
@@ -249,7 +267,7 @@ def query_videos_paged(mode=None, sort='date', search='', folder='',
         conn.close()
 
 
-def count_videos(mode=None, search='', folder=''):
+def count_videos(mode=None, media_type=None, search='', folder=''):
     conn = get_db_connection()
     try:
         cursor = conn.cursor()
@@ -261,6 +279,9 @@ def count_videos(mode=None, search='', folder=''):
         elif mode is not None:
             where_parts.append('mode = ?')
             params.append(mode)
+        if media_type is not None:
+            where_parts.append('media_type = ?')
+            params.append(media_type)
         if folder:
             where_parts.append('folder = ?')
             params.append(folder)

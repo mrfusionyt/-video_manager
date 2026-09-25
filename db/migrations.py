@@ -91,47 +91,70 @@ def init_db():
         conn.commit()
         print(f"[INFO] Backfilled folder for {len(backfill_rows)} videos")
 
-    # --- Таблица categories ---
+    # ================================================================
+    # --- Таблица categories (с media_type: 'video' | 'image') ---
+    # ================================================================
     cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='categories'")
     table_exists = cursor.fetchone() is not None
-    if table_exists:
-        cursor.execute("PRAGMA index_list('categories')")
-        indexes = cursor.fetchall()
-        need_migration = False
-        for idx in indexes:
-            if idx['unique']:
-                cursor.execute(f"PRAGMA index_info('{idx['name']}')")
-                cols = cursor.fetchall()
-                if len(cols) == 1 and cols[0]['name'] == 'name':
-                    need_migration = True
-                    break
-        if need_migration:
-            cursor.execute('''
-                CREATE TABLE categories_new (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    name TEXT NOT NULL,
-                    mode INTEGER DEFAULT 1
-                )
-            ''')
-            cursor.execute("PRAGMA table_info(categories)")
-            cols = [col['name'] for col in cursor.fetchall()]
-            if 'mode' in cols:
-                cursor.execute("INSERT INTO categories_new (id, name, mode) SELECT id, name, mode FROM categories")
-            else:
-                cursor.execute("INSERT INTO categories_new (id, name, mode) SELECT id, name, 1 FROM categories")
-            cursor.execute("DROP TABLE categories")
-            cursor.execute("ALTER TABLE categories_new RENAME TO categories")
-            cursor.execute("CREATE UNIQUE INDEX idx_categories_name_mode ON categories(name, mode)")
-            print("[INFO] Migrated categories table: removed UNIQUE(name), added UNIQUE(name, mode)")
-    else:
+
+    if not table_exists:
+        # Создаём с нуля — сразу с media_type
         cursor.execute('''
             CREATE TABLE categories (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL,
-                mode INTEGER DEFAULT 1
+                mode INTEGER DEFAULT 1,
+                media_type TEXT DEFAULT 'video'
             )
         ''')
-        cursor.execute("CREATE UNIQUE INDEX idx_categories_name_mode ON categories(name, mode)")
+        cursor.execute(
+            "CREATE UNIQUE INDEX idx_categories_name_mode_type "
+            "ON categories(name, mode, media_type)"
+        )
+        print("[INFO] Created categories table with media_type")
+    else:
+        # 1) Добавляем колонку media_type, если её нет
+        cursor.execute("PRAGMA table_info(categories)")
+        cat_cols = [col['name'] for col in cursor.fetchall()]
+
+        if 'media_type' not in cat_cols:
+            cursor.execute(
+                "ALTER TABLE categories ADD COLUMN media_type TEXT DEFAULT 'video'"
+            )
+            cursor.execute(
+                "UPDATE categories SET media_type = 'video' WHERE media_type IS NULL"
+            )
+            print("[INFO] Added media_type column to categories")
+
+        # 2) Ищем и удаляем старые уникальные индексы (name) / (name, mode),
+        #    которые мешают новому UNIQUE(name, mode, media_type)
+        cursor.execute("PRAGMA index_list('categories')")
+        indexes = cursor.fetchall()
+
+        has_new_index = False
+        old_indexes_to_drop = []
+
+        for idx in indexes:
+            if not idx['unique']:
+                continue
+            idx_name = idx['name']
+            cursor.execute(f"PRAGMA index_info('{idx_name}')")
+            idx_cols = [c['name'] for c in cursor.fetchall()]
+            if idx_cols == ['name', 'mode', 'media_type']:
+                has_new_index = True
+            elif idx_cols in (['name'], ['name', 'mode']):
+                old_indexes_to_drop.append(idx_name)
+
+        for old_name in old_indexes_to_drop:
+            cursor.execute(f"DROP INDEX IF EXISTS {old_name}")
+            print(f"[INFO] Dropped old index {old_name}")
+
+        if not has_new_index:
+            cursor.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_categories_name_mode_type "
+                "ON categories(name, mode, media_type)"
+            )
+            print("[INFO] Created UNIQUE(name, mode, media_type) on categories")
 
     # --- Таблица video_categories ---
     cursor.execute('''
@@ -179,6 +202,7 @@ def init_db():
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_videos_media_type ON videos(media_type)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_videos_folder ON videos(folder)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_videos_mode_folder ON videos(mode, folder)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_videos_mode_media_type ON videos(mode, media_type)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_video_categories_category ON video_categories(category_id)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_video_categories_video ON video_categories(video_id)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_playlist_videos_video ON playlist_videos(video_id)")
@@ -190,3 +214,4 @@ def init_db():
         ensure_thumbnails_dir()
     except Exception as e:
         print(f"[init_db] cannot create thumbnails dir: {e}")
+    

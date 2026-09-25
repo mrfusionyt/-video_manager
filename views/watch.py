@@ -1,6 +1,9 @@
 r"""
-Страница просмотра. Несовместимые видео конвертируются на месте.
-Битые файлы (повреждённый поток) в БД не попадают — их отсеивает сканер.
+Страница просмотра.
+  • /video/<id>   — потоковая отдача видео (конвертация на месте при необходимости)
+  • /watch/<id>   — HTML-плеер для видео
+  • /photo/<id>   — HTML-просмотрщик для фото (новая вкладка)
+Несовместимые видео конвертируются на месте. Битые файлы отсеивает сканер.
 """
 import os
 import mimetypes
@@ -33,6 +36,9 @@ _CONVERT_LOCK = threading.Lock()
 
 def register(app):
 
+    # ================================================================
+    #                    СЫРОЙ ПОТОК ФАЙЛА
+    # ================================================================
     @app.route('/video/<int:video_id>')
     def video_file(video_id):
         video = get_video_by_id(video_id)
@@ -43,22 +49,24 @@ def register(app):
         if not os.path.exists(filepath):
             abort(404)
 
-        need, reason = needs_conversion(filepath, video.get('codec'))
-        if need:
-            with _CONVERT_LOCK:
-                video = get_video_by_id(video_id)
-                filepath = video['filepath']
-                need, reason = needs_conversion(filepath, video.get('codec'))
-                if need:
-                    print(f"[watch] on-demand convert ({reason}): "
-                          f"{video['filename']}")
-                    ok, new_video, msg = convert_video_in_place(video)
-                    if ok:
-                        update_db_after_conversion(video_id, new_video)
-                        filepath = new_video['filepath']
-                    else:
-                        print(f"[watch] convert FAILED, serving original: {msg}")
-                        filepath = video['filepath']
+        # Конвертация только для видео. Для фото — отдаём как есть.
+        if video.get('media_type') != 'image':
+            need, reason = needs_conversion(filepath, video.get('codec'))
+            if need:
+                with _CONVERT_LOCK:
+                    video = get_video_by_id(video_id)
+                    filepath = video['filepath']
+                    need, reason = needs_conversion(filepath, video.get('codec'))
+                    if need:
+                        print(f"[watch] on-demand convert ({reason}): "
+                              f"{video['filename']}")
+                        ok, new_video, msg = convert_video_in_place(video)
+                        if ok:
+                            update_db_after_conversion(video_id, new_video)
+                            filepath = new_video['filepath']
+                        else:
+                            print(f"[watch] convert FAILED, serving original: {msg}")
+                            filepath = video['filepath']
 
         mimetype, _ = mimetypes.guess_type(filepath)
         if not mimetype:
@@ -75,6 +83,9 @@ def register(app):
         response.headers['Cache-Control'] = 'public, max-age=86400'
         return response
 
+    # ================================================================
+    #                       ИНФО О ФАЙЛЕ
+    # ================================================================
     @app.route('/video/<int:video_id>/info')
     def video_info(video_id):
         video = get_video_by_id(video_id)
@@ -89,10 +100,14 @@ def register(app):
             'bitrate': video['bitrate'], 'orientation': video['orientation'],
             'library_name': video.get('library_name'),
             'mode': video['mode'],
+            'media_type': video.get('media_type', 'video'),
             'categories': video.get('categories', []),
         }
         return jsonify(data)
 
+    # ================================================================
+    #                       СКАЧИВАНИЕ
+    # ================================================================
     @app.route('/download/<int:video_id>')
     def download_video(video_id):
         video = get_video_by_id(video_id)
@@ -104,6 +119,9 @@ def register(app):
         return send_file(filepath, as_attachment=True,
                          download_name=video['filename'])
 
+    # ================================================================
+    #                       VR-ПЛЕЕР
+    # ================================================================
     @app.route('/vr/<int:video_id>')
     def vr_player(video_id):
         video = get_video_by_id(video_id)
@@ -111,6 +129,9 @@ def register(app):
             abort(404, "Video not found")
         return render_template('vr.html', video=video)
 
+    # ================================================================
+    #                       РЕЙТИНГ / ПЕРЕИМЕНОВАНИЕ
+    # ================================================================
     @app.route('/rate/<int:video_id>', methods=['POST'])
     def rate_video(video_id):
         data = request.get_json()
@@ -138,6 +159,9 @@ def register(app):
         else:
             return jsonify({'error': 'Rename failed'}), 500
 
+    # ================================================================
+    #                       КАТЕГОРИИ ВИДЕО/ФОТО
+    # ================================================================
     @app.route('/edit_video/<int:video_id>', methods=['GET', 'POST'])
     def edit_video(video_id):
         video = get_video_by_id(video_id)
@@ -147,6 +171,12 @@ def register(app):
             category_ids = request.form.getlist('categories')
             category_ids = [int(x) for x in category_ids if x]
             update_video_categories(video_id, category_ids)
+            # Возвращаемся туда, откуда пришли: фото → /photo/<id>, видео → /watch/<id>
+            if video.get('media_type') == 'image':
+                return redirect(url_for(
+                    'photo_view', photo_id=video_id,
+                    profile=request.args.get('profile', 'female')
+                ))
             return redirect(url_for(
                 'watch', video_id=video_id,
                 profile=request.args.get('profile', 'female')
@@ -171,6 +201,9 @@ def register(app):
         update_video_categories(video_id, category_ids)
         return jsonify({'success': True})
 
+    # ================================================================
+    #                       WATCH (видео)
+    # ================================================================
     @app.route('/watch/<int:video_id>')
     def watch(video_id):
         current_profile = get_current_profile()
@@ -179,7 +212,11 @@ def register(app):
         if not video:
             abort(404)
 
-        # ---------- Фильтры/сортировка из URL ----------
+        # Если случайно открыли фото через /watch — редирект на /photo
+        if video.get('media_type') == 'image':
+            return redirect(url_for('photo_view', photo_id=video_id,
+                                    profile=current_profile))
+
         sort = request.args.get('sort', 'date')
         search = request.args.get('search', '').strip()
         folder = request.args.get('folder', '')
@@ -188,31 +225,25 @@ def register(app):
         if folder:
             folder = os.path.normpath(folder)
 
-        # ---------- Полный отфильтрованный список ----------
-        # Используем ту же логику, что и в index() / load_more().
         search_lc = search.lower()
         if search_lc:
-            all_videos = get_all_videos(mode=None)
+            all_videos = get_all_videos(mode=None, media_type='video')
         else:
-            all_videos = get_all_videos(mode=current_mode)
+            all_videos = get_all_videos(mode=current_mode, media_type='video')
 
         if folder:
             all_videos = [v for v in all_videos if v.get('folder') == folder]
         if search_lc:
             all_videos = [v for v in all_videos
-                          if search_lc in v['filename'].lower()]
+                          if search_lc in (v.get('filename') or '').lower()]
 
         all_videos = process_videos(all_videos, category_ids, sort)
 
-        # ---------- Формируем feed_ids ----------
         feed_ids = [v['id'] for v in all_videos]
         if video_id not in feed_ids:
-            # Если по фильтрам текущее видео не попало в список —
-            # ставим его первым, остальные — как есть.
             all_videos = [video] + all_videos
             feed_ids = [v['id'] for v in all_videos]
 
-        # ---------- Recommendations ----------
         video_categories = video.get('categories', [])
         video_cat_ids = [cat['id'] for cat in video_categories]
 
@@ -252,6 +283,73 @@ def register(app):
             total_recs=total_recs,
             feed_ids=feed_ids,
             feed_index=feed_index,
+            sort=sort,
+            search=search,
+            folder=folder,
+            category_ids=category_ids,
+        )
+
+    # ================================================================
+    #                       PHOTO VIEW (просмотрщик фото)
+    # ================================================================
+    @app.route('/photo/<int:photo_id>')
+    def photo_view(photo_id):
+        current_profile = get_current_profile()
+        current_mode = profile_to_mode(current_profile)
+        photo = get_video_by_id(photo_id)
+        if not photo:
+            abort(404)
+
+        # Если открыли видео через /photo — редирект на /watch
+        if photo.get('media_type') != 'image':
+            return redirect(url_for('watch', video_id=photo_id,
+                                    profile=current_profile))
+
+        sort = request.args.get('sort', 'date')
+        search = request.args.get('search', '').strip()
+        folder = request.args.get('folder', '')
+        category_ids = request.args.getlist('category', type=int)
+
+        if folder:
+            folder = os.path.normpath(folder)
+
+        search_lc = search.lower()
+        if search_lc:
+            all_photos = get_all_videos(mode=None, media_type='image')
+        else:
+            all_photos = get_all_videos(mode=current_mode, media_type='image')
+
+        if folder:
+            all_photos = [v for v in all_photos if v.get('folder') == folder]
+        if search_lc:
+            all_photos = [v for v in all_photos
+                          if search_lc in (v.get('filename') or '').lower()]
+
+        all_photos = process_videos(all_photos, category_ids, sort)
+
+        feed_ids = [p['id'] for p in all_photos]
+        if photo_id not in feed_ids:
+            all_photos = [photo] + all_photos
+            feed_ids = [p['id'] for p in all_photos]
+
+        try:
+            feed_index = feed_ids.index(photo_id)
+        except ValueError:
+            feed_ids = [photo_id] + feed_ids
+            feed_index = 0
+
+        prev_id = feed_ids[feed_index - 1] if feed_index > 0 else None
+        next_id = (feed_ids[feed_index + 1]
+                   if feed_index < len(feed_ids) - 1 else None)
+
+        return render_template(
+            'photo.html',
+            photo=photo,
+            prev_id=prev_id,
+            next_id=next_id,
+            feed_ids=feed_ids,
+            feed_index=feed_index,
+            total_photos=len(feed_ids),
             sort=sort,
             search=search,
             folder=folder,

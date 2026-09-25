@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% from "_pagination.html" import pagination %}
+
+{% block title %}Photos{% endblock %}
+{% block page_title %}
+    My Photos
+    <div class="d-inline-flex align-items-center gap-2">
+        <form class="d-flex" method="get" action="{{ url_for('photos_page') }}" style="margin-right: 8px;">
+            <input class="form-control form-control-sm" type="search" name="search" placeholder="Search..."
+                   value="{{ search or '' }}" aria-label="Search" style="width: 180px;">
+            <input type="hidden" name="profile" value="{{ current_profile }}">
+            <button class="btn btn-outline-secondary btn-sm" type="submit">Go</button>
+        </form>
+        <button class="btn btn-filter btn-sm" data-bs-toggle="modal" data-bs-target="#filterModal">
+            Filters
+        </button>
+        <div class="dropdown d-inline">
+            {% set sort_labels = sort_options if sort_options is defined else {
+                'date': 'Date',
+                'rating': 'Rating',
+                'filename_asc': 'Name ↑',
+                'filename_desc': 'Name ↓'
+            } %}
+            <button class="btn btn-secondary btn-sm dropdown-toggle" type="button" id="sortDropdown" data-bs-toggle="dropdown" aria-expanded="false">
+                Sort by: {{ sort_labels.get(sort, 'Date') }}
+            </button>
+            <ul class="dropdown-menu dropdown-menu-dark" aria-labelledby="sortDropdown">
+                <li><a class="dropdown-item {% if sort == 'date' %}active{% endif %}" href="#" data-sort="date">By Date</a></li>
+                <li><a class="dropdown-item {% if sort == 'rating' %}active{% endif %}" href="#" data-sort="rating">By Rating</a></li>
+                <li><hr class="dropdown-divider"></li>
+                <li><a class="dropdown-item {% if sort == 'filename_asc' %}active{% endif %}" href="#" data-sort="filename_asc">Name (A→Z)</a></li>
+                <li><a class="dropdown-item {% if sort == 'filename_desc' %}active{% endif %}" href="#" data-sort="filename_desc">Name (Z→A)</a></li>
+            </ul>
+        </div>
+    </div>
+{% endblock %}
+
+{% block content %}
+{% if selected_categories %}
+<div class="mb-3">
+    <span class="text-muted me-2">Active filters:</span>
+    {% for cat in all_photo_categories %}
+        {% if cat.id in selected_categories %}
+        <span class="filter-badge">
+            {{ cat.name }}
+            {% set remaining = selected_categories | reject('eq', cat.id) | list %}
+            <a href="{{ url_for('photos_page', category=remaining) if remaining else url_for('photos_page') }}"
+               class="remove-filter" title="Remove filter">✕</a>
+        </span>
+        {% endif %}
+    {% endfor %}
+    <a href="{{ url_for('photos_page') }}" class="btn btn-outline-secondary btn-sm ms-2">Clear All</a>
+</div>
+{% endif %}
+
+<div class="row photo-grid" id="photoGrid">
+    {% include '_photo_cards.html' with context %}
+</div>
+
+<div id="moreContainer" class="text-center mt-3" {% if page >= total_pages %}style="display:none;"{% endif %}>
+    <button id="moreBtn" class="btn btn-more">More</button>
+</div>
+
+<div id="paginationContainer" class="mt-3">
+    {% call(p) pagination(page, total_pages) %}{{ url_for('photos_page', page=p, category=selected_categories, sort=sort, search=search, folder=folder, profile=current_profile) }}{% endcall %}
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+window.PHOTOS_CONFIG = {
+    page: {{ page|default(1) }},
+    totalPages: {{ total_pages|default(1) }},
+    selectedCategories: {{ selected_categories|tojson }},
+    sort: {{ sort|tojson }},
+    search: {{ search|tojson }},
+    folder: {{ folder|tojson }},
+    profile: {{ current_profile|tojson }}
+};
+</script>
+<script src="{{ url_for('static', filename='js/photos.js') }}"></script>
+{% endblock %}

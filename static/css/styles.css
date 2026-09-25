@@ -823,6 +823,63 @@ img#starIcon.inactive { filter: grayscale(1) brightness(0.55); opacity: 0.75; }
 
 
 /* ============================================================
+   10.1 PHOTO CARDS
+   ============================================================ */
+
+.photo-card { cursor: pointer; transition: transform var(--tr); }
+.photo-card:hover { transform: scale(1.02); z-index: 10; }
+.photo-card .card {
+    border: none;
+    background: var(--bg-surface);
+    border-radius: var(--radius);
+    overflow: hidden;
+    box-shadow: var(--shadow-card);
+}
+.photo-card .card .photo-wrapper {
+    position: relative;
+    background: #0a0a0a;
+    aspect-ratio: 1 / 1;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.photo-card .card .photo-wrapper .photo-thumbnail {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+    background: #0a0a0a;
+    pointer-events: none;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-user-drag: none;
+    transition: transform 0.35s ease;
+}
+.photo-card:hover .photo-thumbnail { transform: scale(1.03); }
+.photo-card .card-body { padding: 10px 12px; }
+.photo-card .card-title {
+    font-size: var(--card-title-size);
+    font-weight: 500;
+    margin-bottom: 4px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--text-primary);
+}
+.photo-card .card-text small { font-size: 0.75rem; color: var(--text-muted); }
+.photo-card .badge { font-size: 0.7rem; background: #333; color: var(--text-primary); }
+.photo-card .badge.bg-primary { background: var(--red) !important; }
+.photo-card .badge.bg-secondary { background: var(--bg-btn) !important; }
+.photo-card .stars { color: var(--red); font-size: 0.9rem; letter-spacing: 2px; }
+.photo-card .stars .empty { color: var(--text-faint); }
+
+@media (max-width: 576px) {
+    .photo-card .card .photo-wrapper { aspect-ratio: 1 / 1; }
+}
+
+
+/* ============================================================
    11. FOLDERS
    ============================================================ */
 

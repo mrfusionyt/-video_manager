@@ -1,0 +1,339 @@
+{% extends "base.html" %}
+
+{% block title %}{{ photo.filename }}{% endblock %}
+{% block page_title %}Photo{% endblock %}
+
+{% block styles %}
+<style>
+    .photo-viewer {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 320px;
+        gap: 1rem;
+        align-items: start;
+    }
+    @media (max-width: 992px) {
+        .photo-viewer { grid-template-columns: 1fr; }
+    }
+
+    .pv-stage {
+        position: relative;
+        background: #0a0a0a;
+        border-radius: var(--radius);
+        overflow: hidden;
+        min-height: 60vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        user-select: none;
+        touch-action: pan-y;
+    }
+    .pv-image-wrap {
+        width: 100%;
+        height: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: zoom-in;
+    }
+    .pv-stage.zoomed .pv-image-wrap { cursor: zoom-out; }
+    .pv-image {
+        max-width: 100%;
+        max-height: 85vh;
+        object-fit: contain;
+        transition: transform 0.2s ease;
+        transform-origin: center center;
+        user-select: none;
+        -webkit-user-drag: none;
+        pointer-events: none;
+    }
+    .pv-stage.zoomed .pv-image {
+        cursor: move;
+        max-width: none;
+        max-height: none;
+        pointer-events: auto;
+    }
+
+    /* Prev / Next */
+    .pv-nav {
+        position: absolute;
+        top: 50%;
+        transform: translateY(-50%);
+        width: 48px;
+        height: 48px;
+        border-radius: 50%;
+        background: rgba(0, 0, 0, 0.55);
+        color: #fff;
+        border: 1px solid rgba(255,255,255,0.18);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        z-index: 5;
+        font-size: 1.4rem;
+        transition: background var(--tr), transform var(--tr);
+        -webkit-tap-highlight-color: transparent;
+    }
+    .pv-nav:hover { background: var(--red); transform: translateY(-50%) scale(1.06); }
+    .pv-nav:active { transform: translateY(-50%) scale(0.95); }
+    .pv-nav.prev { left: 12px; }
+    .pv-nav.next { right: 12px; }
+    .pv-nav.disabled { opacity: 0.25; cursor: not-allowed; pointer-events: none; }
+
+    .pv-counter {
+        position: absolute;
+        top: 12px;
+        left: 12px;
+        background: rgba(0, 0, 0, 0.6);
+        color: #fff;
+        font-size: 0.8rem;
+        padding: 4px 10px;
+        border-radius: var(--radius-pill);
+        font-variant-numeric: tabular-nums;
+        z-index: 5;
+        pointer-events: none;
+    }
+
+    .pv-actions {
+        position: absolute;
+        top: 12px;
+        right: 12px;
+        display: flex;
+        gap: 6px;
+        z-index: 5;
+    }
+    .pv-icon-btn {
+        width: 38px;
+        height: 38px;
+        border-radius: 50%;
+        background: rgba(0, 0, 0, 0.6);
+        border: 1px solid rgba(255,255,255,0.18);
+        color: #fff;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        font-size: 1rem;
+        transition: background var(--tr), transform 0.15s;
+        -webkit-tap-highlight-color: transparent;
+    }
+    .pv-icon-btn:hover { background: var(--red); }
+    .pv-icon-btn:active { transform: scale(0.92); }
+    .pv-icon-btn.active { background: var(--red); }
+
+    /* Панель справа */
+    .pv-side {
+        background: var(--bg-surface);
+        border-radius: var(--radius);
+        padding: 1rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.8rem;
+        max-height: 85vh;
+        overflow-y: auto;
+    }
+    .pv-title {
+        color: var(--text-primary);
+        font-size: 0.95rem;
+        font-weight: 500;
+        word-break: break-word;
+        line-height: 1.35;
+    }
+    .pv-meta {
+        color: var(--text-muted);
+        font-size: 0.8rem;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+    }
+    .pv-meta-row { display: flex; gap: 6px; }
+    .pv-meta-row .k { color: var(--text-dim); min-width: 60px; }
+    .pv-meta-row .v { color: var(--text-primary); word-break: break-all; }
+
+    .pv-cats { display: flex; flex-wrap: wrap; gap: 4px; }
+    .pv-cats .badge { font-size: 0.72rem; }
+
+    .pv-rating {
+        display: flex;
+        gap: 4px;
+        font-size: 1.4rem;
+        line-height: 1;
+    }
+    .pv-rating .star {
+        color: var(--text-faint);
+        cursor: pointer;
+        transition: color 0.15s, transform 0.15s;
+        user-select: none;
+    }
+    .pv-rating .star.active { color: var(--red); }
+    .pv-rating .star:hover,
+    .pv-rating .star.hover-active { color: var(--red); transform: scale(1.15); }
+
+    .pv-buttons {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 6px;
+    }
+    .pv-buttons a {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        background: var(--bg-elevated);
+        border: 1px solid var(--border-strong);
+        color: var(--text-primary);
+        padding: 0.5rem 0.8rem;
+        border-radius: var(--radius);
+        text-decoration: none;
+        font-size: 0.85rem;
+        transition: background var(--tr), border-color var(--tr);
+        cursor: pointer;
+    }
+    .pv-buttons a:hover { background: var(--red); border-color: var(--red); color: #fff; }
+    .pv-buttons a.primary { background: var(--red); border-color: var(--red); color: #fff; }
+    .pv-buttons a.primary:hover { background: var(--red-hover); }
+
+    /* Info-модалка */
+    .pv-info-table { width: 100%; font-size: 0.85rem; }
+    .pv-info-table td { padding: 4px 6px; vertical-align: top; }
+    .pv-info-table td:first-child { color: var(--text-muted); white-space: nowrap; width: 110px; }
+
+    @media (max-width: 768px) {
+        .pv-nav { width: 40px; height: 40px; font-size: 1.2rem; }
+        .pv-nav.prev { left: 6px; }
+        .pv-nav.next { right: 6px; }
+        .pv-image { max-height: 60vh; }
+        .pv-side { max-height: none; }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="photo-viewer">
+
+    <div class="pv-stage" id="pvStage">
+        <div class="pv-counter" id="pvCounter">
+            {{ feed_index + 1 }} / {{ total_photos }}
+        </div>
+
+        <div class="pv-actions">
+            <button type="button" class="pv-icon-btn" id="pvZoomIn" title="Zoom in (+)">＋</button>
+            <button type="button" class="pv-icon-btn" id="pvZoomOut" title="Zoom out (−)">−</button>
+            <button type="button" class="pv-icon-btn" id="pvRotate" title="Rotate (R)">⟳</button>
+            <button type="button" class="pv-icon-btn" id="pvFullscreen" title="Fullscreen (F)">⛶</button>
+        </div>
+
+        <div class="pv-image-wrap" id="pvImageWrap">
+            <img class="pv-image" id="pvImage"
+                 src="{{ url_for('video_file', video_id=photo.id) }}"
+                 alt="{{ photo.filename }}"
+                 draggable="false">
+        </div>
+
+        {% if prev_id %}
+            <a class="pv-nav prev"
+               href="{{ url_for('photo_view', photo_id=prev_id, profile=current_profile, sort=sort, search=search, folder=folder) }}{% for c in category_ids %}&category={{ c }}{% endfor %}"
+               title="Previous (←)">‹</a>
+        {% else %}
+            <span class="pv-nav prev disabled">‹</span>
+        {% endif %}
+
+        {% if next_id %}
+            <a class="pv-nav next"
+               href="{{ url_for('photo_view', photo_id=next_id, profile=current_profile, sort=sort, search=search, folder=folder) }}{% for c in category_ids %}&category={{ c }}{% endfor %}"
+               title="Next (→)">›</a>
+        {% else %}
+            <span class="pv-nav next disabled">›</span>
+        {% endif %}
+    </div>
+
+    <aside class="pv-side">
+        <div class="pv-title" title="{{ photo.filename }}">{{ photo.filename }}</div>
+
+        <div class="pv-rating" id="pvRating">
+            {% set rating = photo.rating|default(0)|int %}
+            {% for i in range(1, 6) %}
+                <span class="star {% if i <= rating %}active{% endif %}" data-value="{{ i }}">★</span>
+            {% endfor %}
+        </div>
+
+        <div class="pv-cats" id="pvCats">
+            {% if photo.categories %}
+                {% for cat in photo.categories %}
+                    <span class="badge bg-primary" data-category-id="{{ cat.id }}">{{ cat.name }}</span>
+                {% endfor %}
+            {% else %}
+                <span class="badge bg-secondary">no categories</span>
+            {% endif %}
+        </div>
+
+        <div class="pv-buttons">
+            <a href="{{ url_for('edit_video', video_id=photo.id, profile=current_profile) }}" class="primary">
+                ✎ Edit categories
+            </a>
+            <a href="{{ url_for('download_video', video_id=photo.id) }}">
+                ↓ Download
+            </a>
+            <a href="#" id="pvShowInfo">
+                ⓘ Info
+            </a>
+            <a href="{{ url_for('photos_page', profile=current_profile) }}">
+                ← All Photos
+            </a>
+        </div>
+
+        <div class="pv-meta">
+            <div class="pv-meta-row"><span class="k">Size:</span><span class="v">{{ (photo.size / (1024**2))|round(2) }} MB</span></div>
+            <div class="pv-meta-row"><span class="k">Added:</span><span class="v">{{ photo.added[:10] if photo.added else '—' }}</span></div>
+            {% if photo.width and photo.height %}
+                <div class="pv-meta-row"><span class="k">Resolution:</span><span class="v">{{ photo.width }} × {{ photo.height }}</span></div>
+            {% endif %}
+        </div>
+    </aside>
+</div>
+
+<!-- Модалка Info -->
+<div class="modal fade" id="pvInfoModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-content edit-modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Photo Info</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <table class="pv-info-table">
+                    <tr><td>Filename</td><td>{{ photo.filename }}</td></tr>
+                    <tr><td>Size</td><td>{{ (photo.size / (1024**2))|round(2) }} MB ({{ photo.size }} B)</td></tr>
+                    <tr><td>Resolution</td><td>{{ photo.width or '—' }} × {{ photo.height or '—' }}</td></tr>
+                    <tr><td>Orientation</td><td>{{ photo.orientation or '—' }}</td></tr>
+                    <tr><td>Library</td><td>{{ photo.library_name or '—' }}</td></tr>
+                    <tr><td>Folder</td><td style="word-break: break-all;">{{ photo.folder or '—' }}</td></tr>
+                    <tr><td>Full path</td><td style="word-break: break-all;">{{ photo.filepath }}</td></tr>
+                    <tr><td>Added</td><td>{{ photo.added or '—' }}</td></tr>
+                    <tr><td>Mode</td><td>{{ photo.mode | mode_name }}</td></tr>
+                    <tr><td>Rating</td><td>{{ photo.rating or 0 }}</td></tr>
+                </table>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+window.PHOTO_VIEW_CONFIG = {
+    photoId: {{ photo.id }},
+    currentProfile: {{ current_profile|tojson }},
+    prevId: {{ prev_id|tojson }},
+    nextId: {{ next_id|tojson }},
+    sort: {{ sort|tojson }},
+    search: {{ search|tojson }},
+    folder: {{ folder|tojson }},
+    categoryIds: {{ category_ids|tojson }},
+    initialRating: {{ photo.rating|default(0)|int }},
+};
+</script>
+<script src="{{ url_for('static', filename='js/photo_view.js') }}"></script>
+{% endblock %}

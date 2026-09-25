@@ -1,5 +1,6 @@
 """
 Главная страница, пагинация, folders, thumbnails.
++ Вкладка Photos (media_type='image') с тем же движком фильтров.
 """
 import os
 import math
@@ -15,6 +16,7 @@ from models import (
     get_folders,
     get_videos_by_folder,
     query_videos_paged,
+    count_videos,
 )
 from scanner import scan_libraries
 from config import (
@@ -41,8 +43,35 @@ from artists import (
 )
 
 
+# ===================================================================
+#                       ОБЩИЕ ХЕЛПЕРЫ
+# ===================================================================
+def _apply_common_filters(videos, search, folder):
+    """Поиск + папка. Используется в fallback-ветках."""
+    if folder:
+        videos = [v for v in videos if v.get('folder') == folder]
+    if search:
+        search_lc = search.lower()
+        videos = [v for v in videos
+                  if search_lc in (v.get('filename') or '').lower()]
+    return videos
+
+
+def _photos_sort_options():
+    """Сортировки, доступные для фотографий."""
+    return {
+        'date': 'By Date',
+        'rating': 'By Rating',
+        'filename_asc': 'Name (A→Z)',
+        'filename_desc': 'Name (Z→A)',
+    }
+
+
 def register(app):
 
+    # ================================================================
+    #                       VIDEOS (главная)
+    # ================================================================
     @app.route('/')
     def index():
         current_profile = get_current_profile()
@@ -66,6 +95,7 @@ def register(app):
         if not category_ids:
             sql_result = query_videos_paged(
                 mode=current_mode,
+                media_type='video',
                 sort=sort,
                 search=search,
                 folder=folder,
@@ -96,16 +126,11 @@ def register(app):
         # ---------- Python fallback ----------
         search_lc = search.lower()
         if search_lc:
-            videos = get_all_videos(mode=None)
+            videos = get_all_videos(mode=None, media_type='video')
         else:
-            videos = get_all_videos(mode=current_mode)
+            videos = get_all_videos(mode=current_mode, media_type='video')
 
-        if folder:
-            videos = [v for v in videos if v.get('folder') == folder]
-
-        if search_lc:
-            videos = [v for v in videos if search_lc in v['filename'].lower()]
-
+        videos = _apply_common_filters(videos, search, folder)
         videos = process_videos(videos, category_ids, sort)
 
         total_videos = len(videos)
@@ -131,6 +156,93 @@ def register(app):
                                search=search,
                                folder=folder)
 
+    # ================================================================
+    #                       PHOTOS
+    # ================================================================
+    @app.route('/photos')
+    def photos_page():
+        current_profile = get_current_profile()
+        current_mode = profile_to_mode(current_profile)
+        last_folder = app_config.get('last_folder', '')
+        category_ids = request.args.getlist('category', type=int)
+        page = request.args.get('page', 1, type=int)
+        sort = request.args.get('sort', 'date')
+        search = request.args.get('search', '').strip()
+        folder = request.args.get('folder', '')
+        if page < 1:
+            page = 1
+
+        if folder:
+            folder = os.path.normpath(folder)
+
+        # Допустимые сортировки для фото
+        if sort not in _photos_sort_options():
+            sort = 'date'
+
+        selected_category = category_ids[0] if len(category_ids) == 1 else None
+
+        # ---------- SQL path ----------
+        sql_result = None
+        if not category_ids:
+            sql_result = query_videos_paged(
+                mode=current_mode,
+                media_type='image',
+                sort=sort,
+                search=search,
+                folder=folder,
+                category_ids=None,
+                page=page,
+                per_page=ITEMS_PER_PAGE,
+            )
+
+        if sql_result is not None:
+            page_photos, total_photos = sql_result
+            total_pages = math.ceil(total_photos / ITEMS_PER_PAGE) if total_photos > 0 else 1
+            return render_template('photos.html',
+                                   photos=page_photos,
+                                   selected_category=selected_category,
+                                   selected_categories=category_ids,
+                                   last_folder=last_folder,
+                                   page=page,
+                                   total_pages=total_pages,
+                                   total_photos=total_photos,
+                                   sort=sort,
+                                   search=search,
+                                   folder=folder,
+                                   sort_options=_photos_sort_options())
+
+        # ---------- Python fallback ----------
+        search_lc = search.lower()
+        if search_lc:
+            photos_all = get_all_videos(mode=None, media_type='image')
+        else:
+            photos_all = get_all_videos(mode=current_mode, media_type='image')
+
+        photos_all = _apply_common_filters(photos_all, search, folder)
+        photos_all = process_videos(photos_all, category_ids, sort)
+
+        total_photos = len(photos_all)
+        total_pages = math.ceil(total_photos / ITEMS_PER_PAGE) if total_photos > 0 else 1
+        start = (page - 1) * ITEMS_PER_PAGE
+        end = start + ITEMS_PER_PAGE
+        page_photos = photos_all[start:end]
+
+        return render_template('photos.html',
+                               photos=page_photos,
+                               selected_category=selected_category,
+                               selected_categories=category_ids,
+                               last_folder=last_folder,
+                               page=page,
+                               total_pages=total_pages,
+                               total_photos=total_photos,
+                               sort=sort,
+                               search=search,
+                               folder=folder,
+                               sort_options=_photos_sort_options())
+
+    # ================================================================
+    #                       LOAD MORE (для Videos)
+    # ================================================================
     @app.route('/load_more')
     def load_more():
         current_profile = get_current_profile()
@@ -148,6 +260,7 @@ def register(app):
         if not category_ids:
             sql_result = query_videos_paged(
                 mode=current_mode,
+                media_type='video',
                 sort=sort,
                 search=search,
                 folder=folder,
@@ -169,11 +282,10 @@ def register(app):
                 })
 
         search_lc = search.lower()
-        videos = get_all_videos(mode=None) if search_lc else get_all_videos(mode=current_mode)
-        if folder:
-            videos = [v for v in videos if v.get('folder') == folder]
-        if search_lc:
-            videos = [v for v in videos if search_lc in v['filename'].lower()]
+        videos = (get_all_videos(mode=None, media_type='video')
+                  if search_lc
+                  else get_all_videos(mode=current_mode, media_type='video'))
+        videos = _apply_common_filters(videos, search, folder)
         videos = process_videos(videos, category_ids, sort)
         total_videos = len(videos)
         if sort in ('top10', 'top50', 'top100'):
@@ -190,11 +302,73 @@ def register(app):
             'has_more': page < total_pages
         })
 
+    # ================================================================
+    #                       LOAD MORE (для Photos)
+    # ================================================================
+    @app.route('/load_more_photos')
+    def load_more_photos():
+        current_profile = get_current_profile()
+        current_mode = profile_to_mode(current_profile)
+        category_ids = request.args.getlist('category', type=int)
+        page = request.args.get('page', 1, type=int)
+        sort = request.args.get('sort', 'date')
+        search = request.args.get('search', '').strip()
+        folder = request.args.get('folder', '')
+        if page < 1:
+            page = 1
+        if folder:
+            folder = os.path.normpath(folder)
+        if sort not in _photos_sort_options():
+            sort = 'date'
+
+        if not category_ids:
+            sql_result = query_videos_paged(
+                mode=current_mode,
+                media_type='image',
+                sort=sort,
+                search=search,
+                folder=folder,
+                category_ids=None,
+                page=page,
+                per_page=ITEMS_PER_PAGE,
+            )
+            if sql_result is not None:
+                page_photos, total_photos = sql_result
+                total_pages = math.ceil(total_photos / ITEMS_PER_PAGE) if total_photos > 0 else 1
+                html = render_template('_photo_cards.html', photos=page_photos)
+                return jsonify({
+                    'html': html,
+                    'page': page,
+                    'total_pages': total_pages,
+                    'has_more': page < total_pages
+                })
+
+        search_lc = search.lower()
+        photos_all = (get_all_videos(mode=None, media_type='image')
+                      if search_lc
+                      else get_all_videos(mode=current_mode, media_type='image'))
+        photos_all = _apply_common_filters(photos_all, search, folder)
+        photos_all = process_videos(photos_all, category_ids, sort)
+        total_photos = len(photos_all)
+        total_pages = math.ceil(total_photos / ITEMS_PER_PAGE) if total_photos > 0 else 1
+        start = (page - 1) * ITEMS_PER_PAGE
+        end = start + ITEMS_PER_PAGE
+        page_photos = photos_all[start:end]
+        html = render_template('_photo_cards.html', photos=page_photos)
+        return jsonify({
+            'html': html,
+            'page': page,
+            'total_pages': total_pages,
+            'has_more': page < total_pages
+        })
+
+    # ================================================================
+    #                       IMAGE / THUMBNAIL
+    # ================================================================
     @app.route('/image/<filename>')
     def serve_image(filename):
         return send_from_directory('image', filename)
 
-    # ---------- Превью ----------
     def _thumbnail_placeholder():
         svg = (
             '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 270">'
@@ -215,7 +389,8 @@ def register(app):
         if has_thumbnail(video_id):
             path = get_thumbnail_path(video_id)
         else:
-            ok = generate_thumbnail(video_id, video['filepath'], video.get('duration', 0))
+            ok = generate_thumbnail(video_id, video['filepath'],
+                                    video.get('duration', 0))
             if not ok:
                 return _thumbnail_placeholder()
             path = get_thumbnail_path(video_id)
@@ -226,7 +401,9 @@ def register(app):
         except Exception:
             return _thumbnail_placeholder()
 
-    # ---------- Folders ----------
+    # ================================================================
+    #                       FOLDERS
+    # ================================================================
     @app.route('/folders')
     def folders():
         current_profile = get_current_profile()
@@ -245,7 +422,6 @@ def register(app):
             videos = get_videos_by_folder(folder['path'], limit=1, mode=current_mode)
             folder['preview'] = videos[0] if videos else None
 
-        # Список артистов текущего профиля — для модалки «Назначить артиста»
         artists = get_all_artists(mode=current_mode)
 
         return render_template('folders.html',
@@ -305,20 +481,11 @@ def register(app):
             save_config(app_config)
         return redirect(url_for('index'))
 
-    # =============================================================
-    #        НАЗНАЧЕНИЕ АРТИСТА ИЗ ПАПКИ
-    # =============================================================
+    # ================================================================
+    #                НАЗНАЧЕНИЕ АРТИСТА ИЗ ПАПКИ
+    # ================================================================
     @app.route('/folders/assign_artist', methods=['POST'])
     def folders_assign_artist():
-        """
-        Привязывает все видео папки к указанным артистам.
-        Ожидает JSON:
-            {
-              folder_path: "...",
-              artist_ids: [1, 2, 3],
-              only_unassigned: true|false
-            }
-        """
         data = request.get_json() or {}
         folder_path = data.get('folder_path')
         artist_ids = data.get('artist_ids') or []
@@ -358,10 +525,6 @@ def register(app):
 
     @app.route('/folders/create_artist', methods=['POST'])
     def folders_create_artist():
-        """
-        Создаёт артиста в текущем профиле.
-        Ожидает JSON: { name: "..." }
-        """
         data = request.get_json() or {}
         name = (data.get('name') or '').strip()
         if not name:

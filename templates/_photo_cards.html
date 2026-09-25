@@ -1,0 +1,47 @@
+{% for photo in photos %}
+<div class="col-md-3 col-sm-4 col-6 mb-3 photo-card"
+     data-photo-id="{{ photo.id }}"
+     onclick="window.location.href='{{ url_for('photo_view', photo_id=photo.id, profile=current_profile, sort=(sort if sort is defined else 'date'), search=(search if search is defined else ''), folder=(folder if folder is defined else '')) }}{% for c in (selected_categories if selected_categories is defined else []) %}&category={{ c }}{% endfor %}'">
+    <div class="card h-100">
+        <div class="photo-wrapper">
+            <img class="photo-thumbnail"
+                 src="{{ url_for('video_file', video_id=photo.id) }}"
+                 alt="{{ photo.filename }}"
+                 loading="lazy"
+                 decoding="async">
+        </div>
+        <div class="card-body">
+            <h5 class="card-title" title="{{ photo.filename }}">
+                {{ photo.filename.rsplit('.', 1)[0] if '.' in photo.filename else photo.filename }}
+                {% if photo.mode %}
+                    <span class="badge bg-danger ms-1">{{ photo.mode | mode_name }}</span>
+                {% endif %}
+            </h5>
+            <p class="card-text">
+                <small class="text-muted">
+                    Added: {{ photo.added[:10] if photo.added else '—' }}
+                    {% if photo.size %}
+                        • {{ (photo.size / (1024**2))|round(2) }} MB
+                    {% endif %}
+                </small><br>
+                <small>
+                    Categories:
+                    {% if photo.categories %}
+                        {% for cat in photo.categories %}
+                            <span class="badge bg-primary">{{ cat.name }}</span>
+                        {% endfor %}
+                    {% else %}
+                        <span class="badge bg-secondary">none</span>
+                    {% endif %}
+                </small>
+            </p>
+            <div class="stars">
+                {% set rating = photo.rating|default(0)|int %}
+                {% for i in range(1, 6) %}
+                    {% if i <= rating %}★{% else %}<span class="empty">☆</span>{% endif %}
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endfor %}

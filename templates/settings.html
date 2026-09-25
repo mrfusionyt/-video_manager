@@ -60,30 +60,53 @@
 
 {% elif tab == 'categories' %}
     <div class="settings-section">
+
+        {# Переключатель Videos / Photos #}
+        <div class="cat-type-tabs">
+            <a href="{{ url_for('settings', tab='categories', media_type='video', profile=current_profile) }}"
+               class="cat-type-tab {% if cat_media_type == 'video' %}active{% endif %}">
+                🎬 Video categories
+                <span class="cnt">{{ categories_video|length }}</span>
+            </a>
+            <a href="{{ url_for('settings', tab='categories', media_type='image', profile=current_profile) }}"
+               class="cat-type-tab {% if cat_media_type == 'image' %}active{% endif %}">
+                🖼 Photo categories
+                <span class="cnt">{{ categories_image|length }}</span>
+            </a>
+        </div>
+
+        {% set current_list = categories_image if cat_media_type == 'image' else categories_video %}
+
         <div class="mb-3">
             <form method="post">
                 <input type="hidden" name="action" value="import_categories">
                 <input type="hidden" name="profile" value="{{ current_profile }}">
+                <input type="hidden" name="media_type" value="{{ cat_media_type }}">
                 <div class="mb-2">
-                    <label class="form-label text-muted small">Enter category names (one per line):</label>
-                    <textarea name="categories_text" class="form-control form-control-dark" placeholder="Horror&#10;Comedy&#10;Documentary"></textarea>
+                    <label class="form-label text-muted small">
+                        Enter {{ 'photo' if cat_media_type == 'image' else 'video' }} category names (one per line):
+                    </label>
+                    <textarea name="categories_text" class="form-control form-control-dark" placeholder="Nature&#10;Portrait&#10;Street"></textarea>
                 </div>
                 <button type="submit" class="btn-import">Import Categories</button>
             </form>
         </div>
+
         <div class="mb-3">
-            <form method="post" onsubmit="return confirm('Delete ALL categories for selected profile? This cannot be undone.');">
+            <form method="post" onsubmit="return confirm('Delete ALL {{ cat_media_type }} categories for selected profile? This cannot be undone.');">
                 <input type="hidden" name="action" value="delete_all_categories">
                 <input type="hidden" name="profile" value="{{ current_profile }}">
-                <button type="submit" class="btn-danger-custom">Delete All Categories</button>
+                <input type="hidden" name="media_type" value="{{ cat_media_type }}">
+                <button type="submit" class="btn-danger-custom">Delete All {{ 'Photo' if cat_media_type == 'image' else 'Video' }} Categories</button>
             </form>
         </div>
-        {% if all_categories %}
+
+        {% if current_list %}
         <div class="table-responsive">
             <table class="table table-dark-custom table-hover" id="categoriesTable">
                 <thead><tr><th style="width:40px;">#</th><th>Name</th><th>Profile</th><th style="width:60px;">Delete</th></tr></thead>
                 <tbody>
-                    {% for cat in all_categories %}
+                    {% for cat in current_list %}
                         {% if loop.index0 < 10 %}
                             <tr>
                                 <td>{{ loop.index }}</td>
@@ -93,6 +116,7 @@
                                     <form method="post" style="display:inline;">
                                         <input type="hidden" name="action" value="delete_category">
                                         <input type="hidden" name="profile" value="{{ current_profile }}">
+                                        <input type="hidden" name="media_type" value="{{ cat_media_type }}">
                                         <input type="hidden" name="category_id" value="{{ cat.id }}">
                                         <button type="submit" class="btn-delete" title="Delete category">✕</button>
                                     </form>
@@ -107,6 +131,7 @@
                                     <form method="post" style="display:inline;">
                                         <input type="hidden" name="action" value="delete_category">
                                         <input type="hidden" name="profile" value="{{ current_profile }}">
+                                        <input type="hidden" name="media_type" value="{{ cat_media_type }}">
                                         <input type="hidden" name="category_id" value="{{ cat.id }}">
                                         <button type="submit" class="btn-delete" title="Delete category">✕</button>
                                     </form>
@@ -116,16 +141,56 @@
                     {% endfor %}
                 </tbody>
             </table>
-            {% if all_categories|length > 10 %}
+            {% if current_list|length > 10 %}
                 <div class="mt-2">
                     <a href="#" class="btn btn-outline-secondary btn-sm" id="toggleCategoriesSettingsBtn">Show All</a>
                 </div>
             {% endif %}
         </div>
         {% else %}
-        <p class="text-muted">No categories yet.</p>
+        <p class="text-muted">No {{ 'photo' if cat_media_type == 'image' else 'video' }} categories yet.</p>
         {% endif %}
     </div>
+
+    <style>
+    .cat-type-tabs {
+        display: flex;
+        gap: 0.5rem;
+        margin-bottom: 1.25rem;
+        border-bottom: 1px solid var(--border);
+        padding-bottom: 0;
+    }
+    .cat-type-tab {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.6rem 1.1rem;
+        border-radius: var(--radius) var(--radius) 0 0;
+        background: var(--bg-elevated);
+        border: 1px solid var(--border-strong);
+        border-bottom: none;
+        color: var(--text-secondary);
+        text-decoration: none;
+        font-size: 0.9rem;
+        margin-bottom: -1px;
+        transition: background var(--tr), color var(--tr), border-color var(--tr);
+    }
+    .cat-type-tab:hover { background: var(--bg-subtle); color: #fff; }
+    .cat-type-tab.active {
+        background: var(--red);
+        border-color: var(--red);
+        color: #fff;
+        font-weight: 600;
+    }
+    .cat-type-tab .cnt {
+        background: rgba(255,255,255,0.18);
+        color: inherit;
+        padding: 1px 7px;
+        border-radius: var(--radius-pill);
+        font-size: 0.72rem;
+    }
+    .cat-type-tab.active .cnt { background: rgba(0,0,0,0.25); }
+    </style>
 
 {% elif tab == 'network' %}
     <div class="settings-section">

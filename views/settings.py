@@ -1,6 +1,8 @@
 """
 Настройки, скачивание VR, раздача VR-файлов, прогресс-стримы,
 перезапуск сервера. Дубликаты — отдельная страница.
+
+Категории разделены по media_type: video / image.
 """
 import os
 import sys
@@ -25,6 +27,7 @@ from models import (
     add_library,
     delete_library,
     get_stats,
+    get_categories,
     CONFIG_PATH,
 )
 from scanner import (
@@ -136,27 +139,45 @@ def register(app):
         tab = request.values.get('tab') or request.args.get('tab') or 'libraries'
         task_id = request.args.get('task_id')
 
+        # ---------- POST: действия ----------
         if request.method == 'POST':
             action = request.form.get('action')
+
+            # --- Категории ---
+            # media_type приходит из скрытого поля формы (video | image),
+            # по умолчанию 'video'.
+            form_media_type = request.form.get('media_type', 'video')
+            if form_media_type not in ('video', 'image'):
+                form_media_type = 'video'
+
             if action == 'add_category':
                 name = request.form.get('name')
                 if name:
-                    add_category(name, mode=current_mode)
+                    add_category(name, mode=current_mode,
+                                 media_type=form_media_type)
+
             elif action == 'import_categories':
                 text = request.form.get('categories_text', '')
                 if text.strip():
-                    names = [line.strip() for line in text.splitlines() if line.strip()]
+                    names = [line.strip() for line in text.splitlines()
+                             if line.strip()]
                     for name in names:
                         try:
-                            add_category(name, mode=current_mode)
+                            add_category(name, mode=current_mode,
+                                         media_type=form_media_type)
                         except Exception:
                             pass
+
             elif action == 'delete_category':
                 cat_id = request.form.get('category_id')
                 if cat_id:
                     delete_category(cat_id)
+
             elif action == 'delete_all_categories':
-                delete_all_categories(current_mode)
+                delete_all_categories(current_mode,
+                                      media_type=form_media_type)
+
+            # --- Библиотеки ---
             elif action == 'add_library':
                 path = request.form.get('path')
                 if path and os.path.isdir(path):
@@ -165,12 +186,15 @@ def register(app):
                         scan_libraries()
                     except sqlite3.IntegrityError:
                         pass
+
             elif action == 'delete_library':
                 lib_id = request.form.get('library_id')
                 if lib_id:
                     delete_library(lib_id)
                     return redirect(url_for('settings', tab='libraries',
                                             profile=current_profile))
+
+            # --- Сканирование ---
             elif action == 'scan':
                 new_task_id = str(uuid.uuid4())
                 started = scan_libraries_async(new_task_id)
@@ -181,10 +205,14 @@ def register(app):
                                         tab='libraries',
                                         task_id=new_task_id,
                                         profile=current_profile))
+
+            # --- Сеть ---
             elif action == 'save_ip':
                 ip = request.form.get('static_ip', '').strip()
                 app_config['static_ip'] = ip
                 save_config(app_config)
+
+            # --- Дубликаты ---
             elif action == 'start_duplicate_scan':
                 filters = request.form.getlist('media_types')
                 if not filters:
@@ -194,15 +222,42 @@ def register(app):
                 return redirect(url_for('duplicates_page',
                                         task_id=new_task_id,
                                         profile=current_profile))
+
+            # Редирект назад с сохранением вкладки и media_type вкладки
+            if tab == 'categories':
+                return redirect(url_for('settings',
+                                        tab='categories',
+                                        media_type=form_media_type,
+                                        profile=current_profile))
             return redirect(url_for('settings', tab=tab, profile=current_profile))
 
-        # Старые закладки: /settings?tab=download_vr → отдельная страница
+        # ---------- GET ----------
+
+        # Старые закладки
         if tab == 'download_vr':
             return redirect(url_for('download_vr', profile=current_profile))
-
-        # Старые закладки: /settings?tab=duplicates → отдельная страница
         if tab == 'duplicates':
             return redirect(url_for('duplicates_page', profile=current_profile))
+
+        if tab == 'categories':
+            # Активный тип категорий (video | image)
+            cat_media_type = request.args.get('media_type', 'video')
+            if cat_media_type not in ('video', 'image'):
+                cat_media_type = 'video'
+
+            categories_video = get_categories(mode=current_mode,
+                                              media_type='video')
+            categories_image = get_categories(mode=current_mode,
+                                              media_type='image')
+
+            return render_template(
+                'settings.html',
+                tab='categories',
+                categories_video=categories_video,
+                categories_image=categories_image,
+                cat_media_type=cat_media_type,
+                scan_running=is_scan_in_progress(),
+            )
 
         if tab == 'stats':
             stats_female = get_stats(mode=1) or {
@@ -216,15 +271,16 @@ def register(app):
             return render_template('stats.html',
                                    stats_female=stats_female,
                                    stats_transgender=stats_transgender)
-        else:
-            return render_template('settings.html',
-                                   tab=tab,
-                                   task_id=task_id,
-                                   scan_running=is_scan_in_progress())
 
-    # ------------------------------------------------------------------
+        # libraries (по умолчанию) и network
+        return render_template('settings.html',
+                               tab=tab,
+                               task_id=task_id,
+                               scan_running=is_scan_in_progress())
+
+    # ================================================================
     #                    DUPLICATES — отдельная страница
-    # ------------------------------------------------------------------
+    # ================================================================
     @app.route('/duplicates', methods=['GET', 'POST'])
     def duplicates_page():
         current_profile = request.values.get('profile') or get_current_profile()
@@ -250,9 +306,9 @@ def register(app):
                                task_id=task_id,
                                **stats)
 
-    # ------------------------------------------------------------------
+    # ================================================================
     #                    RESTART SERVER
-    # ------------------------------------------------------------------
+    # ================================================================
     @app.route('/restart_server', methods=['POST'])
     def restart_server():
         print("[restart] requested by client")
@@ -279,9 +335,9 @@ def register(app):
                 time.sleep(0.5)
         return Response(generate(), mimetype="text/event-stream")
 
-    # ------------------------------------------------------------------
+    # ================================================================
     #                    DOWNLOAD VR — отдельная страница
-    # ------------------------------------------------------------------
+    # ================================================================
     @app.route('/download_vr', methods=['GET', 'POST'])
     def download_vr():
         if request.method == 'POST':

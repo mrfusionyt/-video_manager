@@ -16,7 +16,9 @@ if getattr(sys, "frozen", False):
 else:
     BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 
-from models import init_db, get_categories, get_all_videos, get_libraries
+from models import (
+    init_db, get_categories, get_all_videos, get_libraries, count_videos,
+)
 from artists import init_artists_db, get_all_artists
 from scanner import scan_libraries
 from config import app_config, DARK_MODE, MODE_LABELS
@@ -56,9 +58,14 @@ except Exception as _e:
     print(f"[app] WARNING: tools page not registered: {_e}")
 
 
-@app.route("/image/<path:filename>")
-def image_files(filename):
-    return send_from_directory(app.config["IMAGE_DIR"], filename)
+# ===================================================================
+#                       СТАТИКА (image/*)
+# ===================================================================
+# NB: эндпоинт 'serve_image' определён в views/main.py.
+# Здесь дубликат не нужен — url_for('serve_image', ...) резолвится
+# на тот, что зарегистрирован первым (main).
+# Оставляем только общую раздачу содержимого IMAGE_DIR для случаев,
+# когда image/ содержит большие вложения, не покрытые main.serve_image.
 
 
 @app.template_filter('mode_name')
@@ -74,18 +81,32 @@ def mode_name_filter(mode):
 def inject_globals():
     current_profile = get_current_profile()
     current_mode = profile_to_mode(current_profile)
-    categories = get_categories(mode=current_mode)
-    all_videos = get_all_videos(mode=current_mode)
-    libraries = get_libraries(mode=current_mode)
 
+    # --- Категории (раздельно video/image) ---
+    categories_video = get_categories(mode=current_mode, media_type='video')
+    categories_image = get_categories(mode=current_mode, media_type='image')
+
+    # --- Видео текущего профиля (только media_type='video') ---
+    all_videos = get_all_videos(mode=current_mode, media_type='video')
+
+    # --- Количество фото (для бейджа в хедере) ---
+    try:
+        photos_count = count_videos(mode=current_mode, media_type='image')
+    except Exception:
+        photos_count = 0
+
+    # --- Количество видео (только video) ---
+    videos_count = len(all_videos)
+
+    # --- Присваиваем счётчики категориям видео для сайдбара ---
     cat_counts = {}
     for video in all_videos:
         for cat in video.get('categories', []):
             cat_counts[cat['id']] = cat_counts.get(cat['id'], 0) + 1
-    for cat in categories:
+    for cat in categories_video:
         cat['video_count'] = cat_counts.get(cat['id'], 0)
 
-    total_videos = len(all_videos)
+    libraries = get_libraries(mode=current_mode)
 
     artists_sidebar = []
     selected_artist_id = None
@@ -109,9 +130,15 @@ def inject_globals():
     ]
 
     return dict(
-        all_categories=categories,
+        # video-категории (для обратной совместимости с base.html)
+        all_categories=categories_video,
+        # image-категории (для фильтров на /photos и настроек)
+        all_photo_categories=categories_image,
+
         all_libraries=libraries,
-        all_videos_count=total_videos,
+        all_videos_count=videos_count,
+        all_photos_count=photos_count,
+
         dark_mode=DARK_MODE,
         settings_tabs=settings_tabs,
         app_config=app_config,

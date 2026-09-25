@@ -37,6 +37,10 @@
 {% set NO_SIDEBAR = (request.endpoint == 'editor_page') %}
 {# Страницы с единым сайдбаром "Settings + Tools" #}
 {% set ADMIN_PAGES = ('settings', 'tools_page', 'download_vr', 'duplicates_page') %}
+{# Страницы, где в сайдбаре показываются фотокатегории #}
+{% set PHOTO_PAGES = ('photos_page', 'photo_view', 'photo_edit') %}
+{# Страницы, где активна вкладка Photo в хедере #}
+{% set PHOTO_ACTIVE = (request.endpoint in PHOTO_PAGES) %}
 
 <div class="container-fluid">
     <div class="row">
@@ -134,7 +138,46 @@
                     <div class="no-artists-msg">No artists yet</div>
                 {% endif %}
 
+            {% elif request.endpoint in PHOTO_PAGES %}
+                {# ============================================================
+                   САЙДБАР ДЛЯ ФОТО: PHOTO-КАТЕГОРИИ
+                   ============================================================ #}
+                <h5>Photo Categories</h5>
+                <ul class="nav flex-column" id="photoCategoryList">
+                    <li class="nav-item">
+                        <a class="nav-link {% if not selected_category %}active{% endif %}"
+                           href="{{ url_for('photos_page', profile=current_profile) }}">
+                            All Photos <span class="badge">{{ all_photos_count or 0 }}</span>
+                        </a>
+                    </li>
+                    {% for cat in all_photo_categories %}
+                        {% if loop.index0 < 10 %}
+                            <li class="nav-item">
+                                <a class="nav-link {% if selected_category == cat.id %}active{% endif %}"
+                                   href="{{ url_for('photos_page', category=cat.id, profile=current_profile) }}">
+                                    {{ cat.name }} <span class="badge">{{ cat.video_count or 0 }}</span>
+                                </a>
+                            </li>
+                        {% else %}
+                            <li class="nav-item category-extra" style="display: none;">
+                                <a class="nav-link {% if selected_category == cat.id %}active{% endif %}"
+                                   href="{{ url_for('photos_page', category=cat.id, profile=current_profile) }}">
+                                    {{ cat.name }} <span class="badge">{{ cat.video_count or 0 }}</span>
+                                </a>
+                            </li>
+                        {% endif %}
+                    {% endfor %}
+                </ul>
+                {% if all_photo_categories|length > 10 %}
+                    <div class="px-3 mt-2">
+                        <a href="#" class="category-more-btn" id="toggleCategoriesBtn">Show All</a>
+                    </div>
+                {% endif %}
+
             {% else %}
+                {# ============================================================
+                   САЙДБАР ДЛЯ ВИДЕО (главная и др.)
+                   ============================================================ #}
                 <h5>Categories</h5>
                 <ul class="nav flex-column" id="categoryList">
                     <li class="nav-item">
@@ -180,8 +223,12 @@
 
                     <ul class="nav-tabs-custom">
                         <li class="nav-item">
-                            <a class="nav-link {% if request.endpoint == 'index' or request.endpoint == 'watch' or request.endpoint == 'edit_video' %}active{% endif %}"
+                            <a class="nav-link {% if request.endpoint in ('index', 'watch', 'edit_video') and not PHOTO_ACTIVE %}active{% endif %}"
                                href="{{ url_for('index', profile=current_profile) }}">Videos</a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link {% if PHOTO_ACTIVE %}active{% endif %}"
+                               href="{{ url_for('photos_page', profile=current_profile) }}">Photo</a>
                         </li>
                         <li class="nav-item">
                             <a class="nav-link {% if request.endpoint in ('artists_page', 'artist_view') %}active{% endif %}"
@@ -193,7 +240,8 @@
                         </li>
                     </ul>
 
-                    <form class="search-form" method="get" action="{% if request.endpoint == 'folders' %}{{ url_for('folders') }}{% else %}{{ url_for('index') }}{% endif %}">
+                    <form class="search-form" method="get"
+                          action="{% if request.endpoint == 'folders' %}{{ url_for('folders') }}{% elif PHOTO_ACTIVE %}{{ url_for('photos_page') }}{% else %}{{ url_for('index') }}{% endif %}">
                         <input type="text" name="search" placeholder="Search..." value="{{ search or '' }}" aria-label="Search">
                         <input type="hidden" name="profile" value="{{ current_profile }}">
                         <button type="submit" class="btn-search">Go</button>
@@ -205,18 +253,26 @@
                             Sort
                         </button>
                         <ul class="dropdown-menu dropdown-menu-dark" aria-labelledby="sortDropdown">
-                            <li><a class="dropdown-item {% if sort == 'date' %}active{% endif %}" href="#" data-sort="date">By Date</a></li>
-                            <li><a class="dropdown-item {% if sort == 'rating' %}active{% endif %}" href="#" data-sort="rating">By Rating</a></li>
-                            <li><hr class="dropdown-divider"></li>
-                            <li><a class="dropdown-item {% if sort == 'duration_asc' %}active{% endif %}" href="#" data-sort="duration_asc">Duration (short first)</a></li>
-                            <li><a class="dropdown-item {% if sort == 'duration_desc' %}active{% endif %}" href="#" data-sort="duration_desc">Duration (long first)</a></li>
-                            <li><hr class="dropdown-divider"></li>
-                            <li><a class="dropdown-item {% if sort == 'orientation_vertical_first' %}active{% endif %}" href="#" data-sort="orientation_vertical_first">Vertical First</a></li>
-                            <li><a class="dropdown-item {% if sort == 'orientation_horizontal_first' %}active{% endif %}" href="#" data-sort="orientation_horizontal_first">Horizontal First</a></li>
-                            <li><hr class="dropdown-divider"></li>
-                            <li><a class="dropdown-item {% if sort == 'top10' %}active{% endif %}" href="#" data-sort="top10">Top 10</a></li>
-                            <li><a class="dropdown-item {% if sort == 'top50' %}active{% endif %}" href="#" data-sort="top50">Top 50</a></li>
-                            <li><a class="dropdown-item {% if sort == 'top100' %}active{% endif %}" href="#" data-sort="top100">Top 100</a></li>
+                            {% if PHOTO_ACTIVE %}
+                                <li><a class="dropdown-item {% if sort == 'date' %}active{% endif %}" href="#" data-sort="date">By Date</a></li>
+                                <li><a class="dropdown-item {% if sort == 'rating' %}active{% endif %}" href="#" data-sort="rating">By Rating</a></li>
+                                <li><hr class="dropdown-divider"></li>
+                                <li><a class="dropdown-item {% if sort == 'filename_asc' %}active{% endif %}" href="#" data-sort="filename_asc">Name (A→Z)</a></li>
+                                <li><a class="dropdown-item {% if sort == 'filename_desc' %}active{% endif %}" href="#" data-sort="filename_desc">Name (Z→A)</a></li>
+                            {% else %}
+                                <li><a class="dropdown-item {% if sort == 'date' %}active{% endif %}" href="#" data-sort="date">By Date</a></li>
+                                <li><a class="dropdown-item {% if sort == 'rating' %}active{% endif %}" href="#" data-sort="rating">By Rating</a></li>
+                                <li><hr class="dropdown-divider"></li>
+                                <li><a class="dropdown-item {% if sort == 'duration_asc' %}active{% endif %}" href="#" data-sort="duration_asc">Duration (short first)</a></li>
+                                <li><a class="dropdown-item {% if sort == 'duration_desc' %}active{% endif %}" href="#" data-sort="duration_desc">Duration (long first)</a></li>
+                                <li><hr class="dropdown-divider"></li>
+                                <li><a class="dropdown-item {% if sort == 'orientation_vertical_first' %}active{% endif %}" href="#" data-sort="orientation_vertical_first">Vertical First</a></li>
+                                <li><a class="dropdown-item {% if sort == 'orientation_horizontal_first' %}active{% endif %}" href="#" data-sort="orientation_horizontal_first">Horizontal First</a></li>
+                                <li><hr class="dropdown-divider"></li>
+                                <li><a class="dropdown-item {% if sort == 'top10' %}active{% endif %}" href="#" data-sort="top10">Top 10</a></li>
+                                <li><a class="dropdown-item {% if sort == 'top50' %}active{% endif %}" href="#" data-sort="top50">Top 50</a></li>
+                                <li><a class="dropdown-item {% if sort == 'top100' %}active{% endif %}" href="#" data-sort="top100">Top 100</a></li>
+                            {% endif %}
                         </ul>
                     </div>
                 </div>
@@ -224,6 +280,10 @@
                 <div class="right-section">
                     {% if request.endpoint == 'watch' %}
                         <a href="#" onclick="window.history.back(); return false;" class="btn-nav icon-only" title="Back">
+                            <img src="{{ url_for('serve_image', filename='back.png') }}" alt="Back">
+                        </a>
+                    {% elif request.endpoint == 'photo_view' %}
+                        <a href="{{ url_for('photos_page', profile=current_profile) }}" class="btn-nav icon-only" title="Back to photos">
                             <img src="{{ url_for('serve_image', filename='back.png') }}" alt="Back">
                         </a>
                     {% elif request.endpoint == 'editor_page' %}
@@ -267,6 +327,11 @@
                     <a href="{{ url_for('index', profile=current_profile) }}">
                         <img src="{{ url_for('serve_image', filename='video.png') }}" alt="" class="drawer-icon">
                         <span>Videos</span>
+                    </a>
+                </li>
+                <li>
+                    <a href="{{ url_for('photos_page', profile=current_profile) }}">
+                        <span>Photos</span>
                     </a>
                 </li>
             </ul>
@@ -373,7 +438,11 @@
             <ul class="drawer-nav">
                 <li>
                     <a href="{{ url_for('index', profile=current_profile) }}"
-                       class="{% if request.endpoint == 'index' or request.endpoint == 'watch' or request.endpoint == 'edit_video' %}active{% endif %}">Videos</a>
+                       class="{% if request.endpoint in ('index', 'watch', 'edit_video') and not PHOTO_ACTIVE %}active{% endif %}">Videos</a>
+                </li>
+                <li>
+                    <a href="{{ url_for('photos_page', profile=current_profile) }}"
+                       class="{% if PHOTO_ACTIVE %}active{% endif %}">Photo</a>
                 </li>
                 <li>
                     <a href="{{ url_for('artists_page', profile=current_profile) }}"
@@ -389,7 +458,7 @@
         <div class="drawer-section">
             <div class="drawer-section-title">Search</div>
             <form class="drawer-search-form" method="get"
-                  action="{% if request.endpoint == 'folders' %}{{ url_for('folders') }}{% else %}{{ url_for('index') }}{% endif %}">
+                  action="{% if request.endpoint == 'folders' %}{{ url_for('folders') }}{% elif PHOTO_ACTIVE %}{{ url_for('photos_page') }}{% else %}{{ url_for('index') }}{% endif %}">
                 <input type="text" name="search" placeholder="Search..." value="{{ search or '' }}">
                 <input type="hidden" name="profile" value="{{ current_profile }}">
                 <button type="submit">Go</button>
@@ -404,15 +473,22 @@
             <details class="drawer-details">
                 <summary><span>Sort by</span></summary>
                 <ul class="drawer-details-list">
-                    <li><a href="#" data-sort="date" class="{% if sort == 'date' %}active{% endif %}">By Date</a></li>
-                    <li><a href="#" data-sort="rating" class="{% if sort == 'rating' %}active{% endif %}">By Rating</a></li>
-                    <li><a href="#" data-sort="duration_asc" class="{% if sort == 'duration_asc' %}active{% endif %}">Duration (short first)</a></li>
-                    <li><a href="#" data-sort="duration_desc" class="{% if sort == 'duration_desc' %}active{% endif %}">Duration (long first)</a></li>
-                    <li><a href="#" data-sort="orientation_vertical_first" class="{% if sort == 'orientation_vertical_first' %}active{% endif %}">Vertical First</a></li>
-                    <li><a href="#" data-sort="orientation_horizontal_first" class="{% if sort == 'orientation_horizontal_first' %}active{% endif %}">Horizontal First</a></li>
-                    <li><a href="#" data-sort="top10" class="{% if sort == 'top10' %}active{% endif %}">Top 10</a></li>
-                    <li><a href="#" data-sort="top50" class="{% if sort == 'top50' %}active{% endif %}">Top 50</a></li>
-                    <li><a href="#" data-sort="top100" class="{% if sort == 'top100' %}active{% endif %}">Top 100</a></li>
+                    {% if PHOTO_ACTIVE %}
+                        <li><a href="#" data-sort="date" class="{% if sort == 'date' %}active{% endif %}">By Date</a></li>
+                        <li><a href="#" data-sort="rating" class="{% if sort == 'rating' %}active{% endif %}">By Rating</a></li>
+                        <li><a href="#" data-sort="filename_asc" class="{% if sort == 'filename_asc' %}active{% endif %}">Name (A→Z)</a></li>
+                        <li><a href="#" data-sort="filename_desc" class="{% if sort == 'filename_desc' %}active{% endif %}">Name (Z→A)</a></li>
+                    {% else %}
+                        <li><a href="#" data-sort="date" class="{% if sort == 'date' %}active{% endif %}">By Date</a></li>
+                        <li><a href="#" data-sort="rating" class="{% if sort == 'rating' %}active{% endif %}">By Rating</a></li>
+                        <li><a href="#" data-sort="duration_asc" class="{% if sort == 'duration_asc' %}active{% endif %}">Duration (short first)</a></li>
+                        <li><a href="#" data-sort="duration_desc" class="{% if sort == 'duration_desc' %}active{% endif %}">Duration (long first)</a></li>
+                        <li><a href="#" data-sort="orientation_vertical_first" class="{% if sort == 'orientation_vertical_first' %}active{% endif %}">Vertical First</a></li>
+                        <li><a href="#" data-sort="orientation_horizontal_first" class="{% if sort == 'orientation_horizontal_first' %}active{% endif %}">Horizontal First</a></li>
+                        <li><a href="#" data-sort="top10" class="{% if sort == 'top10' %}active{% endif %}">Top 10</a></li>
+                        <li><a href="#" data-sort="top50" class="{% if sort == 'top50' %}active{% endif %}">Top 50</a></li>
+                        <li><a href="#" data-sort="top100" class="{% if sort == 'top100' %}active{% endif %}">Top 100</a></li>
+                    {% endif %}
                 </ul>
             </details>
         </div>
@@ -442,22 +518,40 @@
             <div class="drawer-section">
                 <div class="drawer-section-title">Categories</div>
                 <details class="drawer-details">
-                    <summary><span>All Categories ({{ all_categories|length }})</span></summary>
+                    <summary><span>All Categories ({{ (all_photo_categories if PHOTO_ACTIVE else all_categories)|length }})</span></summary>
                     <ul class="drawer-details-list">
                         <li>
-                            <a href="{{ url_for('index', profile=current_profile) }}"
-                               class="{% if not selected_category %}active{% endif %}">
-                                All Videos <span class="item-count">{{ all_videos_count or 0 }}</span>
-                            </a>
-                        </li>
-                        {% for cat in all_categories %}
-                            <li>
-                                <a href="{{ url_for('index', category=cat.id, profile=current_profile) }}"
-                                   class="{% if selected_category == cat.id %}active{% endif %}">
-                                    {{ cat.name }} <span class="item-count">{{ cat.video_count or 0 }}</span>
+                            {% if PHOTO_ACTIVE %}
+                                <a href="{{ url_for('photos_page', profile=current_profile) }}"
+                                   class="{% if not selected_category %}active{% endif %}">
+                                    All Photos <span class="item-count">{{ all_photos_count or 0 }}</span>
                                 </a>
-                            </li>
-                        {% endfor %}
+                            {% else %}
+                                <a href="{{ url_for('index', profile=current_profile) }}"
+                                   class="{% if not selected_category %}active{% endif %}">
+                                    All Videos <span class="item-count">{{ all_videos_count or 0 }}</span>
+                                </a>
+                            {% endif %}
+                        </li>
+                        {% if PHOTO_ACTIVE %}
+                            {% for cat in all_photo_categories %}
+                                <li>
+                                    <a href="{{ url_for('photos_page', category=cat.id, profile=current_profile) }}"
+                                       class="{% if selected_category == cat.id %}active{% endif %}">
+                                        {{ cat.name }} <span class="item-count">{{ cat.video_count or 0 }}</span>
+                                    </a>
+                                </li>
+                            {% endfor %}
+                        {% else %}
+                            {% for cat in all_categories %}
+                                <li>
+                                    <a href="{{ url_for('index', category=cat.id, profile=current_profile) }}"
+                                       class="{% if selected_category == cat.id %}active{% endif %}">
+                                        {{ cat.name }} <span class="item-count">{{ cat.video_count or 0 }}</span>
+                                    </a>
+                                </li>
+                            {% endfor %}
+                        {% endif %}
                     </ul>
                 </details>
             </div>
@@ -506,24 +600,41 @@
     <div class="modal-dialog modal-lg">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title" id="filterModalLabel">Select Categories</h5>
+                <h5 class="modal-title" id="filterModalLabel">
+                    {% if PHOTO_ACTIVE %}Select Photo Categories{% else %}Select Categories{% endif %}
+                </h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
-            <form method="get" action="{% if request.endpoint == 'folders' %}{{ url_for('folders') }}{% else %}{{ url_for('index') }}{% endif %}" id="filterForm">
+            <form method="get"
+                  action="{% if request.endpoint == 'folders' %}{{ url_for('folders') }}{% elif PHOTO_ACTIVE %}{{ url_for('photos_page') }}{% else %}{{ url_for('index') }}{% endif %}"
+                  id="filterForm">
                 <input type="hidden" name="profile" value="{{ current_profile }}">
                 <div class="modal-body">
-                    <p class="text-muted">Only videos with the highest number of matches will be shown.</p>
+                    <p class="text-muted">Only files with the highest number of matches will be shown.</p>
                     <div class="filter-grid">
-                        {% for cat in all_categories %}
-                        <div class="form-check">
-                            <input class="form-check-input" type="checkbox" name="category" value="{{ cat.id }}"
-                                   id="cat_{{ cat.id }}"
-                                   {% if cat.id in selected_categories %}checked{% endif %}>
-                            <label class="form-check-label" for="cat_{{ cat.id }}">{{ cat.name }}</label>
-                        </div>
+                        {% if PHOTO_ACTIVE %}
+                            {% for cat in all_photo_categories %}
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="category" value="{{ cat.id }}"
+                                       id="cat_{{ cat.id }}"
+                                       {% if cat.id in selected_categories %}checked{% endif %}>
+                                <label class="form-check-label" for="cat_{{ cat.id }}">{{ cat.name }}</label>
+                            </div>
+                            {% else %}
+                            <p class="text-muted">No photo categories yet.</p>
+                            {% endfor %}
                         {% else %}
-                        <p class="text-muted">No categories yet.</p>
-                        {% endfor %}
+                            {% for cat in all_categories %}
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="category" value="{{ cat.id }}"
+                                       id="cat_{{ cat.id }}"
+                                       {% if cat.id in selected_categories %}checked{% endif %}>
+                                <label class="form-check-label" for="cat_{{ cat.id }}">{{ cat.name }}</label>
+                            </div>
+                            {% else %}
+                            <p class="text-muted">No categories yet.</p>
+                            {% endfor %}
+                        {% endif %}
                     </div>
                 </div>
                 <div class="modal-footer">
