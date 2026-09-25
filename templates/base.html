@@ -10,9 +10,13 @@
     {% block styles %}{% endblock %}
 </head>
 <body>
+{# Страница редактора — без сайдбара, на всю ширину #}
+{% set NO_SIDEBAR = (request.endpoint == 'editor_page') %}
+
 <div class="container-fluid">
     <div class="row">
         <!-- Sidebar (desktop only) -->
+        {% if not NO_SIDEBAR %}
         <div class="col-md-3 col-lg-2 sidebar d-none d-md-block" style="padding-top: 70px;">
             {% if request.endpoint == 'settings' %}
                 <h5 class="px-3 mb-3 text-light">Settings</h5>
@@ -106,9 +110,10 @@
                 {% endif %}
             {% endif %}
         </div>
+        {% endif %}
 
         <!-- Main content -->
-        <div class="col-md-9 col-lg-10">
+        <div class="{% if NO_SIDEBAR %}col-12{% else %}col-md-9 col-lg-10{% endif %}">
             <div class="top-bar">
                 <div class="left-section">
                     <button type="button" class="hamburger-btn" id="hamburgerBtn" aria-label="Menu">
@@ -178,7 +183,11 @@
                         <a href="#" onclick="window.history.back(); return false;" class="btn-nav icon-only" title="Back">
                             <img src="{{ url_for('serve_image', filename='back.png') }}" alt="Back">
                         </a>
-                    {% elif request.endpoint == 'settings' or request.endpoint == 'edit_video' or request.endpoint == 'artist_view' or request.endpoint == 'tools_page' or request.endpoint == 'editor_page' %}
+                    {% elif request.endpoint == 'editor_page' %}
+                        <a href="{{ url_for('watch', video_id=(request.view_args or {}).get('video_id', 0), profile=current_profile) }}" class="btn-nav icon-only" title="Back to video">
+                            <img src="{{ url_for('serve_image', filename='back.png') }}" alt="Back">
+                        </a>
+                    {% elif request.endpoint == 'settings' or request.endpoint == 'edit_video' or request.endpoint == 'artist_view' or request.endpoint == 'tools_page' %}
                         <a href="{{ url_for('index', profile=current_profile) }}" class="btn-nav icon-only" title="Back">
                             <img src="{{ url_for('serve_image', filename='back.png') }}" alt="Back">
                         </a>
@@ -210,12 +219,8 @@
 
     {% if request.endpoint == 'settings' %}
         {# ============================================================
-           SETTINGS PAGE — компактное мобильное меню:
-             1. Videos (на главную)
-             2. Профиль (переключатель)
-             3. Табы настроек + Tools
+           SETTINGS PAGE
            ============================================================ #}
-
         <div class="drawer-section">
             <ul class="drawer-nav">
                 <li>
@@ -257,12 +262,8 @@
 
     {% elif request.endpoint == 'tools_page' %}
         {# ============================================================
-           TOOLS PAGE — компактное мобильное меню:
-             1. Videos (на главную)
-             2. Профиль
-             3. Навигация по Tools / Settings
+           TOOLS PAGE
            ============================================================ #}
-
         <div class="drawer-section">
             <ul class="drawer-nav">
                 <li>
@@ -298,11 +299,57 @@
             </ul>
         </div>
 
+    {% elif request.endpoint == 'editor_page' %}
+        {# ============================================================
+           EDITOR PAGE — минимум пунктов, всё действие на самой странице
+           ============================================================ #}
+        <div class="drawer-section">
+            <ul class="drawer-nav">
+                <li>
+                    <a href="{{ url_for('index', profile=current_profile) }}">
+                        <img src="{{ url_for('serve_image', filename='video.png') }}" alt="" class="drawer-icon">
+                        <span>Videos</span>
+                    </a>
+                </li>
+                <li>
+                    <a href="{{ url_for('watch', video_id=(request.view_args or {}).get('video_id', 0), profile=current_profile) }}">
+                        <img src="{{ url_for('serve_image', filename='play.png') }}" alt="" class="drawer-icon">
+                        <span>Back to video</span>
+                    </a>
+                </li>
+            </ul>
+        </div>
+
+        <div class="drawer-section">
+            <div class="drawer-section-title">Profile</div>
+            <button type="button" class="drawer-btn primary"
+                    onclick="switchProfile('{{ 'transgender' if current_profile == 'female' else 'female' }}')">
+                Switch to {{ 'Transgender' if current_profile == 'female' else 'Female' }}
+            </button>
+        </div>
+
+        <div class="drawer-section">
+            <div class="drawer-section-title">More</div>
+            <ul class="drawer-nav">
+                <li>
+                    <a href="{{ url_for('tools_page', profile=current_profile) }}">
+                        <img src="{{ url_for('serve_image', filename='settings.png') }}" alt="" class="drawer-icon">
+                        <span>Tools</span>
+                    </a>
+                </li>
+                <li>
+                    <a href="{{ url_for('settings', profile=current_profile) }}">
+                        <img src="{{ url_for('serve_image', filename='settings.png') }}" alt="" class="drawer-icon">
+                        <span>Settings</span>
+                    </a>
+                </li>
+            </ul>
+        </div>
+
     {% else %}
         {# ============================================================
-           ОБЩЕЕ МЕНЮ — как было раньше
+           ОБЩЕЕ МЕНЮ
            ============================================================ #}
-
         <div class="drawer-section">
             <div class="drawer-section-title">Navigation</div>
             <ul class="drawer-nav">
