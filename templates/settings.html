@@ -135,7 +135,7 @@
             <input type="hidden" name="profile" value="{{ current_profile }}">
             <div class="mb-3">
                 <label for="static_ip" class="form-label">Enter static IP address (e.g., 192.168.1.100):</label>
-                <input type="text" class="form-control form-control-dark" id="static_ip" name="static_ip" 
+                <input type="text" class="form-control form-control-dark" id="static_ip" name="static_ip"
                        placeholder="192.168.1.100" value="{{ app_config.get('static_ip', '') }}">
             </div>
             <button type="submit" class="btn-add">Save IP</button>
@@ -159,43 +159,15 @@
             ⟳ Restart Server
         </button>
     </div>
-
-{% elif tab == 'duplicates' %}
-    <div class="settings-section">
-        <h5>Duplicate Finder</h5>
-        <div class="mb-3">
-            <form method="post" action="{{ url_for('settings') }}" id="duplicateScanForm">
-                <input type="hidden" name="action" value="start_duplicate_scan">
-                <input type="hidden" name="profile" value="{{ current_profile }}">
-                <div class="mb-2">
-                    <label class="form-label">Media types to scan:</label>
-                    <div class="form-check form-check-inline">
-                        <input class="form-check-input" type="checkbox" name="media_types" value="video" checked id="media_video">
-                        <label class="form-check-label" for="media_video">Video</label>
-                    </div>
-                    <div class="form-check form-check-inline">
-                        <input class="form-check-input" type="checkbox" name="media_types" value="image" checked id="media_image">
-                        <label class="form-check-label" for="media_image">Image</label>
-                    </div>
-                </div>
-                <button type="submit" class="btn-add">Find Duplicates</button>
-            </form>
-        </div>
-        <div class="mt-3">
-            <a href="{{ url_for('settings', tab='duplicates', profile=current_profile) }}" class="btn-add">Go to Duplicates</a>
-        </div>
-    </div>
 {% endif %}
 
-<!-- ============================================================
-     МОДАЛКА ПОДТВЕРЖДЕНИЯ ПЕРЕЗАПУСКА СЕРВЕРА
-     ============================================================ -->
+<!-- МОДАЛКА ПОДТВЕРЖДЕНИЯ ПЕРЕЗАПУСКА СЕРВЕРА -->
 <div class="modal fade" id="restartServerModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content edit-modal-content">
             <div class="modal-header">
                 <h5 class="modal-title">Restart server</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body">
                 <div class="delete-warning">
@@ -218,99 +190,26 @@
     </div>
 </div>
 
-<!-- ============================================================
-     OVERLAY "SERVER IS RESTARTING"
-     ============================================================ -->
+<!-- OVERLAY "SERVER IS RESTARTING" -->
 <div class="restart-overlay" id="restartOverlay" style="display:none;">
     <div class="restart-overlay-inner">
         <div class="restart-spinner"></div>
-        <div class="restart-overlay-text" id="restartOverlayText">
-            Перезапуск сервера…
-        </div>
-        <div class="restart-overlay-hint" id="restartOverlayHint">
-            Ждём, пока сервер вернётся онлайн
-        </div>
+        <div class="restart-overlay-text" id="restartOverlayText">Перезапуск сервера…</div>
+        <div class="restart-overlay-hint" id="restartOverlayHint">Ждём, пока сервер вернётся онлайн</div>
     </div>
 </div>
 
 <style>
-.restart-overlay {
-    position: fixed;
-    inset: 0;
-    background: rgba(0, 0, 0, 0.88);
-    z-index: 10000;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    backdrop-filter: blur(6px);
-    -webkit-backdrop-filter: blur(6px);
-}
-.restart-overlay-inner {
-    text-align: center;
-    color: var(--text-primary);
-    padding: 2rem 2.5rem;
-    background: var(--bg-surface);
-    border: 1px solid var(--border-strong);
-    border-radius: var(--radius-lg);
-    box-shadow: var(--shadow-modal);
-    max-width: 420px;
-}
-.restart-spinner {
-    width: 48px;
-    height: 48px;
-    margin: 0 auto 1rem auto;
-    border: 4px solid var(--bg-elevated);
-    border-top-color: var(--red);
-    border-radius: 50%;
-    animation: restart-spin 0.9s linear infinite;
-}
-@keyframes restart-spin {
-    from { transform: rotate(0deg); }
-    to   { transform: rotate(360deg); }
-}
-.restart-overlay-text {
-    font-size: 1.05rem;
-    font-weight: 500;
-    margin-bottom: 0.4rem;
-}
-.restart-overlay-hint {
-    font-size: 0.85rem;
-    color: var(--text-muted);
-}
-.restart-overlay-inner.success .restart-spinner {
-    border: none;
-    background: transparent;
-    animation: none;
-    color: var(--green);
-    font-size: 2.5rem;
-    line-height: 1;
-}
-.restart-overlay-inner.success .restart-spinner::after {
-    content: '✓';
-    display: block;
-    width: 48px;
-    height: 48px;
-    margin: 0 auto;
-    font-size: 2.5rem;
-    line-height: 48px;
-    color: var(--green);
-}
-.restart-overlay-inner.error .restart-spinner {
-    border: none;
-    background: transparent;
-    animation: none;
-}
-.restart-overlay-inner.error .restart-spinner::after {
-    content: '!';
-    display: block;
-    width: 48px;
-    height: 48px;
-    margin: 0 auto;
-    font-size: 2.5rem;
-    line-height: 48px;
-    color: var(--red);
-    font-weight: bold;
-}
+.restart-overlay { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.88); z-index: 10000; display: flex; align-items: center; justify-content: center; backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
+.restart-overlay-inner { text-align: center; color: var(--text-primary); padding: 2rem 2.5rem; background: var(--bg-surface); border: 1px solid var(--border-strong); border-radius: var(--radius-lg); box-shadow: var(--shadow-modal); max-width: 420px; }
+.restart-spinner { width: 48px; height: 48px; margin: 0 auto 1rem auto; border: 4px solid var(--bg-elevated); border-top-color: var(--red); border-radius: 50%; animation: restart-spin 0.9s linear infinite; }
+@keyframes restart-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+.restart-overlay-text { font-size: 1.05rem; font-weight: 500; margin-bottom: 0.4rem; }
+.restart-overlay-hint { font-size: 0.85rem; color: var(--text-muted); }
+.restart-overlay-inner.success .restart-spinner { border: none; background: transparent; animation: none; }
+.restart-overlay-inner.success .restart-spinner::after { content: '✓'; display: block; width: 48px; height: 48px; margin: 0 auto; font-size: 2.5rem; line-height: 48px; color: var(--green); }
+.restart-overlay-inner.error .restart-spinner { border: none; background: transparent; animation: none; }
+.restart-overlay-inner.error .restart-spinner::after { content: '!'; display: block; width: 48px; height: 48px; margin: 0 auto; font-size: 2.5rem; line-height: 48px; color: var(--red); font-weight: bold; }
 </style>
 
 <script>
@@ -321,11 +220,8 @@
             pasteBtn.addEventListener('click', async function() {
                 try {
                     const text = await navigator.clipboard.readText();
-                    if (text) {
-                        pathInput.value = text;
-                    } else {
-                        alert('Clipboard is empty or contains non-text data.');
-                    }
+                    if (text) pathInput.value = text;
+                    else alert('Clipboard is empty or contains non-text data.');
                 } catch (err) {
                     alert('Unable to access clipboard. Please paste manually (Ctrl+V).');
                 }
@@ -338,12 +234,8 @@
                 e.preventDefault();
                 const extras = document.querySelectorAll('.category-extra-settings');
                 let show = false;
-                if (extras.length > 0 && extras[0].style.display === 'none') {
-                    show = true;
-                }
-                extras.forEach(el => {
-                    el.style.display = show ? 'table-row' : 'none';
-                });
+                if (extras.length > 0 && extras[0].style.display === 'none') show = true;
+                extras.forEach(el => { el.style.display = show ? 'table-row' : 'none'; });
                 this.textContent = show ? 'Hide' : 'Show All';
             });
         }
@@ -355,20 +247,15 @@
 
         if (scanForm) {
             scanForm.addEventListener('submit', function() {
-                if (scanBtn) {
-                    scanBtn.disabled = true;
-                    scanBtn.textContent = 'Scanning…';
-                }
-                const progressContainer = document.getElementById('scanProgressContainer');
-                if (progressContainer) progressContainer.style.display = 'block';
-                const progressText = document.getElementById('scanProgressText');
-                if (progressText) progressText.textContent = 'Starting scan...';
+                if (scanBtn) { scanBtn.disabled = true; scanBtn.textContent = 'Scanning…'; }
+                const pc = document.getElementById('scanProgressContainer');
+                if (pc) pc.style.display = 'block';
+                const pt = document.getElementById('scanProgressText');
+                if (pt) pt.textContent = 'Starting scan...';
             });
         }
 
-        if (taskId && scanBtn) {
-            startScanProgress(taskId);
-        }
+        if (taskId && scanBtn) startScanProgress(taskId);
 
         function startScanProgress(taskId) {
             const progressContainer = document.getElementById('scanProgressContainer');
@@ -376,13 +263,9 @@
             const progressText = document.getElementById('scanProgressText');
             if (!progressContainer) return;
             progressContainer.style.display = 'block';
-
             const es = new EventSource('/scan_progress/' + taskId);
-
             es.onmessage = function(event) {
-                let data;
-                try { data = JSON.parse(event.data); } catch (e) { return; }
-
+                let data; try { data = JSON.parse(event.data); } catch (e) { return; }
                 if (data.status === 'complete') {
                     progressFill.style.width = '100%';
                     progressText.textContent = '✅ ' + (data.message || 'Done');
@@ -397,137 +280,78 @@
                     progressFill.style.background = '#dc3545';
                     progressText.textContent = '❌ ' + (data.message || 'Error');
                     es.close();
-                    if (scanBtn) {
-                        scanBtn.disabled = false;
-                        scanBtn.textContent = 'Scan';
-                    }
+                    if (scanBtn) { scanBtn.disabled = false; scanBtn.textContent = 'Scan'; }
                 } else if (data.status === 'scanning') {
                     const pct = data.progress || 0;
                     progressFill.style.width = pct + '%';
                     const processed = data.processed || 0;
                     const total = data.total || 0;
                     const msg = data.message || '';
-                    progressText.textContent = total > 0
-                        ? `${pct}% — ${processed}/${total} — ${msg}`
-                        : msg;
+                    progressText.textContent = total > 0 ? `${pct}% — ${processed}/${total} — ${msg}` : msg;
                 } else if (data.status === 'not_found') {
                     progressText.textContent = 'Progress lost. Refresh the page.';
                     es.close();
                 }
             };
-
             es.onerror = function() {
                 progressText.textContent = 'Connection lost. Refresh the page.';
                 es.close();
-                if (scanBtn) {
-                    scanBtn.disabled = false;
-                    scanBtn.textContent = 'Scan';
-                }
+                if (scanBtn) { scanBtn.disabled = false; scanBtn.textContent = 'Scan'; }
             };
         }
 
-        /* ============================================================
-           RESTART SERVER
-           ============================================================ */
         const restartBtn = document.getElementById('restartServerBtn');
         const restartModalEl = document.getElementById('restartServerModal');
         const confirmRestartBtn = document.getElementById('confirmRestartBtn');
         const restartOverlay = document.getElementById('restartOverlay');
         const restartOverlayText = document.getElementById('restartOverlayText');
         const restartOverlayHint = document.getElementById('restartOverlayHint');
-        const restartOverlayInner = restartOverlay
-            ? restartOverlay.querySelector('.restart-overlay-inner')
-            : null;
+        const restartOverlayInner = restartOverlay ? restartOverlay.querySelector('.restart-overlay-inner') : null;
 
         if (restartBtn && restartModalEl) {
             const restartModal = new bootstrap.Modal(restartModalEl);
-
-            restartBtn.addEventListener('click', function() {
-                restartModal.show();
-            });
-
+            restartBtn.addEventListener('click', function() { restartModal.show(); });
             confirmRestartBtn.addEventListener('click', function() {
                 confirmRestartBtn.disabled = true;
                 confirmRestartBtn.textContent = 'Restarting…';
-
-                fetch('/restart_server', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                }).catch(function() {
-                    // сервер может упасть раньше, чем отдаст ответ — это нормально
-                }).finally(function() {
-                    restartModal.hide();
-                    startRestartOverlay();
-                });
+                fetch('/restart_server', { method: 'POST', headers: { 'Content-Type': 'application/json' } })
+                    .catch(function() {})
+                    .finally(function() { restartModal.hide(); startRestartOverlay(); });
             });
         }
 
         function startRestartOverlay() {
             if (!restartOverlay) return;
-
-            if (restartOverlayInner) {
-                restartOverlayInner.classList.remove('success', 'error');
-            }
+            if (restartOverlayInner) restartOverlayInner.classList.remove('success', 'error');
             restartOverlayText.textContent = 'Перезапуск сервера…';
             restartOverlayHint.textContent = 'Ждём, пока сервер вернётся онлайн';
             restartOverlay.style.display = 'flex';
-
             const startTime = Date.now();
-            const TIMEOUT_MS = 60000;      // общий таймаут ожидания — 1 минута
-            const FIRST_PING_MS = 1500;    // первый пинг через 1.5 сек
-            const RETRY_MS = 900;          // интервал между пингами
-
+            const TIMEOUT_MS = 60000;
+            const FIRST_PING_MS = 1500;
+            const RETRY_MS = 900;
             let stopped = false;
-
             function markSuccess() {
-                if (stopped) return;
-                stopped = true;
-
-                if (restartOverlayInner) {
-                    restartOverlayInner.classList.add('success');
-                }
+                if (stopped) return; stopped = true;
+                if (restartOverlayInner) restartOverlayInner.classList.add('success');
                 restartOverlayText.textContent = 'Сервер снова онлайн';
                 restartOverlayHint.textContent = 'Обновляем страницу…';
-
-                setTimeout(function() {
-                    window.location.reload();
-                }, 900);
+                setTimeout(() => { window.location.reload(); }, 900);
             }
-
             function markError() {
-                if (stopped) return;
-                stopped = true;
-
-                if (restartOverlayInner) {
-                    restartOverlayInner.classList.add('error');
-                }
+                if (stopped) return; stopped = true;
+                if (restartOverlayInner) restartOverlayInner.classList.add('error');
                 restartOverlayText.textContent = 'Сервер не вернулся';
-                restartOverlayHint.textContent =
-                    'Проверьте консоль. Обновите страницу вручную (F5).';
-
-                setTimeout(function() {
-                    window.location.reload();
-                }, 4000);
+                restartOverlayHint.textContent = 'Проверьте консоль. Обновите страницу вручную (F5).';
+                setTimeout(() => { window.location.reload(); }, 4000);
             }
-
             function ping() {
                 if (stopped) return;
-
-                if (Date.now() - startTime > TIMEOUT_MS) {
-                    markError();
-                    return;
-                }
-
-                fetch(window.location.pathname, {
-                    method: 'HEAD',
-                    cache: 'no-store',
-                }).then(function() {
-                    markSuccess();
-                }).catch(function() {
-                    setTimeout(ping, RETRY_MS);
-                });
+                if (Date.now() - startTime > TIMEOUT_MS) { markError(); return; }
+                fetch(window.location.pathname, { method: 'HEAD', cache: 'no-store' })
+                    .then(function() { markSuccess(); })
+                    .catch(function() { setTimeout(ping, RETRY_MS); });
             }
-
             setTimeout(ping, FIRST_PING_MS);
         }
     });

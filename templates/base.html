@@ -8,52 +8,110 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
     {% block styles %}{% endblock %}
+
+    <style>
+    .sidebar { background: var(--bg-surface); border-right: 1px solid var(--border); min-height: calc(100vh - 70px); }
+    .sidebar h5 { color: #fff; font-size: 1rem; font-weight: 600; padding: 0 1rem; margin-bottom: 0.75rem; }
+    .sidebar h5.sidebar-divider { border-top: 1px solid var(--border); padding-top: 1.25rem; margin-top: 1.5rem; }
+    .sidebar .nav-link { color: var(--text-secondary); padding: 0.5rem 1rem; border-radius: var(--radius); display: block; text-decoration: none; font-size: 0.9rem; transition: background var(--tr), color var(--tr); }
+    .sidebar .nav-link:hover { background: var(--bg-elevated); color: #fff; }
+    .sidebar .nav-link.active { background: var(--red); color: #fff; }
+    .sidebar .nav-link .badge { float: right; background: var(--bg-subtle); color: var(--text-primary); }
+    .sidebar .nav-link.active .badge { background: rgba(255,255,255,0.25); color: #fff; }
+
+    .sidebar .profile-switch-wrap { padding: 8px 0.75rem 1rem 0.75rem; margin-bottom: 0.5rem; border-bottom: 1px solid var(--border); }
+    .sidebar .profile-switch-btn { display: flex; align-items: center; gap: 0.6rem; width: 100%; padding: 0.65rem 0.8rem; background: var(--bg-elevated); border: 1px solid var(--border-strong); color: var(--text-primary); border-radius: var(--radius); cursor: pointer; text-align: left; transition: background var(--tr), border-color var(--tr); font-family: inherit; }
+    .sidebar .profile-switch-btn:hover { background: var(--bg-subtle); border-color: var(--red); }
+    .sidebar .profile-switch-btn:hover .profile-switch-arrow { color: var(--red); }
+    .sidebar .profile-switch-icon { display: block; width: 22px; height: 22px; background-color: var(--red); -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat; -webkit-mask-position: center; mask-position: center; -webkit-mask-size: contain; mask-size: contain; flex-shrink: 0; }
+    .sidebar .profile-switch-info { display: flex; flex-direction: column; gap: 0; flex: 1; min-width: 0; line-height: 1.15; }
+    .sidebar .profile-switch-label { color: var(--text-muted); font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; margin-bottom: 2px; }
+    .sidebar .profile-switch-name { color: var(--text-primary); font-size: 0.92rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .sidebar .profile-switch-arrow { color: var(--text-muted); font-size: 1.15rem; line-height: 1; flex-shrink: 0; transition: color var(--tr); }
+
+    .drawer-nav li.drawer-divider { height: 1px; background: #242424; margin: 6px 0 6px 0; padding: 0; list-style: none; pointer-events: none; }
+    </style>
 </head>
 <body>
 {# Страница редактора — без сайдбара, на всю ширину #}
 {% set NO_SIDEBAR = (request.endpoint == 'editor_page') %}
+{# Страницы с единым сайдбаром "Settings + Tools" #}
+{% set ADMIN_PAGES = ('settings', 'tools_page', 'download_vr', 'duplicates_page') %}
 
 <div class="container-fluid">
     <div class="row">
         <!-- Sidebar (desktop only) -->
         {% if not NO_SIDEBAR %}
-        <div class="col-md-3 col-lg-2 sidebar d-none d-md-block" style="padding-top: 70px;">
-            {% if request.endpoint == 'settings' %}
-                <h5 class="px-3 mb-3 text-light">Settings</h5>
+        <div class="col-md-3 col-lg-2 sidebar d-none d-md-block" style="padding-top: 10px;">
+
+            <!-- Profile switch -->
+            <div class="profile-switch-wrap">
+                <button type="button" class="profile-switch-btn"
+                        data-profile="{{ 'transgender' if current_profile == 'female' else 'female' }}"
+                        onclick="switchProfile(this.dataset.profile)"
+                        title="Switch to {{ 'Transgender' if current_profile == 'female' else 'Female' }}">
+                    <span class="profile-switch-icon"
+                          style="-webkit-mask-image: url('{{ url_for('serve_image', filename='icon' + ('1' if current_profile == 'female' else '2') + '.png') }}'); mask-image: url('{{ url_for('serve_image', filename='icon' + ('1' if current_profile == 'female' else '2') + '.png') }}');"></span>
+                    <span class="profile-switch-info">
+                        <span class="profile-switch-label">Profile</span>
+                        <span class="profile-switch-name">{{ 'Female' if current_profile == 'female' else 'Transgender' }}</span>
+                    </span>
+                    <span class="profile-switch-arrow">⇄</span>
+                </button>
+            </div>
+
+            {% if request.endpoint in ADMIN_PAGES %}
+                {# ============================================================
+                   ЕДИНЫЙ САЙДБАР ДЛЯ SETTINGS / TOOLS / DOWNLOAD VR / DUPLICATES
+                   ============================================================ #}
+                <h5>Settings</h5>
                 <ul class="nav flex-column">
                     {% for item in settings_tabs %}
                     <li class="nav-item">
-                        <a class="nav-link {% if request.args.get('tab', 'libraries') == item.id %}active{% endif %}"
+                        <a class="nav-link {% if request.endpoint == 'settings' and request.args.get('tab', 'libraries') == item.id %}active{% endif %}"
                            href="{{ url_for('settings', tab=item.id, profile=current_profile) }}">
                             {{ item.label }}
                         </a>
                     </li>
                     {% endfor %}
+                </ul>
+
+                <h5 class="sidebar-divider">Tools</h5>
+                <ul class="nav flex-column">
                     <li class="nav-item">
                         <a class="nav-link {% if request.endpoint == 'tools_page' %}active{% endif %}"
                            href="{{ url_for('tools_page', profile=current_profile) }}">
-                            Tools
-                        </a>
-                    </li>
-                </ul>
-
-            {% elif request.endpoint == 'tools_page' %}
-                <h5 class="px-3 mb-3 text-light">Tools</h5>
-                <ul class="nav flex-column">
-                    <li class="nav-item">
-                        <a class="nav-link active" href="{{ url_for('tools_page', profile=current_profile) }}">
-                            Maintenance
+                            Library Maintenance
                         </a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('settings', profile=current_profile) }}">
-                            ← Back to Settings
+                        <a class="nav-link {% if request.endpoint == 'youtube.index' %}active{% endif %}"
+                           href="{{ url_for('youtube.index') }}">
+                            YouTube Downloader
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.endpoint == 'instagram.index' %}active{% endif %}"
+                           href="{{ url_for('instagram.index') }}">
+                            Instagram Downloader
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.endpoint == 'download_vr' %}active{% endif %}"
+                           href="{{ url_for('download_vr', profile=current_profile) }}">
+                            Download VR
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.endpoint == 'duplicates_page' %}active{% endif %}"
+                           href="{{ url_for('duplicates_page', profile=current_profile) }}">
+                            Duplicates
                         </a>
                     </li>
                 </ul>
 
             {% elif request.endpoint in ('artists_page', 'artist_view') %}
-                <h5 class="px-3 mb-3 text-light">Artists</h5>
+                <h5>Artists</h5>
                 <ul class="nav flex-column" id="artistList">
                     <li class="nav-item">
                         <a class="nav-link {% if not selected_artist_id %}active{% endif %}"
@@ -77,7 +135,7 @@
                 {% endif %}
 
             {% else %}
-                <h5 class="px-3 mb-3 text-light">Categories</h5>
+                <h5>Categories</h5>
                 <ul class="nav flex-column" id="categoryList">
                     <li class="nav-item">
                         <a class="nav-link {% if not selected_category %}active{% endif %}"
@@ -164,21 +222,6 @@
                 </div>
 
                 <div class="right-section">
-                    <button class="mode-toggle-btn"
-                            data-profile="{{ 'transgender' if current_profile == 'female' else 'female' }}"
-                            onclick="switchProfile(this.dataset.profile)"
-                            title="Switch profile">
-                        <span class="mode-icon"
-                              style="-webkit-mask-image: url('{{ url_for('serve_image', filename='icon' + ('1' if current_profile == 'female' else '2') + '.png') }}'); mask-image: url('{{ url_for('serve_image', filename='icon' + ('1' if current_profile == 'female' else '2') + '.png') }}');"></span>
-                    </button>
-
-                    <a href="{{ url_for('instagram.index') }}" class="btn-nav icon-only hide-mobile" title="Instagram Downloader">
-                        <img src="{{ url_for('serve_image', filename='instagram.png') }}" alt="Instagram">
-                    </a>
-                    <a href="{{ url_for('youtube.index') }}" class="btn-nav icon-only hide-mobile" title="YouTube Downloader">
-                        <img src="{{ url_for('serve_image', filename='youtube.png') }}" alt="YouTube">
-                    </a>
-
                     {% if request.endpoint == 'watch' %}
                         <a href="#" onclick="window.history.back(); return false;" class="btn-nav icon-only" title="Back">
                             <img src="{{ url_for('serve_image', filename='back.png') }}" alt="Back">
@@ -187,7 +230,7 @@
                         <a href="{{ url_for('watch', video_id=(request.view_args or {}).get('video_id', 0), profile=current_profile) }}" class="btn-nav icon-only" title="Back to video">
                             <img src="{{ url_for('serve_image', filename='back.png') }}" alt="Back">
                         </a>
-                    {% elif request.endpoint == 'settings' or request.endpoint == 'edit_video' or request.endpoint == 'artist_view' or request.endpoint == 'tools_page' %}
+                    {% elif request.endpoint in ('settings', 'edit_video', 'artist_view', 'tools_page', 'download_vr', 'duplicates_page') %}
                         <a href="{{ url_for('index', profile=current_profile) }}" class="btn-nav icon-only" title="Back">
                             <img src="{{ url_for('serve_image', filename='back.png') }}" alt="Back">
                         </a>
@@ -217,10 +260,7 @@
 
     <div class="mobile-drawer-body">
 
-    {% if request.endpoint == 'settings' %}
-        {# ============================================================
-           SETTINGS PAGE
-           ============================================================ #}
+    {% if request.endpoint in ADMIN_PAGES %}
         <div class="drawer-section">
             <ul class="drawer-nav">
                 <li>
@@ -246,63 +286,49 @@
                 {% for item in settings_tabs %}
                 <li>
                     <a href="{{ url_for('settings', tab=item.id, profile=current_profile) }}"
-                       class="{% if request.args.get('tab', 'libraries') == item.id %}active{% endif %}">
+                       class="{% if request.endpoint == 'settings' and request.args.get('tab', 'libraries') == item.id %}active{% endif %}">
                         <span>{{ item.label }}</span>
                     </a>
                 </li>
                 {% endfor %}
-                <li>
-                    <a href="{{ url_for('tools_page', profile=current_profile) }}"
-                       class="{% if request.endpoint == 'tools_page' %}active{% endif %}">
-                        <span>Tools</span>
-                    </a>
-                </li>
             </ul>
-        </div>
-
-    {% elif request.endpoint == 'tools_page' %}
-        {# ============================================================
-           TOOLS PAGE
-           ============================================================ #}
-        <div class="drawer-section">
-            <ul class="drawer-nav">
-                <li>
-                    <a href="{{ url_for('index', profile=current_profile) }}">
-                        <img src="{{ url_for('serve_image', filename='video.png') }}" alt="" class="drawer-icon">
-                        <span>Videos</span>
-                    </a>
-                </li>
-            </ul>
-        </div>
-
-        <div class="drawer-section">
-            <div class="drawer-section-title">Profile</div>
-            <button type="button" class="drawer-btn primary"
-                    onclick="switchProfile('{{ 'transgender' if current_profile == 'female' else 'female' }}')">
-                Switch to {{ 'Transgender' if current_profile == 'female' else 'Female' }}
-            </button>
         </div>
 
         <div class="drawer-section">
             <div class="drawer-section-title">Tools</div>
             <ul class="drawer-nav">
                 <li>
-                    <a href="{{ url_for('tools_page', profile=current_profile) }}" class="active">
-                        <span>Maintenance</span>
+                    <a href="{{ url_for('tools_page', profile=current_profile) }}"
+                       class="{% if request.endpoint == 'tools_page' %}active{% endif %}">
+                        <span>Library Maintenance</span>
                     </a>
                 </li>
                 <li>
-                    <a href="{{ url_for('settings', profile=current_profile) }}">
-                        <span>← Back to Settings</span>
+                    <a href="{{ url_for('youtube.index') }}">
+                        <span>YouTube Downloader</span>
+                    </a>
+                </li>
+                <li>
+                    <a href="{{ url_for('instagram.index') }}">
+                        <span>Instagram Downloader</span>
+                    </a>
+                </li>
+                <li>
+                    <a href="{{ url_for('download_vr', profile=current_profile) }}"
+                       class="{% if request.endpoint == 'download_vr' %}active{% endif %}">
+                        <span>Download VR</span>
+                    </a>
+                </li>
+                <li>
+                    <a href="{{ url_for('duplicates_page', profile=current_profile) }}"
+                       class="{% if request.endpoint == 'duplicates_page' %}active{% endif %}">
+                        <span>Duplicates</span>
                     </a>
                 </li>
             </ul>
         </div>
 
     {% elif request.endpoint == 'editor_page' %}
-        {# ============================================================
-           EDITOR PAGE — минимум пунктов, всё действие на самой странице
-           ============================================================ #}
         <div class="drawer-section">
             <ul class="drawer-nav">
                 <li>
@@ -331,12 +357,7 @@
         <div class="drawer-section">
             <div class="drawer-section-title">More</div>
             <ul class="drawer-nav">
-                <li>
-                    <a href="{{ url_for('tools_page', profile=current_profile) }}">
-                        <img src="{{ url_for('serve_image', filename='settings.png') }}" alt="" class="drawer-icon">
-                        <span>Tools</span>
-                    </a>
-                </li>
+                <li class="drawer-divider"></li>
                 <li>
                     <a href="{{ url_for('settings', profile=current_profile) }}">
                         <img src="{{ url_for('serve_image', filename='settings.png') }}" alt="" class="drawer-icon">
@@ -347,9 +368,6 @@
         </div>
 
     {% else %}
-        {# ============================================================
-           ОБЩЕЕ МЕНЮ
-           ============================================================ #}
         <div class="drawer-section">
             <div class="drawer-section-title">Navigation</div>
             <ul class="drawer-nav">
@@ -460,13 +478,7 @@
                         <span>YouTube Downloader</span>
                     </a>
                 </li>
-                <li>
-                    <a href="{{ url_for('tools_page', profile=current_profile) }}"
-                       class="{% if request.endpoint == 'tools_page' %}active{% endif %}">
-                        <img src="{{ url_for('serve_image', filename='settings.png') }}" alt="Tools" class="drawer-icon">
-                        <span>Tools</span>
-                    </a>
-                </li>
+                <li class="drawer-divider"></li>
                 <li>
                     <a href="{{ url_for('settings', profile=current_profile) }}"
                        class="{% if request.endpoint == 'settings' %}active{% endif %}">

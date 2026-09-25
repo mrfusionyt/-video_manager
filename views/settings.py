@@ -1,6 +1,6 @@
 """
 Настройки, скачивание VR, раздача VR-файлов, прогресс-стримы,
-перезапуск сервера.
+перезапуск сервера. Дубликаты — отдельная страница.
 """
 import os
 import sys
@@ -44,7 +44,6 @@ from duplicate_finder import (
 
 
 def _duplicates_stats(groups):
-    """Считает total_* для шаблона."""
     total_files = 0
     total_keep = 0
     total_move = 0
@@ -71,56 +70,27 @@ def _duplicates_stats(groups):
     }
 
 
-# ===================================================================
-#                     RESTART SERVER
-# ===================================================================
-#  Как работает:
-#
-#  A) Если приложение запущено через run.bat — bat экспортирует
-#     VM_SUPERVISED_BY_BAT=1. В этом случае мы просто делаем
-#     os._exit(42), а bat сам поднимает python заново в том же окне.
-#     Это самый чистый сценарий: сервер живёт в том же cmd,
-#     пользователь видит логи, фоновых "висящих" python не остаётся.
-#
-#  B) Если приложение запущено вручную (`python app.py` или .exe) —
-#     переменной нет. Тогда запускаем новый процесс через Popen
-#     (DETACHED_PROCESS) и убиваем старый. Работает и в dev, и в EXE.
-#
 RESTART_EXIT_CODE = 42
 
 
 def _spawn_restart():
-    """
-    Инициирует перезапуск сервера.
-
-    Вызывается в фоновом потоке, чтобы сначала успеть отдать HTTP-ответ
-    клиенту. Сам процесс завершается мгновенно.
-    """
-    # -------- Сценарий A: под управлением run.bat ----------------------
     if os.environ.get('VM_SUPERVISED_BY_BAT') == '1':
-        print(f"[restart] supervised by run.bat, exiting with code "
-              f"{RESTART_EXIT_CODE}")
-        # Даём буферам шанс сброситься
+        print(f"[restart] supervised by run.bat, exiting with code {RESTART_EXIT_CODE}")
         try:
             sys.stdout.flush()
             sys.stderr.flush()
         except Exception:
             pass
-        # Небольшая пауза, чтобы HTTP-ответ успел уйти
         time.sleep(0.4)
         os._exit(RESTART_EXIT_CODE)
-        return  # pragma: no cover
+        return
 
-    # -------- Сценарий B: запуск вручную (dev или EXE) -----------------
     try:
         if getattr(sys, 'frozen', False):
-            # PyInstaller EXE: [app.exe] + переданные аргументы
             cmd = [sys.executable] + list(sys.argv[1:])
         else:
-            # dev: [python.exe] + [app.py]
             cmd = [sys.executable] + list(sys.argv)
 
-        # Абсолютный cwd, чтобы app.py нашёлся при любом рабочем каталоге
         base_dir = os.path.abspath(
             os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         )
@@ -140,17 +110,14 @@ def _spawn_restart():
         proc = subprocess.Popen(cmd, **kwargs)
         print(f"[restart] new process spawned pid={proc.pid} cmd={cmd}")
 
-        # Даём новому процессу время подняться и проверить, что он жив
         time.sleep(1.5)
         if proc.poll() is not None:
-            print(f"[restart] new process died immediately "
-                  f"(rc={proc.returncode}), NOT killing old server")
-            return  # оставляем старый сервер работать
+            print(f"[restart] new process died immediately (rc={proc.returncode})")
+            return
     except Exception as e:
         print(f"[restart] failed to spawn new process: {e}")
-        return  # не убиваем текущий сервер, если не удалось запустить новый
+        return
 
-    # -------- Убиваем старый процесс -----------------------------------
     print("[restart] exiting old process")
     try:
         sys.stdout.flush()
@@ -224,19 +191,20 @@ def register(app):
                     filters = ['video', 'image']
                 new_task_id = str(uuid.uuid4())
                 find_duplicates_async(new_task_id, filters)
-                return redirect(url_for('settings', tab='duplicates',
+                return redirect(url_for('duplicates_page',
                                         task_id=new_task_id,
                                         profile=current_profile))
             return redirect(url_for('settings', tab=tab, profile=current_profile))
 
+        # Старые закладки: /settings?tab=download_vr → отдельная страница
+        if tab == 'download_vr':
+            return redirect(url_for('download_vr', profile=current_profile))
+
+        # Старые закладки: /settings?tab=duplicates → отдельная страница
         if tab == 'duplicates':
-            duplicates = get_duplicate_groups()
-            stats = _duplicates_stats(duplicates)
-            return render_template('duplicates.html',
-                                   duplicates=duplicates,
-                                   task_id=task_id,
-                                   **stats)
-        elif tab == 'stats':
+            return redirect(url_for('duplicates_page', profile=current_profile))
+
+        if tab == 'stats':
             stats_female = get_stats(mode=1) or {
                 'total_videos': 0, 'total_categories': 0,
                 'total_size': 0, 'avg_rating': 0.0
@@ -248,8 +216,6 @@ def register(app):
             return render_template('stats.html',
                                    stats_female=stats_female,
                                    stats_transgender=stats_transgender)
-        elif tab == 'download_vr':
-            return render_template('download_vr.html', files=get_vr_downloads())
         else:
             return render_template('settings.html',
                                    tab=tab,
@@ -257,16 +223,38 @@ def register(app):
                                    scan_running=is_scan_in_progress())
 
     # ------------------------------------------------------------------
+    #                    DUPLICATES — отдельная страница
+    # ------------------------------------------------------------------
+    @app.route('/duplicates', methods=['GET', 'POST'])
+    def duplicates_page():
+        current_profile = request.values.get('profile') or get_current_profile()
+        task_id = request.args.get('task_id')
+
+        if request.method == 'POST':
+            action = request.form.get('action')
+            if action == 'start_duplicate_scan':
+                filters = request.form.getlist('media_types')
+                if not filters:
+                    filters = ['video', 'image']
+                new_task_id = str(uuid.uuid4())
+                find_duplicates_async(new_task_id, filters)
+                return redirect(url_for('duplicates_page',
+                                        task_id=new_task_id,
+                                        profile=current_profile))
+            return redirect(url_for('duplicates_page', profile=current_profile))
+
+        duplicates = get_duplicate_groups()
+        stats = _duplicates_stats(duplicates)
+        return render_template('duplicates.html',
+                               duplicates=duplicates,
+                               task_id=task_id,
+                               **stats)
+
+    # ------------------------------------------------------------------
     #                    RESTART SERVER
     # ------------------------------------------------------------------
     @app.route('/restart_server', methods=['POST'])
     def restart_server():
-        """
-        Перезапускает Flask-сервер.
-
-        Ответ отдаём сразу — клиент сам ждёт, пока сервер вернётся
-        (polling HEAD / каждые 0.9 секунды из JS).
-        """
         print("[restart] requested by client")
         supervised = os.environ.get('VM_SUPERVISED_BY_BAT') == '1'
         print(f"[restart] supervised_by_bat={supervised}")
@@ -274,13 +262,12 @@ def register(app):
         return jsonify({
             'success': True,
             'supervised': supervised,
-            'message': 'Server is restarting…',
+            'message': 'Server is restarting...',
         })
 
     @app.route('/scan_progress/<task_id>')
     def scan_progress_stream(task_id):
         def generate():
-            import time
             while True:
                 progress = get_scan_progress(task_id)
                 if progress is None:
@@ -292,6 +279,9 @@ def register(app):
                 time.sleep(0.5)
         return Response(generate(), mimetype="text/event-stream")
 
+    # ------------------------------------------------------------------
+    #                    DOWNLOAD VR — отдельная страница
+    # ------------------------------------------------------------------
     @app.route('/download_vr', methods=['GET', 'POST'])
     def download_vr():
         if request.method == 'POST':
@@ -362,7 +352,6 @@ def register(app):
     @app.route('/progress/<task_id>')
     def progress_stream(task_id):
         def generate():
-            import time
             while True:
                 progress = get_progress(task_id)
                 if progress is None:

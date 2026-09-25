@@ -13,7 +13,7 @@
 </div>
 
 <div class="mb-3">
-    <form method="post" action="{{ url_for('settings') }}" id="duplicateScanForm">
+    <form method="post" action="{{ url_for('duplicates_page', profile=current_profile) }}" id="duplicateScanForm">
         <input type="hidden" name="action" value="start_duplicate_scan">
         <input type="hidden" name="profile" value="{{ current_profile }}">
         <div class="mb-2">

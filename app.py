@@ -37,10 +37,8 @@ app.config["BASE_DIR"] = BASE_DIR
 app.config["IMAGE_DIR"] = resource_path("image")
 app.config["DOP_DIR"] = resource_path("_dop")
 
-# Deno для yt-dlp: добавляем _dop в PATH при старте
 os.environ["PATH"] = app.config["DOP_DIR"] + os.pathsep + os.environ.get("PATH", "")
 
-# Jinja-глобал для пагинации
 app.jinja_env.globals['paginate_range'] = paginate_range
 
 init_db()
@@ -51,9 +49,6 @@ app.register_blueprint(youtube_bp)
 set_post_download_hook(scan_libraries)
 register_all(app)
 
-# -------------------------------------------------------------------
-# Ручная регистрация страницы Tools (не входит в register_all)
-# -------------------------------------------------------------------
 try:
     from views import tools as views_tools
     views_tools.register(app)
@@ -110,9 +105,7 @@ def inject_globals():
         {'id': 'libraries', 'label': 'Libraries'},
         {'id': 'categories', 'label': 'Categories'},
         {'id': 'network', 'label': 'Network'},
-        {'id': 'duplicates', 'label': 'Duplicates'},
         {'id': 'stats', 'label': 'Stats'},
-        {'id': 'download_vr', 'label': 'Download VR'}
     ]
 
     return dict(
