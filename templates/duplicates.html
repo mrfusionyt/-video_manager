@@ -16,6 +16,7 @@
     <form method="post" action="{{ url_for('duplicates_page', profile=current_profile) }}" id="duplicateScanForm">
         <input type="hidden" name="action" value="start_duplicate_scan">
         <input type="hidden" name="profile" value="{{ current_profile }}">
+
         <div class="mb-2">
             <label class="form-label">Media types to scan:</label>
             <div class="form-check form-check-inline">
@@ -27,6 +28,30 @@
                 <label class="form-check-label" for="media_image">Image</label>
             </div>
         </div>
+
+        <div class="mb-2">
+            <label class="form-label">
+                Scan paths <span class="text-muted" style="font-size:0.8rem;">(опционально, один путь на строку — включая подпапки)</span>
+            </label>
+            <textarea name="scan_paths" id="scanPaths" class="form-control form-control-dark"
+                      rows="4"
+                      placeholder="Оставь пустым — скан всей библиотеки&#10;Или впиши пути, например:&#10;G:\Female\New folder&#10;D:\Videos\temp"></textarea>
+            <div class="d-flex gap-2 mt-2 flex-wrap">
+                <button type="button" class="btn btn-outline-secondary btn-sm" id="addLibraryPathsBtn">
+                    + Добавить все библиотеки профиля
+                </button>
+                <button type="button" class="btn btn-outline-secondary btn-sm" id="clearPathsBtn">
+                    Очистить
+                </button>
+                <span class="text-muted align-self-center" id="pathsHint" style="font-size:0.78rem;"></span>
+            </div>
+            <div class="text-muted mt-2" style="font-size:0.78rem;">
+                Если путей нет — сканирование идёт по всей библиотеке.
+                Если пути указаны — только файлы внутри этих папок
+                (включая все подпапки).
+            </div>
+        </div>
+
         <button type="submit" class="btn-add">Find Duplicates</button>
     </form>
 </div>
@@ -152,6 +177,79 @@
 (function () {
     'use strict';
 
+    // ============================================================
+    // ПУТИ СКАНИРОВАНИЯ (без localStorage — всегда чистые)
+    // ============================================================
+    var scanPathsEl = document.getElementById('scanPaths');
+    var pathsHint = document.getElementById('pathsHint');
+
+    var allLibraries = [
+        {% for lib in all_libraries %}
+            {
+                path: {{ lib.path|tojson }},
+                name: {{ lib.name|tojson }}
+            }{% if not loop.last %},{% endif %}
+        {% endfor %}
+    ];
+
+    function countLines(text) {
+        if (!text) return 0;
+        return text.split('\n').map(function(s){ return s.trim(); })
+                   .filter(function(s){ return s; }).length;
+    }
+
+    function updateHint() {
+        if (!pathsHint || !scanPathsEl) return;
+        var n = countLines(scanPathsEl.value);
+        if (n === 0) {
+            pathsHint.textContent = '(вся библиотека)';
+        } else {
+            pathsHint.textContent = '(фильтр: ' + n + ' путь' +
+                (n === 1 ? '' : (n < 5 ? 'и' : 'ей')) + ')';
+        }
+    }
+
+    updateHint();
+
+    if (scanPathsEl) {
+        scanPathsEl.addEventListener('input', updateHint);
+    }
+
+    var addLibsBtn = document.getElementById('addLibraryPathsBtn');
+    if (addLibsBtn && scanPathsEl) {
+        addLibsBtn.addEventListener('click', function () {
+            if (!allLibraries.length) {
+                alert('Нет ни одной библиотеки для этого профиля.');
+                return;
+            }
+            var existing = scanPathsEl.value.split('\n')
+                .map(function(s){ return s.trim(); })
+                .filter(function(s){ return s; });
+            var seen = {};
+            existing.forEach(function(p){ seen[p.toLowerCase()] = true; });
+            allLibraries.forEach(function(lib) {
+                var p = (lib.path || '').trim();
+                if (p && !seen[p.toLowerCase()]) {
+                    existing.push(p);
+                    seen[p.toLowerCase()] = true;
+                }
+            });
+            scanPathsEl.value = existing.join('\n');
+            updateHint();
+        });
+    }
+
+    var clearBtn = document.getElementById('clearPathsBtn');
+    if (clearBtn && scanPathsEl) {
+        clearBtn.addEventListener('click', function () {
+            scanPathsEl.value = '';
+            updateHint();
+        });
+    }
+
+    // ============================================================
+    // Прочая логика
+    // ============================================================
     function getSelectedIds() {
         return Array.from(document.querySelectorAll('.dup-checkbox:checked'))
             .map(function (cb) { return parseInt(cb.dataset.videoId, 10); })

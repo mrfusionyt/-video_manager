@@ -9,18 +9,15 @@ r"""
     или MIH 4×16 (THRESHOLD>0).
   • Audio: chromaprint → LSH 4×8 бит → FFT-префильтр → точный longest-run.
   • Skip audio для video-matched пар.
-  • Paры из ignored_pairs исключаются из группировки:
-      – при новом скане;
-      – при загрузке из duplicates_cache.json.
+  • Paры из ignored_pairs исключаются из группировки.
 
-Прогресс-фазы:
-  0-40%   хеширование (или загрузка из кеша)
-  40-45%  подготовка video-индекса
-  45-65%  video verification
-  65-70%  audio LSH-индекс
-  70-80%  audio FFT отсев (внутри verify)
-  80-95%  audio verification
-  95-100% группировка
+Поддерживается ограничение поиска определёнными папками (scan_paths):
+если задан список путей, в скан попадут только файлы, чей filepath
+находится внутри одной из этих папок (включая все подпапки).
+
+Диагностика (verbose): печатает сколько файлов на входе, сколько
+отфильтровано, сколько пропало с диска, сколько кандидатов, сколько
+совпало. Это помогает понять, где теряются дубликаты.
 """
 import os
 import json
@@ -159,7 +156,6 @@ def _init_db():
             FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE
         )
     """)
-    # ★ Blacklist пар, которые НЕ надо считать дубликатами.
     c.execute("""
         CREATE TABLE IF NOT EXISTS ignored_pairs (
             path_a TEXT NOT NULL,
@@ -280,14 +276,12 @@ def _cleanup_db(current_paths):
 #                     Blacklist (ignored_pairs)
 # ===================================================================
 def _pair_key(p_a, p_b):
-    """Возвращает отсортированную пару нормализованных путей."""
     a = _normalize_path(p_a)
     b = _normalize_path(p_b)
     return (a, b) if a < b else (b, a)
 
 
 def mark_pair_not_duplicate(path_a, path_b, note=''):
-    """Помечает пару файлов как «не дубликаты». Идемпотентно."""
     if not path_a or not path_b:
         return False, "Empty path"
     a, b = _pair_key(path_a, path_b)
@@ -347,7 +341,6 @@ def clear_ignored_pairs():
 
 
 def _load_blacklist():
-    """Загружает все пары как set(normalized_path_a, normalized_path_b)."""
     _init_db()
     conn = _get_conn()
     try:
@@ -380,6 +373,58 @@ def _set_progress(task_id, progress, processed, total, message):
     t['processed'] = int(processed)
     t['total'] = int(total)
     t['message'] = message
+
+
+# ===================================================================
+#                     Фильтрация по scan_paths
+# ===================================================================
+def _normalize_scan_paths(paths):
+    if not paths:
+        return []
+    normalized = []
+    seen = set()
+    for p in paths:
+        if not p:
+            continue
+        if isinstance(p, str):
+            p = p.strip().strip('"').strip("'")
+        if not p:
+            continue
+        try:
+            p_abs = os.path.abspath(os.path.normpath(p))
+            p_norm = os.path.normcase(p_abs)
+        except Exception:
+            continue
+        # добавляем trailing sep, чтобы G:\Female не матчил G:\FemaleOther
+        p_norm_sep = p_norm.rstrip(os.sep) + os.sep
+        if p_norm_sep in seen:
+            continue
+        seen.add(p_norm_sep)
+        normalized.append(p_norm_sep)
+    return normalized
+
+
+def _filter_videos_by_scan_paths(videos, scan_paths):
+    norm_paths = _normalize_scan_paths(scan_paths)
+    if not norm_paths:
+        return videos
+
+    result = []
+    for v in videos:
+        fp = v.get('filepath')
+        if not fp:
+            continue
+        try:
+            fp_norm = os.path.normcase(os.path.abspath(fp))
+        except Exception:
+            continue
+        for base_sep in norm_paths:
+            # fp_norm должен быть внутри base_sep ИЛИ равен base без sep
+            base_no_sep = base_sep.rstrip(os.sep)
+            if fp_norm == base_no_sep or fp_norm.startswith(base_sep):
+                result.append(v)
+                break
+    return result
 
 
 # ===================================================================
@@ -808,6 +853,9 @@ def _group_all(task_id, frames_by_path, audio_by_path,
     n = len(paths)
     parent = list(range(n))
 
+    print(f"[dup] === GROUPING START ===")
+    print(f"[dup] files with frames: {n}")
+
     blacklist = _load_blacklist()
     print(f"[dup] ignored_pairs loaded: {len(blacklist)}")
 
@@ -836,7 +884,6 @@ def _group_all(task_id, frames_by_path, audio_by_path,
     video_pairs = _video_candidates(paths, hash_objs, threshold)
     print(f"[dup] video candidates: {len(video_pairs)}")
 
-    # Фильтр blacklist
     video_pairs = {p for p in video_pairs if not is_ignored(p[0], p[1])}
     print(f"[dup] video candidates after blacklist: {len(video_pairs)}")
 
@@ -869,12 +916,10 @@ def _group_all(task_id, frames_by_path, audio_by_path,
     audio_pairs_all = _audio_lsh_candidates(paths, audio_by_path)
     print(f"[dup] audio candidates (LSH raw): {len(audio_pairs_all)}")
 
-    # skip video-matched
     audio_pairs = {p for p in audio_pairs_all if find(p[0]) != find(p[1])}
     print(f"[dup] audio after skip video-matched: {len(audio_pairs)} "
           f"(skipped {len(audio_pairs_all) - len(audio_pairs)})")
 
-    # skip blacklist
     before_bl = len(audio_pairs)
     audio_pairs = {p for p in audio_pairs if not is_ignored(p[0], p[1])}
     print(f"[dup] audio after blacklist: {len(audio_pairs)} "
@@ -971,7 +1016,14 @@ def _group_all(task_id, frames_by_path, audio_by_path,
 # ===================================================================
 #                     Запуск
 # ===================================================================
-def find_duplicates_async(task_id, filters=None):
+def find_duplicates_async(task_id, filters=None, scan_paths=None):
+    """
+    Запускает скан в фоне.
+
+    filters:    list of media types ('video', 'image') или None
+    scan_paths: list of директорий; если задан, сканируются только файлы
+                внутри этих папок (с подпапками). None или [] — все файлы.
+    """
     global scan_in_progress, scan_progress
     with _lock:
         if scan_in_progress:
@@ -983,24 +1035,53 @@ def find_duplicates_async(task_id, filters=None):
             'processed': 0, 'message': 'Initializing...'
         }
     threading.Thread(target=_find_duplicates_worker,
-                     args=(task_id, filters), daemon=True).start()
-    print(f"[dup] started task_id={task_id} filters={filters}")
+                     args=(task_id, filters, scan_paths), daemon=True).start()
+    print(f"[dup] started task_id={task_id} filters={filters} "
+          f"paths={scan_paths}")
     return True
 
 
-def _find_duplicates_worker(task_id, filters):
+def _find_duplicates_worker(task_id, filters, scan_paths=None):
     global DUPLICATE_GROUPS, scan_in_progress
     try:
-        print(f"[dup] worker start")
+        print(f"\n{'=' * 70}")
+        print(f"[dup] === WORKER START ===")
+        print(f"[dup] task_id:     {task_id}")
+        print(f"[dup] filters:     {filters}")
+        print(f"[dup] scan_paths:  {scan_paths}")
+        print(f"{'=' * 70}")
+
         _init_db()
 
         all_items = get_all_videos()
         print(f"[dup] total in DB: {len(all_items)}")
+
         if filters:
             allowed = set(filters)
+            before = len(all_items)
             all_items = [v for v in all_items
                          if v.get('media_type', 'video') in allowed]
-        print(f"[dup] after filter: {len(all_items)}")
+            print(f"[dup] after media_type filter {filters}: "
+                  f"{len(all_items)} (removed {before - len(all_items)})")
+
+        if scan_paths:
+            before = len(all_items)
+            all_items = _filter_videos_by_scan_paths(all_items, scan_paths)
+            print(f"[dup] after path filter: {len(all_items)} "
+                  f"(removed {before - len(all_items)})")
+            if not all_items:
+                print(f"[dup] ⚠️  PATH FILTER REMOVED EVERYTHING! "
+                      f"check scan_paths={scan_paths}")
+        else:
+            print(f"[dup] no path filter — scanning all files")
+
+        # Проверка: сколько файлов из all_items реально на диске
+        missing = [v['filepath'] for v in all_items
+                   if not os.path.exists(v.get('filepath', ''))]
+        if missing:
+            print(f"[dup] ⚠️  WARNING: {len(missing)} files in DB are missing on disk")
+            for p in missing[:10]:
+                print(f"[dup]    MISSING: {p}")
 
         total = len(all_items)
         _set_progress(task_id, 0, 0, total, f'Scanning {total} files...')
@@ -1012,6 +1093,7 @@ def _find_duplicates_worker(task_id, filters):
                 'status': 'complete', 'progress': 100,
                 'message': 'No files to scan.',
             })
+            print(f"[dup] === RESULT: 0 files to scan ===\n")
             return
 
         _cleanup_db([v['filepath'] for v in all_items])
@@ -1044,6 +1126,9 @@ def _find_duplicates_worker(task_id, filters):
         print(f"[dup] hashed {len(frames_by_path)}/{total} "
               f"(cached: {cached_count}, fresh: {total - cached_count})")
 
+        with_audio = sum(1 for v in audio_by_path.values() if v)
+        print(f"[dup] files with audio fingerprint: {with_audio}/{len(audio_by_path)}")
+
         groups = _group_all(task_id, frames_by_path, audio_by_path,
                             item_by_path, THRESHOLD)
         print(f"[dup] found {len(groups)} groups")
@@ -1055,6 +1140,15 @@ def _find_duplicates_worker(task_id, filters):
             'status': 'complete', 'progress': 100,
             'message': f'Found {len(groups)} duplicate groups'
         })
+
+        print(f"[dup] === RESULT: {len(groups)} groups ===")
+        for gi, g in enumerate(groups[:5]):
+            print(f"[dup]   group #{gi+1}: {len(g['files'])} files, "
+                  f"reason={g['reason']}")
+            for f in g['files'][:3]:
+                print(f"[dup]     - {f.get('filename')}")
+        print(f"{'=' * 70}\n")
+
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -1080,10 +1174,6 @@ def _save_groups(groups):
 #                     Геттеры
 # ===================================================================
 def _rebuild_groups_from_matches(group):
-    """
-    Пересобирает группы внутри одного cached group с учётом blacklist.
-    Возвращает список групп (может быть > 1, если группа раскололась).
-    """
     files = group.get('files', [])
     if len(files) < 2:
         return []
@@ -1091,7 +1181,6 @@ def _rebuild_groups_from_matches(group):
     video_matches = matches.get('video', []) or []
     audio_matches = matches.get('audio', []) or []
 
-    # path -> file
     path_by_id = {}
     for f in files:
         path_by_id[f['id']] = f.get('filepath', '')
@@ -1146,7 +1235,6 @@ def _rebuild_groups_from_matches(group):
         if len(vids) < 2:
             continue
         vids_set = set(vids)
-        sub_files = [path_by_id[v] for v in vids if v in path_by_id]
         sub_files = [f for f in files if f['id'] in vids_set]
         sub_video = [m for m in used_video_pairs
                      if m['a_id'] in vids_set and m['b_id'] in vids_set]
@@ -1212,7 +1300,6 @@ def get_duplicate_groups():
     finally:
         conn.close()
 
-    # 1) чистим несуществующие файлы
     cleaned = []
     for g in DUPLICATE_GROUPS:
         new_files = [v for v in g['files']
@@ -1224,7 +1311,6 @@ def get_duplicate_groups():
                 'matches': g.get('matches', {'video': [], 'audio': []}),
             })
 
-    # 2) пересобираем каждую группу с учётом blacklist
     final = []
     for g in cleaned:
         final.extend(_rebuild_groups_from_matches(g))
@@ -1352,7 +1438,6 @@ def move_all_groups(keep_best=True):
 #                     Blacklist API для views
 # ===================================================================
 def mark_group_ignored(video_ids, note=''):
-    """Помечает все пары внутри группы как ignored."""
     if not video_ids or len(video_ids) < 2:
         return False, "Need >= 2 files", 0
     paths = []
@@ -1370,9 +1455,8 @@ def mark_group_ignored(video_ids, note=''):
             if ok:
                 count += 1
 
-    # Обновляем кеш групп: заново читаем, пересобираем с blacklist
     global DUPLICATE_GROUPS
-    DUPLICATE_GROUPS = []  # сбросить, чтобы get_duplicate_groups перечитал
+    DUPLICATE_GROUPS = []
     get_duplicate_groups()
 
     return True, f"Ignored {count} pairs", count

@@ -3,6 +3,7 @@
 перезапуск сервера. Дубликаты — отдельная страница.
 
 Категории разделены по media_type: video / image.
+Поиск дубликатов поддерживает ограничение по папкам (scan_paths).
 """
 import os
 import sys
@@ -71,6 +72,21 @@ def _duplicates_stats(groups):
         'total_size_keep': total_size_keep,
         'total_size_move': total_size_move,
     }
+
+
+def _parse_scan_paths(raw_text):
+    """
+    Из textarea (один путь на строку) делает список путей.
+    Убирает пустые, strip, убирает кавычки.
+    """
+    if not raw_text:
+        return []
+    result = []
+    for line in raw_text.splitlines():
+        p = line.strip().strip('"').strip("'")
+        if p:
+            result.append(p)
+    return result
 
 
 RESTART_EXIT_CODE = 42
@@ -144,8 +160,6 @@ def register(app):
             action = request.form.get('action')
 
             # --- Категории ---
-            # media_type приходит из скрытого поля формы (video | image),
-            # по умолчанию 'video'.
             form_media_type = request.form.get('media_type', 'video')
             if form_media_type not in ('video', 'image'):
                 form_media_type = 'video'
@@ -194,7 +208,7 @@ def register(app):
                     return redirect(url_for('settings', tab='libraries',
                                             profile=current_profile))
 
-            # --- Сканирование ---
+            # --- Сканирование библиотек ---
             elif action == 'scan':
                 new_task_id = str(uuid.uuid4())
                 started = scan_libraries_async(new_task_id)
@@ -212,18 +226,20 @@ def register(app):
                 app_config['static_ip'] = ip
                 save_config(app_config)
 
-            # --- Дубликаты ---
+            # --- Дубликаты (из старой вкладки settings) ---
             elif action == 'start_duplicate_scan':
                 filters = request.form.getlist('media_types')
                 if not filters:
                     filters = ['video', 'image']
+                scan_paths = _parse_scan_paths(
+                    request.form.get('scan_paths', ''))
                 new_task_id = str(uuid.uuid4())
-                find_duplicates_async(new_task_id, filters)
+                find_duplicates_async(new_task_id, filters,
+                                      scan_paths or None)
                 return redirect(url_for('duplicates_page',
                                         task_id=new_task_id,
                                         profile=current_profile))
 
-            # Редирект назад с сохранением вкладки и media_type вкладки
             if tab == 'categories':
                 return redirect(url_for('settings',
                                         tab='categories',
@@ -232,15 +248,12 @@ def register(app):
             return redirect(url_for('settings', tab=tab, profile=current_profile))
 
         # ---------- GET ----------
-
-        # Старые закладки
         if tab == 'download_vr':
             return redirect(url_for('download_vr', profile=current_profile))
         if tab == 'duplicates':
             return redirect(url_for('duplicates_page', profile=current_profile))
 
         if tab == 'categories':
-            # Активный тип категорий (video | image)
             cat_media_type = request.args.get('media_type', 'video')
             if cat_media_type not in ('video', 'image'):
                 cat_media_type = 'video'
@@ -272,7 +285,6 @@ def register(app):
                                    stats_female=stats_female,
                                    stats_transgender=stats_transgender)
 
-        # libraries (по умолчанию) и network
         return render_template('settings.html',
                                tab=tab,
                                task_id=task_id,
@@ -292,8 +304,11 @@ def register(app):
                 filters = request.form.getlist('media_types')
                 if not filters:
                     filters = ['video', 'image']
+                scan_paths = _parse_scan_paths(
+                    request.form.get('scan_paths', ''))
                 new_task_id = str(uuid.uuid4())
-                find_duplicates_async(new_task_id, filters)
+                find_duplicates_async(new_task_id, filters,
+                                      scan_paths or None)
                 return redirect(url_for('duplicates_page',
                                         task_id=new_task_id,
                                         profile=current_profile))
@@ -336,7 +351,7 @@ def register(app):
         return Response(generate(), mimetype="text/event-stream")
 
     # ================================================================
-    #                    DOWNLOAD VR — отдельная страница
+    #                    DOWNLOAD VR
     # ================================================================
     @app.route('/download_vr', methods=['GET', 'POST'])
     def download_vr():
