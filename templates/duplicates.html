@@ -16,9 +16,10 @@
     <form method="post" action="{{ url_for('duplicates_page', profile=current_profile) }}" id="duplicateScanForm">
         <input type="hidden" name="action" value="start_duplicate_scan">
         <input type="hidden" name="profile" value="{{ current_profile }}">
+        <input type="hidden" name="mode" id="scanModeInput" value="deep">
 
         <div class="mb-2">
-            <label class="form-label">Media types to scan:</label>
+            <label class="form-label">Media types:</label>
             <div class="form-check form-check-inline">
                 <input class="form-check-input" type="checkbox" name="media_types" value="video" checked id="media_video">
                 <label class="form-check-label" for="media_video">Video</label>
@@ -27,6 +28,9 @@
                 <input class="form-check-input" type="checkbox" name="media_types" value="image" checked id="media_image">
                 <label class="form-check-label" for="media_image">Image</label>
             </div>
+            <span class="text-muted ms-2" style="font-size:0.8rem;">
+                (в «Быстром» режиме image игнорируются)
+            </span>
         </div>
 
         <div class="mb-2">
@@ -45,14 +49,22 @@
                 </button>
                 <span class="text-muted align-self-center" id="pathsHint" style="font-size:0.78rem;"></span>
             </div>
-            <div class="text-muted mt-2" style="font-size:0.78rem;">
-                Если путей нет — сканирование идёт по всей библиотеке.
-                Если пути указаны — только файлы внутри этих папок
-                (включая все подпапки).
-            </div>
         </div>
 
-        <button type="submit" class="btn-add">Find Duplicates</button>
+        <div class="d-flex gap-2 flex-wrap align-items-center">
+            <button type="button" class="btn-add" id="startFastBtn"
+                    title="Только видео, строгие правила, минимум ложных срабатываний">
+                ⚡ Быстрый поиск
+            </button>
+            <button type="button" class="btn-add" id="startDeepBtn"
+                    title="Видео + аудио, ищет совпадения даже если монтаж отличается">
+                🔍 Глубокий поиск
+            </button>
+            <span class="text-muted" style="font-size:0.78rem;">
+                Fast: только по 5 ключевым кадрам (≥3 совпадения, hamming ≤2).<br>
+                Deep: то же + аудио (непрерывный run ≥30с).
+            </span>
+        </div>
     </form>
 </div>
 
@@ -170,18 +182,17 @@
         {% endfor %}
     </div>
 {% else %}
-    <p class="text-muted">No duplicates found. Click "Find Duplicates" to start scanning.</p>
+    <p class="text-muted">No duplicates found. Click "Быстрый" или "Глубокий" to start scanning.</p>
 {% endif %}
 
 <script>
 (function () {
     'use strict';
 
-    // ============================================================
-    // ПУТИ СКАНИРОВАНИЯ (без localStorage — всегда чистые)
-    // ============================================================
     var scanPathsEl = document.getElementById('scanPaths');
     var pathsHint = document.getElementById('pathsHint');
+    var modeInput = document.getElementById('scanModeInput');
+    var form = document.getElementById('duplicateScanForm');
 
     var allLibraries = [
         {% for lib in all_libraries %}
@@ -244,6 +255,27 @@
         clearBtn.addEventListener('click', function () {
             scanPathsEl.value = '';
             updateHint();
+        });
+    }
+
+    // Кнопки запуска
+    var startFastBtn = document.getElementById('startFastBtn');
+    var startDeepBtn = document.getElementById('startDeepBtn');
+
+    function submitWithMode(mode) {
+        if (!form) return;
+        if (modeInput) modeInput.value = mode;
+        form.submit();
+    }
+
+    if (startFastBtn) {
+        startFastBtn.addEventListener('click', function () {
+            submitWithMode('fast');
+        });
+    }
+    if (startDeepBtn) {
+        startDeepBtn.addEventListener('click', function () {
+            submitWithMode('deep');
         });
     }
 

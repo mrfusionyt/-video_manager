@@ -3,7 +3,8 @@
 перезапуск сервера. Дубликаты — отдельная страница.
 
 Категории разделены по media_type: video / image.
-Поиск дубликатов поддерживает ограничение по папкам (scan_paths).
+Поиск дубликатов: fast (video-only) / deep (video+audio),
+ограничение по путям (scan_paths).
 """
 import os
 import sys
@@ -75,10 +76,6 @@ def _duplicates_stats(groups):
 
 
 def _parse_scan_paths(raw_text):
-    """
-    Из textarea (один путь на строку) делает список путей.
-    Убирает пустые, strip, убирает кавычки.
-    """
     if not raw_text:
         return []
     result = []
@@ -155,11 +152,9 @@ def register(app):
         tab = request.values.get('tab') or request.args.get('tab') or 'libraries'
         task_id = request.args.get('task_id')
 
-        # ---------- POST: действия ----------
         if request.method == 'POST':
             action = request.form.get('action')
 
-            # --- Категории ---
             form_media_type = request.form.get('media_type', 'video')
             if form_media_type not in ('video', 'image'):
                 form_media_type = 'video'
@@ -191,7 +186,6 @@ def register(app):
                 delete_all_categories(current_mode,
                                       media_type=form_media_type)
 
-            # --- Библиотеки ---
             elif action == 'add_library':
                 path = request.form.get('path')
                 if path and os.path.isdir(path):
@@ -208,7 +202,6 @@ def register(app):
                     return redirect(url_for('settings', tab='libraries',
                                             profile=current_profile))
 
-            # --- Сканирование библиотек ---
             elif action == 'scan':
                 new_task_id = str(uuid.uuid4())
                 started = scan_libraries_async(new_task_id)
@@ -220,22 +213,23 @@ def register(app):
                                         task_id=new_task_id,
                                         profile=current_profile))
 
-            # --- Сеть ---
             elif action == 'save_ip':
                 ip = request.form.get('static_ip', '').strip()
                 app_config['static_ip'] = ip
                 save_config(app_config)
 
-            # --- Дубликаты (из старой вкладки settings) ---
             elif action == 'start_duplicate_scan':
                 filters = request.form.getlist('media_types')
                 if not filters:
                     filters = ['video', 'image']
                 scan_paths = _parse_scan_paths(
                     request.form.get('scan_paths', ''))
+                mode = request.form.get('mode', 'deep')
+                if mode not in ('fast', 'deep'):
+                    mode = 'deep'
                 new_task_id = str(uuid.uuid4())
                 find_duplicates_async(new_task_id, filters,
-                                      scan_paths or None)
+                                      scan_paths or None, mode=mode)
                 return redirect(url_for('duplicates_page',
                                         task_id=new_task_id,
                                         profile=current_profile))
@@ -247,7 +241,6 @@ def register(app):
                                         profile=current_profile))
             return redirect(url_for('settings', tab=tab, profile=current_profile))
 
-        # ---------- GET ----------
         if tab == 'download_vr':
             return redirect(url_for('download_vr', profile=current_profile))
         if tab == 'duplicates':
@@ -306,9 +299,12 @@ def register(app):
                     filters = ['video', 'image']
                 scan_paths = _parse_scan_paths(
                     request.form.get('scan_paths', ''))
+                mode = request.form.get('mode', 'deep')
+                if mode not in ('fast', 'deep'):
+                    mode = 'deep'
                 new_task_id = str(uuid.uuid4())
                 find_duplicates_async(new_task_id, filters,
-                                      scan_paths or None)
+                                      scan_paths or None, mode=mode)
                 return redirect(url_for('duplicates_page',
                                         task_id=new_task_id,
                                         profile=current_profile))
@@ -350,9 +346,6 @@ def register(app):
                 time.sleep(0.5)
         return Response(generate(), mimetype="text/event-stream")
 
-    # ================================================================
-    #                    DOWNLOAD VR
-    # ================================================================
     @app.route('/download_vr', methods=['GET', 'POST'])
     def download_vr():
         if request.method == 'POST':
