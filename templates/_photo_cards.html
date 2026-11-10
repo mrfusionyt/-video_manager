@@ -9,6 +9,12 @@
                  alt="{{ photo.filename }}"
                  loading="lazy"
                  decoding="async">
+            {% if photo.quality_tag %}
+                <span class="quality-badge quality-{{ photo.quality_tag }}"
+                      title="{% if photo.quality_tag == '4k' %}4K / UHD{% else %}Low resolution{% endif %}">
+                    {{ '4K' if photo.quality_tag == '4k' else 'Low' }}
+                </span>
+            {% endif %}
         </div>
         <div class="card-body">
             <h5 class="card-title" title="{{ photo.filename }}">
@@ -22,6 +28,9 @@
                     Added: {{ photo.added[:10] if photo.added else '—' }}
                     {% if photo.size %}
                         • {{ (photo.size / (1024**2))|round(2) }} MB
+                    {% endif %}
+                    {% if photo.width and photo.height %}
+                        • {{ photo.width }}×{{ photo.height }}
                     {% endif %}
                 </small><br>
                 <small>

@@ -28,6 +28,29 @@ def _batch_load_categories(cursor, video_ids, chunk_size=500):
     return result
 
 
+def _attach_quality(videos):
+    """
+    Добавляет каждому видео поле 'quality_tag' ('4k' | 'low' | None).
+    Импорт внутри функции, чтобы не было циклической зависимости
+    config.py -> models -> db.videos.
+    """
+    try:
+        from config import video_quality_tag
+    except Exception:
+        for v in videos:
+            v.setdefault('quality_tag', None)
+        return videos
+
+    for v in videos:
+        try:
+            v['quality_tag'] = video_quality_tag(
+                v.get('width', 0), v.get('height', 0)
+            )
+        except Exception:
+            v['quality_tag'] = None
+    return videos
+
+
 def add_video(library_id, filename, filepath, duration=0, size=0, added=None,
               rating=0, orientation='horizontal', media_type='video',
               width=0, height=0, codec='', bitrate=0, fps=0.0, mode=1,
@@ -86,9 +109,6 @@ def delete_video(video_id):
 
 
 def get_all_videos(mode=None, media_type=None, sort_by='id', folder=None):
-    """
-    media_type: 'video' | 'image' | None (все).
-    """
     conn = get_db_connection()
     try:
         cursor = conn.cursor()
@@ -123,7 +143,7 @@ def get_all_videos(mode=None, media_type=None, sort_by='id', folder=None):
             v = dict(row)
             v['categories'] = categories_map.get(v['id'], [])
             videos.append(v)
-        return videos
+        return _attach_quality(videos)
     finally:
         conn.close()
 
@@ -144,7 +164,7 @@ def get_video_by_id(video_id):
         video = dict(row)
         categories_map = _batch_load_categories(cursor, [video_id])
         video['categories'] = categories_map.get(video_id, [])
-        return video
+        return _attach_quality([video])[0]
     finally:
         conn.close()
 
@@ -185,19 +205,50 @@ def rename_video(video_id, new_filename):
         conn.close()
 
 
+# ============================================================
+#                  SORT / QUALITY
+# ============================================================
+# SQL-выражение: 1, если low-качество, иначе 0.
+# Используется как ПЕРВЫЙ ключ сортировки (ASC), чтобы low всегда
+# уезжало в конец. Пороги захардкожены здесь, потому что config.py
+# импортирует models.py → циклическая зависимость. Если меняешь
+# QUALITY_LOW_HEIGHT в config.py — поменяй и здесь.
+_LOW_QUALITY_SQL = (
+    "CASE WHEN ("
+    "  (CASE WHEN width > height THEN height ELSE width END) > 0 "
+    "  AND (CASE WHEN width > height THEN height ELSE width END) < 720"
+    ") THEN 1 ELSE 0 END"
+)
+
+# Короткое имя для "разрешения" (для secondary-сортировки)
+_RESOLUTION_SQL = (
+    "(CASE WHEN width > height THEN width ELSE height END)"
+)
+
+
 _ORDER_BY_MAP = {
-    'date': 'v.added DESC',
-    'rating': 'v.rating DESC',
-    'duration_asc': 'v.duration ASC',
-    'duration_desc': 'v.duration DESC',
+    # 'date' и 'rating': low-качество уезжает в конец.
+    'date': f'{_LOW_QUALITY_SQL} ASC, v.added DESC',
+    'rating': f'{_LOW_QUALITY_SQL} ASC, v.rating DESC',
+    'duration_asc': f'{_LOW_QUALITY_SQL} ASC, v.duration ASC',
+    'duration_desc': f'{_LOW_QUALITY_SQL} ASC, v.duration DESC',
     'orientation_vertical_first':
-        "CASE WHEN v.orientation = 'vertical' THEN 0 ELSE 1 END, v.id",
+        f"{_LOW_QUALITY_SQL} ASC, "
+        f"CASE WHEN v.orientation = 'vertical' THEN 0 ELSE 1 END, v.id",
     'orientation_horizontal_first':
-        "CASE WHEN v.orientation = 'horizontal' THEN 0 ELSE 1 END, v.id",
-    'top10': 'v.rating DESC',
-    'top50': 'v.rating DESC',
-    'top100': 'v.rating DESC',
-    # для фото сортировка по имени удобнее
+        f"{_LOW_QUALITY_SQL} ASC, "
+        f"CASE WHEN v.orientation = 'horizontal' THEN 0 ELSE 1 END, v.id",
+    'top10': f'{_LOW_QUALITY_SQL} ASC, v.rating DESC',
+    'top50': f'{_LOW_QUALITY_SQL} ASC, v.rating DESC',
+    'top100': f'{_LOW_QUALITY_SQL} ASC, v.rating DESC',
+
+    # Явные сортировки по качеству:
+    # quality_desc — 4K в начале, потом FHD, HD, low в конце
+    'quality_desc': f'{_RESOLUTION_SQL} DESC, v.added DESC',
+    # quality_asc — low в начале, потом HD/FHD/4K
+    'quality_asc': f'{_RESOLUTION_SQL} ASC, v.added DESC',
+
+    # для фото удобнее сортировка по имени
     'filename_asc': 'v.filename COLLATE NOCASE ASC',
     'filename_desc': 'v.filename COLLATE NOCASE DESC',
 }
@@ -206,10 +257,6 @@ _TOP_LIMIT = {'top10': 10, 'top50': 50, 'top100': 100}
 
 def query_videos_paged(mode=None, media_type=None, sort='date', search='',
                        folder='', category_ids=None, page=1, per_page=15):
-    """
-    media_type: 'video' | 'image' | None.
-    Если category_ids задан — возвращает (None, None) (пусть Python-fallback).
-    """
     if category_ids:
         return None, None
     order_clause = _ORDER_BY_MAP.get(sort)
@@ -262,7 +309,7 @@ def query_videos_paged(mode=None, media_type=None, sort='date', search='',
             v = dict(row)
             v['categories'] = categories_map.get(v['id'], [])
             videos.append(v)
-        return videos, total
+        return _attach_quality(videos), total
     finally:
         conn.close()
 

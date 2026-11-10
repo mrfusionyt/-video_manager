@@ -18,6 +18,8 @@
             {% set sort_labels = sort_options if sort_options is defined else {
                 'date': 'Date',
                 'rating': 'Rating',
+                'quality_desc': 'Quality ↓',
+                'quality_asc': 'Quality ↑',
                 'filename_asc': 'Name ↑',
                 'filename_desc': 'Name ↓'
             } %}
@@ -27,6 +29,9 @@
             <ul class="dropdown-menu dropdown-menu-dark" aria-labelledby="sortDropdown">
                 <li><a class="dropdown-item {% if sort == 'date' %}active{% endif %}" href="#" data-sort="date">By Date</a></li>
                 <li><a class="dropdown-item {% if sort == 'rating' %}active{% endif %}" href="#" data-sort="rating">By Rating</a></li>
+                <li><hr class="dropdown-divider"></li>
+                <li><a class="dropdown-item {% if sort == 'quality_desc' %}active{% endif %}" href="#" data-sort="quality_desc">Quality (high → low)</a></li>
+                <li><a class="dropdown-item {% if sort == 'quality_asc' %}active{% endif %}" href="#" data-sort="quality_asc">Quality (low → high)</a></li>
                 <li><hr class="dropdown-divider"></li>
                 <li><a class="dropdown-item {% if sort == 'filename_asc' %}active{% endif %}" href="#" data-sort="filename_asc">Name (A→Z)</a></li>
                 <li><a class="dropdown-item {% if sort == 'filename_desc' %}active{% endif %}" href="#" data-sort="filename_desc">Name (Z→A)</a></li>

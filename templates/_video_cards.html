@@ -10,6 +10,12 @@
                  loading="lazy"
                  decoding="async"
                  data-video-src="{{ url_for('video_file', video_id=video.id) }}">
+            {% if video.quality_tag %}
+                <span class="quality-badge quality-{{ video.quality_tag }}"
+                      title="{% if video.quality_tag == '4k' %}4K / UHD{% else %}Low resolution{% endif %}">
+                    {{ '4K' if video.quality_tag == '4k' else 'Low' }}
+                </span>
+            {% endif %}
         </div>
         <div class="card-body">
             <h5 class="card-title" title="{{ video.filename }}">
@@ -23,6 +29,9 @@
                     Added: {{ video.added[:10] if video.added else '—' }}
                     {% if video.duration and video.duration > 0 %}
                         • <span style="color: #dc3545;">{{ (video.duration // 60) }}:{{ '%02d' % (video.duration % 60) }}</span>
+                    {% endif %}
+                    {% if video.width and video.height %}
+                        • {{ video.width }}×{{ video.height }}
                     {% endif %}
                 </small><br>
                 <small>

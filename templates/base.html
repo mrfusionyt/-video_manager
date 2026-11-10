@@ -65,9 +65,6 @@
             </div>
 
             {% if request.endpoint in ADMIN_PAGES %}
-                {# ============================================================
-                   ЕДИНЫЙ САЙДБАР ДЛЯ SETTINGS / TOOLS / DOWNLOAD VR / DUPLICATES
-                   ============================================================ #}
                 <h5>Settings</h5>
                 <ul class="nav flex-column">
                     {% for item in settings_tabs %}
@@ -139,9 +136,6 @@
                 {% endif %}
 
             {% elif request.endpoint in PHOTO_PAGES %}
-                {# ============================================================
-                   САЙДБАР ДЛЯ ФОТО: PHOTO-КАТЕГОРИИ
-                   ============================================================ #}
                 <h5>Photo Categories</h5>
                 <ul class="nav flex-column" id="photoCategoryList">
                     <li class="nav-item">
@@ -175,9 +169,6 @@
                 {% endif %}
 
             {% else %}
-                {# ============================================================
-                   САЙДБАР ДЛЯ ВИДЕО (главная и др.)
-                   ============================================================ #}
                 <h5>Categories</h5>
                 <ul class="nav flex-column" id="categoryList">
                     <li class="nav-item">
@@ -257,11 +248,17 @@
                                 <li><a class="dropdown-item {% if sort == 'date' %}active{% endif %}" href="#" data-sort="date">By Date</a></li>
                                 <li><a class="dropdown-item {% if sort == 'rating' %}active{% endif %}" href="#" data-sort="rating">By Rating</a></li>
                                 <li><hr class="dropdown-divider"></li>
+                                <li><a class="dropdown-item {% if sort == 'quality_desc' %}active{% endif %}" href="#" data-sort="quality_desc">Quality (high → low)</a></li>
+                                <li><a class="dropdown-item {% if sort == 'quality_asc' %}active{% endif %}" href="#" data-sort="quality_asc">Quality (low → high)</a></li>
+                                <li><hr class="dropdown-divider"></li>
                                 <li><a class="dropdown-item {% if sort == 'filename_asc' %}active{% endif %}" href="#" data-sort="filename_asc">Name (A→Z)</a></li>
                                 <li><a class="dropdown-item {% if sort == 'filename_desc' %}active{% endif %}" href="#" data-sort="filename_desc">Name (Z→A)</a></li>
                             {% else %}
                                 <li><a class="dropdown-item {% if sort == 'date' %}active{% endif %}" href="#" data-sort="date">By Date</a></li>
                                 <li><a class="dropdown-item {% if sort == 'rating' %}active{% endif %}" href="#" data-sort="rating">By Rating</a></li>
+                                <li><hr class="dropdown-divider"></li>
+                                <li><a class="dropdown-item {% if sort == 'quality_desc' %}active{% endif %}" href="#" data-sort="quality_desc">Quality (high → low)</a></li>
+                                <li><a class="dropdown-item {% if sort == 'quality_asc' %}active{% endif %}" href="#" data-sort="quality_asc">Quality (low → high)</a></li>
                                 <li><hr class="dropdown-divider"></li>
                                 <li><a class="dropdown-item {% if sort == 'duration_asc' %}active{% endif %}" href="#" data-sort="duration_asc">Duration (short first)</a></li>
                                 <li><a class="dropdown-item {% if sort == 'duration_desc' %}active{% endif %}" href="#" data-sort="duration_desc">Duration (long first)</a></li>
@@ -476,11 +473,15 @@
                     {% if PHOTO_ACTIVE %}
                         <li><a href="#" data-sort="date" class="{% if sort == 'date' %}active{% endif %}">By Date</a></li>
                         <li><a href="#" data-sort="rating" class="{% if sort == 'rating' %}active{% endif %}">By Rating</a></li>
+                        <li><a href="#" data-sort="quality_desc" class="{% if sort == 'quality_desc' %}active{% endif %}">Quality (high → low)</a></li>
+                        <li><a href="#" data-sort="quality_asc" class="{% if sort == 'quality_asc' %}active{% endif %}">Quality (low → high)</a></li>
                         <li><a href="#" data-sort="filename_asc" class="{% if sort == 'filename_asc' %}active{% endif %}">Name (A→Z)</a></li>
                         <li><a href="#" data-sort="filename_desc" class="{% if sort == 'filename_desc' %}active{% endif %}">Name (Z→A)</a></li>
                     {% else %}
                         <li><a href="#" data-sort="date" class="{% if sort == 'date' %}active{% endif %}">By Date</a></li>
                         <li><a href="#" data-sort="rating" class="{% if sort == 'rating' %}active{% endif %}">By Rating</a></li>
+                        <li><a href="#" data-sort="quality_desc" class="{% if sort == 'quality_desc' %}active{% endif %}">Quality (high → low)</a></li>
+                        <li><a href="#" data-sort="quality_asc" class="{% if sort == 'quality_asc' %}active{% endif %}">Quality (low → high)</a></li>
                         <li><a href="#" data-sort="duration_asc" class="{% if sort == 'duration_asc' %}active{% endif %}">Duration (short first)</a></li>
                         <li><a href="#" data-sort="duration_desc" class="{% if sort == 'duration_desc' %}active{% endif %}">Duration (long first)</a></li>
                         <li><a href="#" data-sort="orientation_vertical_first" class="{% if sort == 'orientation_vertical_first' %}active{% endif %}">Vertical First</a></li>

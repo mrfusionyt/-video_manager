@@ -1290,6 +1290,56 @@ textarea.form-control-dark::placeholder { color: #aaa !important; }
 .video-tile .vname      { z-index: 2; }
 .video-tile .vremove    { z-index: 3; }
 
+/* ============================================================
+   20.1 QUALITY BADGES
+   ============================================================ */
+
+.quality-badge {
+    position: absolute;
+    top: 6px;
+    left: 6px;
+    z-index: 3;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2px 8px;
+    border-radius: var(--radius-pill);
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    color: #fff;
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
+    pointer-events: none;
+    user-select: none;
+    line-height: 1.4;
+}
+
+.quality-badge.quality-4k {
+    background: rgba(40, 167, 69, 0.92);       /* зелёный */
+    border: 1px solid rgba(40, 167, 69, 0.6);
+}
+
+.quality-badge.quality-low {
+    background: rgba(220, 53, 69, 0.92);       /* красный (как бренд) */
+    border: 1px solid rgba(220, 53, 69, 0.6);
+}
+
+/* Бейдж поверх квадратного превью на фото-карточках */
+.photo-card .quality-badge {
+    top: 8px;
+    left: 8px;
+}
+
+/* Бейдж поверх обложки плейлиста и папки — если пригодится */
+.folder-card .quality-badge,
+.playlist-card .quality-badge {
+    top: 6px;
+    left: 6px;
+}
+
 
 /* ============================================================
    21. COMPARE PLAYER
