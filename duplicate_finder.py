@@ -1,29 +1,22 @@
 r"""
-Поиск дубликатов — версия с частичным вложением (substring match).
+Поиск дубликатов — версия с частичным вложением и отдельной логикой для фото.
 
 Архитектура:
-  • SQLite-кеш (hash_cache.db): files / video_frames / audio_fp /
-    ignored_pairs.
+  • SQLite-кеш (hash_cache.db): files / video_frames / audio_fp / ignored_pairs.
 
-  • Video fingerprint: 25 ключевых кадров (5%..95% с шагом),
-    4 зеркала на кадр = 100 phash.
+  • VIDEO:
+      – 25 ключевых кадров, 4 зеркала (phash) = 100 хешей.
+      – "full" / "partial" (substring). См. _classify_video_pair.
+      – audio: chromaprint → LSH → FFT → longest-run (full/partial).
 
-  • Логика video-пары:
-      1) "full"   — покрытие обоих ≥ FULL_COVERAGE (0.8), hamming ≤ 2,
-                    порядок кадров монотонный.
-      2) "partial"— общая подпоследовательность ≥ MIN_SUBSEQ_FRAMES
-                    (по умолчанию 6 из 25), порядок монотонный,
-                    покрытие хотя бы одного < 0.8.
-                    Это ловит "10-минутное содержит 7-минутное".
+  • PHOTO (media_type='image'):
+      – 1 кадр, 4 зеркала (orig, mirror_h, flip_v, flip_hv).
+      – brute-force попарное сравнение по хаммингу (≤ IMAGE_MAX_HAMMING).
+      – никакого subseq / coverage — есть 4 хеша на фото, достаточно.
+      – ловит разные размеры/разрешения/компрессию (phash устойчив
+        к ресайзу) и зеркала.
 
-  • Audio: chromaprint → LSH → FFT → longest-run.
-      run >= AUDIO_FULL_MIN_RUN_SEC (30s) — full
-      run >= AUDIO_PARTIAL_MIN_RUN_SEC (60s) — partial
-
-  • Blacklist пар применяется ко всем парам.
-
-Прогресс-фазы: 0-40 хеширование, 40-45 video-index, 45-65 video verify,
-65-70 audio LSH, 70-95 audio verify, 95-100 группировка.
+  • Blacklist пар применяется на всех фазах.
 """
 import os
 import json
@@ -55,35 +48,32 @@ FPCALC_CANDIDATES = [
     shutil.which('fpcalc'),
 ]
 
-# ---------- Video fingerprint ----------
-# 25 кадров от 5% до 95%. Шаг 3.75%. 4 зеркала на кадр = 100 phash.
+# ---------- Video ----------
 KEYFRAME_POSITIONS = [round(0.05 + i * 0.0375, 4) for i in range(25)]
 
-# ---------- FAST / DEEP thresholds ----------
-# hamming ≤ этого значения = кадры совпали
 FAST_MAX_HAMMING = 2
-
-# FULL — классический дубликат (одно и то же видео).
-# Покрытие: сколько ключевых кадров из A нашли в B / всего.
 FULL_COVERAGE = 0.80
-
-# PARTIAL — вложение (7 мин внутри 10 мин).
-# Требуем минимум N последовательных совпавших кадров (в штуках из 25).
-# 6 из 25 ≈ 24% длины. Для 7-минутного = 1.7 минуты. Для 10-минутного = 2.4 мин.
-# Слишком мало → много ложных; слишком много → пропустим короткие вложения.
 PARTIAL_MIN_SUBSEQ_FRAMES = 6
-
-# Если у двух видео совпало меньше — вообще не считаем парой.
-# Меньше этого = шум.
 MIN_MATCHED_FRAMES = 3
 
-# ---------- Audio thresholds ----------
+# ---------- Photo ----------
+# Порог хамминга между phash-ами (64 бита) для признания фото дубликатом.
+#   0-2  — почти идентичные (пересохранение без потерь)
+#   3-5  — разные размеры/разрешения, лёгкая компрессия
+#   6-8  — разные размеры + сильная компрессия
+#   9+   — уже риск ложных срабатываний
+IMAGE_MAX_HAMMING = 8
+
+# Предупреждение при слишком большом количестве фото (brute-force = O(n²))
+IMAGE_COMPARE_WARN_LIMIT = 20000
+
+# ---------- Audio ----------
 AUDIO_SKIP_INTRO_SEC   = 30.0
 AUDIO_SUBPRINT_PER_SEC = 1.0 / 0.1234
 AUDIO_FPCALC_MAX_LENGTH = 900
 
-AUDIO_FULL_MIN_RUN_SEC    = 30.0    # полный audio-match
-AUDIO_PARTIAL_MIN_RUN_SEC = 60.0    # audio-вложение
+AUDIO_FULL_MIN_RUN_SEC    = 30.0
+AUDIO_PARTIAL_MIN_RUN_SEC = 60.0
 
 AUDIO_BITS_TOLERANT = 8
 AUDIO_PREFILTER_SAMPLES    = 40
@@ -116,6 +106,7 @@ print(f"[dup] video: {len(KEYFRAME_POSITIONS)} keyframes, "
       f"max_hamming={FAST_MAX_HAMMING}, "
       f"full_coverage>={FULL_COVERAGE}, "
       f"partial_min_subseq={PARTIAL_MIN_SUBSEQ_FRAMES}")
+print(f"[dup] photo: max_hamming={IMAGE_MAX_HAMMING}")
 print(f"[dup] audio: full>={AUDIO_FULL_MIN_RUN_SEC:.0f}s, "
       f"partial>={AUDIO_PARTIAL_MIN_RUN_SEC:.0f}s")
 print(f"[dup] workers: hash={HASH_WORKERS}, compare={COMPARE_WORKERS}")
@@ -612,11 +603,6 @@ def _fft_has_correlation(a, b):
 
 
 def _find_audio_match(a_raw, b_raw):
-    """
-    Возвращает dict с run_sec / start_*_sec / kind ('full'|'partial').
-    kind='full'    — run_sec >= AUDIO_FULL_MIN_RUN_SEC
-    kind='partial' — run_sec >= AUDIO_PARTIAL_MIN_RUN_SEC
-    """
     if not a_raw or not b_raw:
         return None
     a = np.asarray(a_raw, dtype=np.uint32)
@@ -697,13 +683,11 @@ def _find_audio_match(a_raw, b_raw):
                 'fft_ratio': round(float(ratio), 2),
             }
 
-            # приоритет: full > partial, потом больше run_sec
             def _rank(m):
                 return (0 if m['kind'] == 'full' else 1, -m['run_sec'])
             if best_match is None or _rank(candidate) < _rank(best_match):
                 best_match = candidate
             if best_match and best_match['kind'] == 'full':
-                # уже нашли full — не ищем дальше
                 break
 
     return best_match
@@ -768,10 +752,106 @@ def _process_media(item, include_audio=True):
 
 
 # ===================================================================
-#                     Video verification (full + partial)
+#                     PHOTO: попарное сравнение
+# ===================================================================
+def _is_image_item(item):
+    return (item or {}).get('media_type') == 'image'
+
+
+def _classify_image_pair(hashes_a, hashes_b, max_hamming=IMAGE_MAX_HAMMING):
+    """
+    hashes_a, hashes_b — списки из 4 imagehash:
+      [orig, mirror_h, flip_v, flip_hv].
+
+    Возвращает dict или None.
+
+    Перебираем все 4×4 = 16 комбинаций, берём минимум хамминга.
+    Так ловятся:
+      • разные размеры / разрешения / компрессия (orig vs orig)
+      • горизонтальное зеркало (orig vs mirror_h)
+      • вертикальное зеркало (orig vs flip_v)
+      • горизонтальное + вертикальное (orig vs flip_hv)
+    """
+    if not hashes_a or not hashes_b:
+        return None
+    best = 999
+    best_pair = None  # (idx_a, idx_b)
+    for idx_a, h_a in enumerate(hashes_a):
+        for idx_b, h_b in enumerate(hashes_b):
+            d = h_a - h_b
+            if d < best:
+                best = d
+                best_pair = (idx_a, idx_b)
+                if best == 0:
+                    break
+        if best == 0:
+            break
+    if best_pair is None or best > max_hamming:
+        return None
+    return {
+        'hamming': int(best),
+        'kind': 'image',
+        'mirror_a': best_pair[0],   # 0=orig, 1=mirror_h, 2=flip_v, 3=flip_hv
+        'mirror_b': best_pair[1],
+    }
+
+
+def _image_pair_matches(paths, hash_objs, item_by_path,
+                        max_hamming=IMAGE_MAX_HAMMING):
+    """
+    Brute-force попарное сравнение только среди фото.
+
+    Возвращает dict: {(i, j): {'hamming': int, 'kind': 'image', ...}}.
+    """
+    image_indices = [
+        i for i, p in enumerate(paths)
+        if _is_image_item(item_by_path.get(p))
+    ]
+    n = len(image_indices)
+    if n < 2:
+        return {}
+
+    print(f"[dup] image phase: comparing {n} photos "
+          f"({n * (n - 1) // 2} pairs, brute force)")
+
+    if n > IMAGE_COMPARE_WARN_LIMIT:
+        print(f"[dup] WARNING: {n} photos — brute force may be slow. "
+              f"Consider narrowing scan_paths.")
+
+    matches = {}
+    total_pairs = n * (n - 1) // 2
+    progress_step = max(1, total_pairs // 20)  # 5% шагов
+    done = 0
+
+    for a in range(n):
+        i = image_indices[a]
+        frames_a = hash_objs[i]
+        if not frames_a:
+            continue
+        # У фото ровно 1 кадр (position=0.5), hashes = 4 imagehash
+        hashes_a = frames_a[0][1]
+        for b in range(a + 1, n):
+            j = image_indices[b]
+            frames_b = hash_objs[j]
+            if not frames_b:
+                continue
+            hashes_b = frames_b[0][1]
+            res = _classify_image_pair(hashes_a, hashes_b, max_hamming)
+            if res:
+                matches[(i, j)] = res
+            done += 1
+            if done % progress_step == 0:
+                print(f"[dup]   image compare: {done}/{total_pairs} "
+                      f"(matches: {len(matches)})")
+
+    print(f"[dup] image matched: {len(matches)} / {total_pairs}")
+    return matches
+
+
+# ===================================================================
+#                     Video verification
 # ===================================================================
 def _frame_best_distance(hashes_a, hashes_b):
-    """Минимальный hamming между двумя наборами по 4 зеркала (16 сравнений)."""
     best = 999
     for h1 in hashes_a:
         for h2 in hashes_b:
@@ -782,11 +862,6 @@ def _frame_best_distance(hashes_a, hashes_b):
 
 
 def _video_match_matrix(ha, hb, max_hamming=FAST_MAX_HAMMING):
-    """
-    Возвращает матрицу совпадений между кадрами A и B.
-    matched[i][j] = hamming если <= max_hamming, иначе None.
-    Плюс массив best_j[i] = индекс лучшего кадра B для кадра A.
-    """
     n_a = len(ha)
     n_b = len(hb)
     matched = [[None] * n_b for _ in range(n_a)]
@@ -801,26 +876,6 @@ def _video_match_matrix(ha, hb, max_hamming=FAST_MAX_HAMMING):
 
 
 def _classify_video_pair(ha, hb):
-    """
-    ha, hb — списки (position, [4 imagehash]).
-    Возвращает dict:
-      {
-        'kind': 'full' | 'partial',
-        'coverage_a': float,       # доля кадров A, нашедших пару в B
-        'coverage_b': float,
-        'matched_count': int,      # уникальных совпавших кадров
-        'subseq_frames': int,      # длина наибольшей монотонной подпоследовательности
-        'pairs': [...],            # по одному на каждый совпавший кадр A
-      }
-    или None, если пара не подходит.
-
-    Идея:
-      * Полное совпадение: каждый A[i] находит пару B[j] c hamming ≤ 2,
-        порядок монотонный. coverage_a ≈ coverage_b ≈ 1.
-      * Частичное: A короче B, но существует монотонная
-        подпоследовательность длины ≥ PARTIAL_MIN_SUBSEQ_FRAMES
-        с hamming ≤ 2. Тогда A "вложено" в B.
-    """
     n_a = len(ha)
     n_b = len(hb)
     if n_a == 0 or n_b == 0:
@@ -828,9 +883,7 @@ def _classify_video_pair(ha, hb):
 
     matched = _video_match_matrix(ha, hb, FAST_MAX_HAMMING)
 
-    # Для каждого кадра A — лучший j и его hamming
-    # (это "жадное" соответствие: A[i] → B[best_j])
-    greedy_pairs = []  # (i, j, hamming)
+    greedy_pairs = []
     for i in range(n_a):
         best_j = -1
         best_d = 999
@@ -842,16 +895,11 @@ def _classify_video_pair(ha, hb):
         if best_j >= 0:
             greedy_pairs.append((i, best_j, best_d))
 
-    # Монотонная подпоследовательность в greedy_pairs:
-    # ищем такую, где i и j одновременно возрастают.
-    # Для этого: сортируем по i (уже), потом LIS по j.
     if not greedy_pairs:
         return None
 
-    # LIS по j (с сохранением индексов)
     j_seq = [p[1] for p in greedy_pairs]
     n = len(j_seq)
-    # dp[k] = длина LIS, заканчивающейся на k
     dp = [1] * n
     parent = [-1] * n
     for k in range(n):
@@ -862,7 +910,6 @@ def _classify_video_pair(ha, hb):
     best_len = max(dp)
     best_end = dp.index(best_len)
 
-    # восстановление цепочки
     chain = []
     k = best_end
     while k != -1:
@@ -876,7 +923,6 @@ def _classify_video_pair(ha, hb):
     coverage_a = matched_count / n_a
     coverage_b = len(set(p[1] for p in greedy_pairs)) / n_b
 
-    # FULL: покрытие обоих >= FULL_COVERAGE и subseq_len достаточно
     if (coverage_a >= FULL_COVERAGE and
             coverage_b >= FULL_COVERAGE and
             subseq_len >= MIN_MATCHED_FRAMES):
@@ -894,7 +940,6 @@ def _classify_video_pair(ha, hb):
             ],
         }
 
-    # PARTIAL: длинная монотонная цепочка, но покрытие < FULL_COVERAGE
     if subseq_len >= PARTIAL_MIN_SUBSEQ_FRAMES:
         return {
             'kind': 'partial',
@@ -923,18 +968,13 @@ def _precompute_video_hashes(frames_by_path, paths):
     return out
 
 
-def _video_candidates(paths, hash_objs):
-    """
-    Пары-кандидаты по ЛЮБОМУ совпадению phash.
-
-    Больше кандидатов (25 кадров × 4 зеркала = 100 phash), но
-    финальное решение — в _classify_video_pair, который отсекает
-    всё, что не full/partial.
-    """
+def _video_candidates(paths, hash_objs, image_path_set):
     n = len(paths)
     pairs = set()
     index = defaultdict(list)
     for i in range(n):
+        if paths[i] in image_path_set:
+            continue
         for _, hashes in hash_objs[i]:
             for h in hashes:
                 index[h].append(i)
@@ -951,13 +991,15 @@ def _video_candidates(paths, hash_objs):
 # ===================================================================
 #                     Audio LSH
 # ===================================================================
-def _audio_lsh_candidates(paths, audio_by_path):
+def _audio_lsh_candidates(paths, audio_by_path, image_path_set):
     n = len(paths)
     skip_steps = int(AUDIO_SKIP_INTRO_SEC * AUDIO_SUBPRINT_PER_SEC)
     mask = (1 << AUDIO_LSH_BAND_BITS) - 1
     bucket = defaultdict(list)
 
     for i in range(n):
+        if paths[i] in image_path_set:
+            continue
         fp = audio_by_path.get(paths[i])
         if not fp:
             continue
@@ -1010,6 +1052,17 @@ def _group_all(task_id, frames_by_path, audio_by_path,
     print(f"[dup] === GROUPING START (mode={mode}) ===")
     print(f"[dup] files with frames: {n}")
 
+    # ---- Разделяем на фото и видео ----
+    image_path_set = set()
+    for p in paths:
+        item = item_by_path.get(p) or {}
+        if _is_image_item(item):
+            image_path_set.add(p)
+
+    n_images = len(image_path_set)
+    n_videos = n - n_images
+    print(f"[dup] videos: {n_videos}, photos: {n_images}")
+
     blacklist = _load_blacklist()
     print(f"[dup] ignored_pairs loaded: {len(blacklist)}")
 
@@ -1032,7 +1085,7 @@ def _group_all(task_id, frames_by_path, audio_by_path,
     hash_objs = _precompute_video_hashes(frames_by_path, paths)
 
     _set_progress(task_id, 42, 0, 0, 'Building video candidate index...')
-    video_pairs = _video_candidates(paths, hash_objs)
+    video_pairs = _video_candidates(paths, hash_objs, image_path_set)
     print(f"[dup] video candidates (raw): {len(video_pairs)}")
 
     video_pairs = {p for p in video_pairs if not is_ignored(p[0], p[1])}
@@ -1066,11 +1119,27 @@ def _group_all(task_id, frames_by_path, audio_by_path,
     print(f"[dup] video matched: {len(video_matches_by_pair)} / {total_vp} "
           f"(rejected {rejected} loose pairs)")
 
+    # ---------- PHOTO ----------
+    _set_progress(task_id, 60, 0, 0, 'Comparing photos...')
+    image_matches_by_pair = {}
+    if n_images >= 2:
+        raw_image_matches = _image_pair_matches(
+            paths, hash_objs, item_by_path)
+        # фильтр blacklist + union
+        for (i, j), res in raw_image_matches.items():
+            if is_ignored(i, j):
+                continue
+            image_matches_by_pair[(i, j)] = res
+            union(i, j)
+        print(f"[dup] image matched after blacklist: "
+              f"{len(image_matches_by_pair)}")
+
     # ---------- AUDIO (только в deep) ----------
     audio_matches_by_pair = {}
     if mode == 'deep':
         _set_progress(task_id, 65, 0, 0, 'Building audio LSH index...')
-        audio_pairs_all = _audio_lsh_candidates(paths, audio_by_path)
+        audio_pairs_all = _audio_lsh_candidates(
+            paths, audio_by_path, image_path_set)
         print(f"[dup] audio candidates (LSH raw): {len(audio_pairs_all)}")
 
         audio_pairs = {p for p in audio_pairs_all if not is_ignored(p[0], p[1])}
@@ -1120,7 +1189,7 @@ def _group_all(task_id, frames_by_path, audio_by_path,
             continue
         group_ids = {f['id'] for f in group_files}
 
-        # Собираем video-совпадения
+        # --- VIDEO matches ---
         video_list = []
         for (i, j), res in video_matches_by_pair.items():
             a = item_by_path.get(paths[i])
@@ -1137,6 +1206,22 @@ def _group_all(task_id, frames_by_path, audio_by_path,
                     'pairs': res['pairs'],
                 })
 
+        # --- IMAGE matches ---
+        image_list = []
+        for (i, j), res in image_matches_by_pair.items():
+            a = item_by_path.get(paths[i])
+            b = item_by_path.get(paths[j])
+            if a and b and a['id'] in group_ids and b['id'] in group_ids:
+                image_list.append({
+                    'a_id': a['id'],
+                    'b_id': b['id'],
+                    'kind': 'image',
+                    'hamming': res['hamming'],
+                    'mirror_a': res['mirror_a'],
+                    'mirror_b': res['mirror_b'],
+                })
+
+        # --- AUDIO matches ---
         audio_list = []
         for (i, j), res in audio_matches_by_pair.items():
             a = item_by_path.get(paths[i])
@@ -1152,33 +1237,44 @@ def _group_all(task_id, frames_by_path, audio_by_path,
                     'skipped_intro_sec': res.get('skipped_intro_sec', 0),
                 })
 
-        # Классификация группы: full / partial / mixed
-        has_full = any(v['kind'] == 'full' for v in video_list) or \
-                   any(a['kind'] == 'full' for a in audio_list)
-        has_partial = any(v['kind'] == 'partial' for v in video_list) or \
-                      any(a['kind'] == 'partial' for a in audio_list)
-
+        # reason
         if video_list and audio_list:
             reason = 'video+audio'
         elif video_list:
             reason = 'video'
+        elif image_list:
+            reason = 'image'
         elif audio_list:
             reason = 'audio'
         else:
             continue
 
-        if has_full and has_partial:
-            kind = 'mixed'
-        elif has_full:
-            kind = 'full'
+        # kind группы
+        if image_list and not video_list and not audio_list:
+            kind = 'image'
         else:
-            kind = 'partial'
+            has_full = any(v['kind'] == 'full' for v in video_list) or \
+                       any(a['kind'] == 'full' for a in audio_list)
+            has_partial = any(v['kind'] == 'partial' for v in video_list) or \
+                          any(a['kind'] == 'partial' for a in audio_list)
+            if has_full and has_partial:
+                kind = 'mixed'
+            elif has_full:
+                kind = 'full'
+            elif has_partial:
+                kind = 'partial'
+            else:
+                kind = 'image'  # fallback (не должно случаться)
 
         groups.append({
             'files': group_files,
             'reason': reason,
             'kind': kind,
-            'matches': {'video': video_list, 'audio': audio_list},
+            'matches': {
+                'video': video_list,
+                'audio': audio_list,
+                'image': image_list,
+            },
         })
 
     return groups
@@ -1350,6 +1446,7 @@ def _rebuild_groups_from_matches(group):
     matches = group.get('matches', {}) or {}
     video_matches = matches.get('video', []) or []
     audio_matches = matches.get('audio', []) or []
+    image_matches = matches.get('image', []) or []
 
     path_by_id = {}
     for f in files:
@@ -1373,6 +1470,7 @@ def _rebuild_groups_from_matches(group):
     blacklist = _load_blacklist()
     used_video_pairs = []
     used_audio_pairs = []
+    used_image_pairs = []
 
     def is_ignored_by_id(a_id, b_id):
         pa = path_by_id.get(a_id, '')
@@ -1382,19 +1480,20 @@ def _rebuild_groups_from_matches(group):
         return _pair_key(pa, pb) in blacklist
 
     for m in video_matches:
-        a_id = m.get('a_id')
-        b_id = m.get('b_id')
-        if a_id in idx and b_id in idx:
-            if not is_ignored_by_id(a_id, b_id):
-                union(idx[a_id], idx[b_id])
-                used_video_pairs.append(m)
+        a_id, b_id = m.get('a_id'), m.get('b_id')
+        if a_id in idx and b_id in idx and not is_ignored_by_id(a_id, b_id):
+            union(idx[a_id], idx[b_id])
+            used_video_pairs.append(m)
     for m in audio_matches:
-        a_id = m.get('a_id')
-        b_id = m.get('b_id')
-        if a_id in idx and b_id in idx:
-            if not is_ignored_by_id(a_id, b_id):
-                union(idx[a_id], idx[b_id])
-                used_audio_pairs.append(m)
+        a_id, b_id = m.get('a_id'), m.get('b_id')
+        if a_id in idx and b_id in idx and not is_ignored_by_id(a_id, b_id):
+            union(idx[a_id], idx[b_id])
+            used_audio_pairs.append(m)
+    for m in image_matches:
+        a_id, b_id = m.get('a_id'), m.get('b_id')
+        if a_id in idx and b_id in idx and not is_ignored_by_id(a_id, b_id):
+            union(idx[a_id], idx[b_id])
+            used_image_pairs.append(m)
 
     by_root = defaultdict(list)
     for i, vid in enumerate(id_list):
@@ -1410,31 +1509,44 @@ def _rebuild_groups_from_matches(group):
                      if m['a_id'] in vids_set and m['b_id'] in vids_set]
         sub_audio = [m for m in used_audio_pairs
                      if m['a_id'] in vids_set and m['b_id'] in vids_set]
+        sub_image = [m for m in used_image_pairs
+                     if m['a_id'] in vids_set and m['b_id'] in vids_set]
         if sub_video and sub_audio:
             r = 'video+audio'
         elif sub_video:
             r = 'video'
+        elif sub_image:
+            r = 'image'
         elif sub_audio:
             r = 'audio'
         else:
             continue
 
-        has_full = any(v.get('kind') == 'full' for v in sub_video) or \
-                   any(a.get('kind') == 'full' for a in sub_audio)
-        has_partial = any(v.get('kind') == 'partial' for v in sub_video) or \
-                      any(a.get('kind') == 'partial' for a in sub_audio)
-        if has_full and has_partial:
-            kind = 'mixed'
-        elif has_full:
-            kind = 'full'
+        if sub_image and not sub_video and not sub_audio:
+            kind = 'image'
         else:
-            kind = 'partial'
+            has_full = any(v.get('kind') == 'full' for v in sub_video) or \
+                       any(a.get('kind') == 'full' for a in sub_audio)
+            has_partial = any(v.get('kind') == 'partial' for v in sub_video) or \
+                          any(a.get('kind') == 'partial' for a in sub_audio)
+            if has_full and has_partial:
+                kind = 'mixed'
+            elif has_full:
+                kind = 'full'
+            elif has_partial:
+                kind = 'partial'
+            else:
+                kind = 'image'
 
         result.append({
             'files': sub_files,
             'reason': r,
             'kind': kind,
-            'matches': {'video': sub_video, 'audio': sub_audio},
+            'matches': {
+                'video': sub_video,
+                'audio': sub_audio,
+                'image': sub_image,
+            },
         })
     return result
 
@@ -1457,7 +1569,9 @@ def get_duplicate_groups():
                         'files': files,
                         'reason': g.get('reason', 'video'),
                         'kind': g.get('kind', 'full'),
-                        'matches': g.get('matches', {'video': [], 'audio': []}),
+                        'matches': g.get('matches', {
+                            'video': [], 'audio': [], 'image': []
+                        }),
                     })
     if not DUPLICATE_GROUPS:
         return []
@@ -1493,7 +1607,9 @@ def get_duplicate_groups():
                 'files': new_files,
                 'reason': g['reason'],
                 'kind': g.get('kind', 'full'),
-                'matches': g.get('matches', {'video': [], 'audio': []}),
+                'matches': g.get('matches', {
+                    'video': [], 'audio': [], 'image': []
+                }),
             })
 
     final = []
@@ -1580,7 +1696,9 @@ def move_selected(video_ids):
                 'files': new_files,
                 'reason': g['reason'],
                 'kind': g.get('kind', 'full'),
-                'matches': g.get('matches', {'video': [], 'audio': []}),
+                'matches': g.get('matches', {
+                    'video': [], 'audio': [], 'image': []
+                }),
             })
     DUPLICATE_GROUPS = kept
     _save_groups(kept)

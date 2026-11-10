@@ -57,11 +57,11 @@
                 ⚡ Быстрый поиск
             </button>
             <button type="button" class="btn-add" id="startDeepBtn"
-                    title="Видео + аудио, ищет совпадения даже если монтаж отличается">
+                    title="Видео + аудио + фото, ищет совпадения даже если монтаж отличается">
                 🔍 Глубокий поиск
             </button>
             <span class="text-muted" style="font-size:0.78rem;">
-                Fast: только по 5 ключевым кадрам (≥3 совпадения, hamming ≤2).<br>
+                Fast: видео по 25 кадрам (full/partial), фото brute-force.<br>
                 Deep: то же + аудио (непрерывный run ≥30с).
             </span>
         </div>
@@ -108,6 +108,7 @@
             {% set outer_idx = loop.index0 %}
             {% set files = group.files if group is mapping else group %}
             {% set reason = group.reason if group is mapping else 'video' %}
+            {% set kind = group.kind if group is mapping and group.kind is defined else 'full' %}
             {% set best = files|sort(attribute='size', reverse=True)|first %}
 
             <div class="duplicate-group" id="group-{{ outer_idx }}" data-group-index="{{ outer_idx }}">
@@ -119,6 +120,14 @@
                         <span class="reason-badge audio">audio</span>
                     {% elif reason == 'video+audio' %}
                         <span class="reason-badge both">video+audio</span>
+                    {% elif reason == 'image' %}
+                        <span class="reason-badge" style="background:#6f42c1;">image</span>
+                    {% endif %}
+
+                    {% if kind == 'partial' %}
+                        <span class="reason-badge" style="background:#ff9800;" title="Одно видео содержится в другом (substring match)">partial</span>
+                    {% elif kind == 'mixed' %}
+                        <span class="reason-badge" style="background:linear-gradient(90deg,#4caf50,#ff9800);" title="Есть и полные, и частичные совпадения">mixed</span>
                     {% endif %}
 
                     <a class="btn-mini" href="{{ url_for('compare_group', group_index=outer_idx, profile=current_profile) }}"
@@ -168,13 +177,21 @@
                                 {% if video.duration %}
                                     • {{ (video.duration // 60) }}:{{ '%02d' % (video.duration % 60) }}
                                 {% endif %}
+                                {% if video.width and video.height %}
+                                    • {{ video.width }}×{{ video.height }}
+                                {% endif %}
                             </div>
                             <div class="path">{{ video.filepath }}</div>
                         </div>
 
                         <div class="dup-actions">
-                            <a href="{{ url_for('watch', video_id=video.id, profile=current_profile) }}"
-                               class="btn btn-sm btn-outline-secondary" target="_blank">Watch</a>
+                            {% if video.media_type == 'image' %}
+                                <a href="{{ url_for('photo_view', photo_id=video.id, profile=current_profile) }}"
+                                   class="btn btn-sm btn-outline-secondary" target="_blank">Open</a>
+                            {% else %}
+                                <a href="{{ url_for('watch', video_id=video.id, profile=current_profile) }}"
+                                   class="btn btn-sm btn-outline-secondary" target="_blank">Watch</a>
+                            {% endif %}
                         </div>
                     </div>
                 {% endfor %}
