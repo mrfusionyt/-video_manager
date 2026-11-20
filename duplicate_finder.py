@@ -1,22 +1,15 @@
 r"""
-Поиск дубликатов — версия с частичным вложением и отдельной логикой для фото.
+Поиск дубликатов — версия с numpy-MIH, оптимизированной группировкой,
+авто-очисткой битых/отсутствующих файлов и защитой от ложных фото-дублей.
 
-Архитектура:
-  • SQLite-кеш (hash_cache.db): files / video_frames / audio_fp / ignored_pairs.
-
-  • VIDEO:
-      – 25 ключевых кадров, 4 зеркала (phash) = 100 хешей.
-      – "full" / "partial" (substring). См. _classify_video_pair.
-      – audio: chromaprint → LSH → FFT → longest-run (full/partial).
-
-  • PHOTO (media_type='image'):
-      – 1 кадр, 4 зеркала (orig, mirror_h, flip_v, flip_hv).
-      – brute-force попарное сравнение по хаммингу (≤ IMAGE_MAX_HAMMING).
-      – никакого subseq / coverage — есть 4 хеша на фото, достаточно.
-      – ловит разные размеры/разрешения/компрессию (phash устойчив
-        к ресайзу) и зеркала.
-
-  • Blacklist пар применяется на всех фазах.
+Ключевое:
+  • При старте отсутствующие на диске файлы удаляются из БД.
+  • Битые файлы переносятся в !Broken.
+  • VIDEO — 25 кадров × 4 зеркала, LSH, full/partial.
+  • PHOTO — 1 кадр × 4 зеркала, numpy-MIH + low-entropy фильтр.
+  • Safety net: image с видео-расширением → принудительно video.
+  • Группировка — O(matches + groups) через pre-indexing по корням.
+  • AUDIO — chromaprint → LSH → FFT → longest-run.
 """
 import os
 import json
@@ -26,6 +19,7 @@ import shutil
 import sqlite3
 import threading
 import subprocess
+import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -34,7 +28,8 @@ import cv2
 from PIL import Image, ImageOps
 import imagehash
 
-from models import get_all_videos, get_db_connection, get_video_by_id
+from models import get_all_videos, get_db_connection, get_video_by_id, delete_video
+from converter import move_to_broken
 
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -57,15 +52,17 @@ PARTIAL_MIN_SUBSEQ_FRAMES = 6
 MIN_MATCHED_FRAMES = 3
 
 # ---------- Photo ----------
-# Порог хамминга между phash-ами (64 бита) для признания фото дубликатом.
-#   0-2  — почти идентичные (пересохранение без потерь)
-#   3-5  — разные размеры/разрешения, лёгкая компрессия
-#   6-8  — разные размеры + сильная компрессия
-#   9+   — уже риск ложных срабатываний
-IMAGE_MAX_HAMMING = 8
+IMAGE_MAX_HAMMING = 5
+IMAGE_LSH_HAMMING = 5
+IMAGE_BRUTE_FORCE_LIMIT = 3000
 
-# Предупреждение при слишком большом количестве фото (brute-force = O(n²))
-IMAGE_COMPARE_WARN_LIMIT = 20000
+# Минимальная энтропия (std grayscale). Ниже — пропускаем.
+# Отсекает аватарки, иконки, однотонные картинки, скриншоты.
+IMAGE_MIN_ENTROPY = 8.0
+
+IMAGE_MIH_TRIU_THRESHOLD = 200
+IMAGE_MIH_MAX_BUCKET_SIZE = 3000
+IMAGE_MIH_MAX_PAIRS = 50_000_000
 
 # ---------- Audio ----------
 AUDIO_SKIP_INTRO_SEC   = 30.0
@@ -94,6 +91,12 @@ AUDIO_FFT_PEAK_STD_RATIO = 5.0
 COMPARE_WORKERS = min(8, max(2, (os.cpu_count() or 4)))
 HASH_WORKERS    = min(4, max(2, (os.cpu_count() or 4)))
 
+# SQLite имеет лимит на количество параметров (~999).
+SQL_PARAM_CHUNK = 500
+
+_VIDEO_EXTS = {'.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv',
+               '.webm', '.m4v', '.ts', '.m2ts', '.mpg', '.mpeg'}
+
 
 FPCALC_PATH = None
 for cand in FPCALC_CANDIDATES:
@@ -106,7 +109,13 @@ print(f"[dup] video: {len(KEYFRAME_POSITIONS)} keyframes, "
       f"max_hamming={FAST_MAX_HAMMING}, "
       f"full_coverage>={FULL_COVERAGE}, "
       f"partial_min_subseq={PARTIAL_MIN_SUBSEQ_FRAMES}")
-print(f"[dup] photo: max_hamming={IMAGE_MAX_HAMMING}")
+print(f"[dup] photo: MIH lsh_hamming={IMAGE_LSH_HAMMING}, "
+      f"final_hamming={IMAGE_MAX_HAMMING}, "
+      f"brute_force_limit={IMAGE_BRUTE_FORCE_LIMIT}, "
+      f"min_entropy={IMAGE_MIN_ENTROPY}, "
+      f"triu_threshold={IMAGE_MIH_TRIU_THRESHOLD}, "
+      f"max_bucket={IMAGE_MIH_MAX_BUCKET_SIZE}, "
+      f"max_pairs={IMAGE_MIH_MAX_PAIRS}")
 print(f"[dup] audio: full>={AUDIO_FULL_MIN_RUN_SEC:.0f}s, "
       f"partial>={AUDIO_PARTIAL_MIN_RUN_SEC:.0f}s")
 print(f"[dup] workers: hash={HASH_WORKERS}, compare={COMPARE_WORKERS}")
@@ -502,6 +511,17 @@ def _process_image_frames(image_path):
     try:
         img = Image.open(image_path).convert('RGB')
         img.thumbnail((256, 256), Image.Resampling.LANCZOS)
+
+        # Отсеиваем низкоэнтропийные изображения (аватарки, однотонные,
+        # скриншоты — их phash близок к нулю и они все матчатся друг с другом).
+        try:
+            gray = np.asarray(img.convert('L'), dtype=np.float32)
+            std = float(gray.std())
+            if std < IMAGE_MIN_ENTROPY:
+                return []
+        except Exception:
+            pass
+
         return [{'position': 0.5, 'hashes': _hash_image(img)}]
     except Exception:
         return []
@@ -706,6 +726,17 @@ def _process_media(item, include_audio=True):
         return None
 
     media_type = item.get('media_type', 'video')
+
+    # Safety net: если media_type='image', но расширение видеофайла —
+    # принудительно считаем видео. Иначе получаем ложные дубли
+    # «фото», которые на самом деле — кадры из видео.
+    _ext = os.path.splitext(path)[1].lower()
+    if media_type == 'image' and _ext in _VIDEO_EXTS:
+        print(f"[dup] WARNING: 'photo' with video extension {_ext}: {path}")
+        media_type = 'video'
+        item = dict(item)
+        item['media_type'] = 'video'
+
     file_id, is_fresh = _get_or_create_file(
         path, st.st_mtime, st.st_size, media_type)
 
@@ -752,57 +783,256 @@ def _process_media(item, include_audio=True):
 
 
 # ===================================================================
-#                     PHOTO: попарное сравнение
+#                     PHOTO: numpy MIH
 # ===================================================================
 def _is_image_item(item):
     return (item or {}).get('media_type') == 'image'
 
 
-def _classify_image_pair(hashes_a, hashes_b, max_hamming=IMAGE_MAX_HAMMING):
-    """
-    hashes_a, hashes_b — списки из 4 imagehash:
-      [orig, mirror_h, flip_v, flip_hv].
-
-    Возвращает dict или None.
-
-    Перебираем все 4×4 = 16 комбинаций, берём минимум хамминга.
-    Так ловятся:
-      • разные размеры / разрешения / компрессия (orig vs orig)
-      • горизонтальное зеркало (orig vs mirror_h)
-      • вертикальное зеркало (orig vs flip_v)
-      • горизонтальное + вертикальное (orig vs flip_hv)
-    """
-    if not hashes_a or not hashes_b:
-        return None
-    best = 999
-    best_pair = None  # (idx_a, idx_b)
-    for idx_a, h_a in enumerate(hashes_a):
-        for idx_b, h_b in enumerate(hashes_b):
-            d = h_a - h_b
-            if d < best:
-                best = d
-                best_pair = (idx_a, idx_b)
-                if best == 0:
-                    break
-        if best == 0:
-            break
-    if best_pair is None or best > max_hamming:
-        return None
-    return {
-        'hamming': int(best),
-        'kind': 'image',
-        'mirror_a': best_pair[0],   # 0=orig, 1=mirror_h, 2=flip_v, 3=flip_hv
-        'mirror_b': best_pair[1],
-    }
+def _popcount64_np(x):
+    x = x.astype(np.uint64, copy=False)
+    x = x - ((x >> np.uint64(1)) & np.uint64(0x5555555555555555))
+    x = (x & np.uint64(0x3333333333333333)) + \
+        ((x >> np.uint64(2)) & np.uint64(0x3333333333333333))
+    x = (x + (x >> np.uint64(4))) & np.uint64(0x0F0F0F0F0F0F0F0F)
+    x = (x * np.uint64(0x0101010101010101)) >> np.uint64(56)
+    return x.astype(np.uint8)
 
 
-def _image_pair_matches(paths, hash_objs, item_by_path,
-                        max_hamming=IMAGE_MAX_HAMMING):
-    """
-    Brute-force попарное сравнение только среди фото.
+def _image_mih_candidates_np(hashes_np, lsh_hamming,
+                             triu_threshold=IMAGE_MIH_TRIU_THRESHOLD,
+                             max_bucket_size=IMAGE_MIH_MAX_BUCKET_SIZE,
+                             max_pairs=IMAGE_MIH_MAX_PAIRS):
+    n = len(hashes_np)
+    if n < 2:
+        return (np.empty(0, dtype=np.int32),
+                np.empty(0, dtype=np.int32))
 
-    Возвращает dict: {(i, j): {'hamming': int, 'kind': 'image', ...}}.
-    """
+    num_blocks = lsh_hamming + 1
+    base_bits = 64 // num_blocks
+    extra = 64 - base_bits * num_blocks
+
+    shifts = []
+    masks = []
+    shift = 0
+    for b in range(num_blocks):
+        bits = base_bits + (1 if b < extra else 0)
+        shifts.append(shift)
+        masks.append((1 << bits) - 1)
+        shift += bits
+
+    all_i = []
+    all_j = []
+    pairs_total = 0
+    skipped_huge = 0
+    skipped_by_limit = 0
+    limit_hit = False
+
+    t_start = time.time()
+
+    for b_idx in range(num_blocks):
+        shift_val = shifts[b_idx]
+        mask_val = masks[b_idx]
+
+        for m in range(4):
+            col = (hashes_np[:, m] >> np.uint64(shift_val)) & np.uint64(mask_val)
+
+            order = np.argsort(col, kind='stable')
+            sorted_col = col[order]
+
+            if n > 1:
+                changes = np.empty(n, dtype=bool)
+                changes[0] = True
+                changes[1:] = sorted_col[1:] != sorted_col[:-1]
+            else:
+                changes = np.array([True])
+
+            group_starts = np.where(changes)[0]
+            group_ends = np.concatenate((group_starts[1:], [n]))
+            sizes = group_ends - group_starts
+
+            multi_mask = sizes >= 2
+            if not multi_mask.any():
+                continue
+
+            multi_starts = group_starts[multi_mask]
+            multi_ends = group_ends[multi_mask]
+            multi_sizes = sizes[multi_mask]
+
+            small = multi_sizes <= triu_threshold
+            for gs, ge in zip(multi_starts[small], multi_ends[small]):
+                size = int(ge - gs)
+                file_ids = order[gs:ge]
+                ii, jj = np.triu_indices(size, k=1)
+                fi = file_ids[ii]
+                fj = file_ids[jj]
+                lo = np.minimum(fi, fj).astype(np.int32)
+                hi = np.maximum(fi, fj).astype(np.int32)
+                all_i.append(lo)
+                all_j.append(hi)
+                pairs_total += len(lo)
+
+            medium = (multi_sizes > triu_threshold) & (multi_sizes <= max_bucket_size)
+            for gs, ge in zip(multi_starts[medium], multi_ends[medium]):
+                if limit_hit and (ge - gs) > 5:
+                    skipped_by_limit += 1
+                    continue
+                file_ids = order[gs:ge]
+                fi = file_ids[:-1]
+                fj = file_ids[1:]
+                lo = np.minimum(fi, fj).astype(np.int32)
+                hi = np.maximum(fi, fj).astype(np.int32)
+                all_i.append(lo)
+                all_j.append(hi)
+                pairs_total += len(lo)
+
+                if pairs_total > max_pairs:
+                    limit_hit = True
+
+            huge = multi_sizes > max_bucket_size
+            if huge.any():
+                skipped_huge += int(huge.sum())
+
+        elapsed = time.time() - t_start
+        print(f"[dup] image MIH block {b_idx + 1}/{num_blocks}: "
+              f"pairs={pairs_total}, skipped_huge={skipped_huge}, "
+              f"skipped_by_limit={skipped_by_limit}, "
+              f"elapsed={elapsed:.1f}s")
+
+        if limit_hit:
+            print(f"[dup] image MIH: HIT max_pairs={max_pairs} limit. "
+                  f"Further large buckets will be skipped.")
+
+    if not all_i:
+        return (np.empty(0, dtype=np.int32),
+                np.empty(0, dtype=np.int32))
+
+    all_i_cat = np.concatenate(all_i)
+    all_j_cat = np.concatenate(all_j)
+
+    if n < 2 ** 31:
+        codes = (all_i_cat.astype(np.int64) * np.int64(n)
+                 + all_j_cat.astype(np.int64))
+    else:
+        codes = (all_i_cat.astype(np.uint64) * np.uint64(n)
+                 + all_j_cat.astype(np.uint64))
+
+    unique_codes = np.unique(codes)
+    if n < 2 ** 31:
+        unique_i = (unique_codes // n).astype(np.int32)
+        unique_j = (unique_codes % n).astype(np.int32)
+    else:
+        unique_i = (unique_codes // np.uint64(n)).astype(np.int32)
+        unique_j = (unique_codes % np.uint64(n)).astype(np.int32)
+
+    return unique_i, unique_j
+
+
+def _image_bruteforce_np(hashes_np, max_hamming):
+    n = len(hashes_np)
+    all_pairs = []
+    batch_size = 200
+
+    for start in range(0, n, batch_size):
+        end = min(start + batch_size, n)
+        b = end - start
+        batch = hashes_np[start:end]
+        rest = hashes_np[start:]
+        n_rest = len(rest)
+
+        min_hamming = np.full((b, n_rest), 255, dtype=np.uint8)
+        min_ma = np.zeros((b, n_rest), dtype=np.uint8)
+        min_mb = np.zeros((b, n_rest), dtype=np.uint8)
+
+        for ka in range(4):
+            a_col = batch[:, ka]
+            for kb in range(4):
+                b_col = rest[:, kb]
+                xor = np.bitwise_xor(a_col[:, None], b_col[None, :])
+                pc = _popcount64_np(xor)
+                better = pc < min_hamming
+                min_hamming = np.where(better, pc, min_hamming)
+                min_ma = np.where(better, ka, min_ma)
+                min_mb = np.where(better, kb, min_mb)
+
+        valid = min_hamming <= max_hamming
+        triu = np.triu(np.ones_like(valid, dtype=bool), k=1)
+        final = valid & triu
+
+        li_arr, lj_arr = np.where(final)
+        for k in range(len(li_arr)):
+            li = int(li_arr[k])
+            lj = int(lj_arr[k])
+            all_pairs.append((
+                start + li,
+                start + lj,
+                int(min_hamming[li, lj]),
+                int(min_ma[li, lj]),
+                int(min_mb[li, lj]),
+            ))
+
+        print(f"[dup]   image brute: {end}/{n} "
+              f"(matches: {len(all_pairs)})")
+
+    return all_pairs
+
+
+def _image_verify_candidates_np(hashes_np, i_arr, j_arr, max_hamming):
+    if len(i_arr) == 0:
+        return []
+
+    all_pairs = []
+    batch_size = 200000
+    total = len(i_arr)
+
+    t_start = time.time()
+
+    for start in range(0, total, batch_size):
+        end = min(start + batch_size, total)
+        bi = i_arr[start:end]
+        bj = j_arr[start:end]
+
+        h_i = hashes_np[bi]
+        h_j = hashes_np[bj]
+
+        min_hamming = np.full(len(bi), 255, dtype=np.uint8)
+        min_ma = np.zeros(len(bi), dtype=np.uint8)
+        min_mb = np.zeros(len(bi), dtype=np.uint8)
+
+        for ka in range(4):
+            a_col = h_i[:, ka]
+            for kb in range(4):
+                b_col = h_j[:, kb]
+                xor = np.bitwise_xor(a_col, b_col)
+                pc = _popcount64_np(xor)
+                better = pc < min_hamming
+                min_hamming = np.where(better, pc, min_hamming)
+                min_ma = np.where(better, ka, min_ma)
+                min_mb = np.where(better, kb, min_mb)
+
+        valid = min_hamming <= max_hamming
+        valid_idx = np.where(valid)[0]
+        if len(valid_idx):
+            for k in valid_idx:
+                k = int(k)
+                all_pairs.append((
+                    int(bi[k]),
+                    int(bj[k]),
+                    int(min_hamming[k]),
+                    int(min_ma[k]),
+                    int(min_mb[k]),
+                ))
+
+        elapsed = time.time() - t_start
+        print(f"[dup]   image verify: {end}/{total} "
+              f"(matched: {len(all_pairs)}, elapsed={elapsed:.1f}s)")
+
+    return all_pairs
+
+
+def _image_pair_matches(paths, frames_by_path, item_by_path,
+                        max_hamming=IMAGE_MAX_HAMMING,
+                        lsh_hamming=IMAGE_LSH_HAMMING):
     image_indices = [
         i for i, p in enumerate(paths)
         if _is_image_item(item_by_path.get(p))
@@ -811,41 +1041,91 @@ def _image_pair_matches(paths, hash_objs, item_by_path,
     if n < 2:
         return {}
 
-    print(f"[dup] image phase: comparing {n} photos "
-          f"({n * (n - 1) // 2} pairs, brute force)")
+    print(f"[dup] image phase: {n} photos")
 
-    if n > IMAGE_COMPARE_WARN_LIMIT:
-        print(f"[dup] WARNING: {n} photos — brute force may be slow. "
-              f"Consider narrowing scan_paths.")
+    hashes_np = np.zeros((n, 4), dtype=np.uint64)
+    valid = np.zeros(n, dtype=bool)
 
-    matches = {}
-    total_pairs = n * (n - 1) // 2
-    progress_step = max(1, total_pairs // 20)  # 5% шагов
-    done = 0
+    skipped_no_frames = 0
+    skipped_bad_hex = 0
+    non_zero_count = 0
 
-    for a in range(n):
-        i = image_indices[a]
-        frames_a = hash_objs[i]
-        if not frames_a:
+    for k, i in enumerate(image_indices):
+        frames = frames_by_path.get(paths[i])
+        if not frames:
+            skipped_no_frames += 1
             continue
-        # У фото ровно 1 кадр (position=0.5), hashes = 4 imagehash
-        hashes_a = frames_a[0][1]
-        for b in range(a + 1, n):
-            j = image_indices[b]
-            frames_b = hash_objs[j]
-            if not frames_b:
+        hashes_list = frames[0].get('hashes') or []
+        if len(hashes_list) < 4:
+            skipped_no_frames += 1
+            continue
+        ok = False
+        for m in range(4):
+            hx = hashes_list[m]
+            if not hx:
                 continue
-            hashes_b = frames_b[0][1]
-            res = _classify_image_pair(hashes_a, hashes_b, max_hamming)
-            if res:
-                matches[(i, j)] = res
-            done += 1
-            if done % progress_step == 0:
-                print(f"[dup]   image compare: {done}/{total_pairs} "
-                      f"(matches: {len(matches)})")
+            try:
+                val = int(hx, 16) if isinstance(hx, str) else int(hx)
+            except (ValueError, TypeError):
+                skipped_bad_hex += 1
+                continue
+            hashes_np[k, m] = np.uint64(val)
+            if val != 0:
+                non_zero_count += 1
+            ok = True
+        if ok:
+            valid[k] = True
 
-    print(f"[dup] image matched: {len(matches)} / {total_pairs}")
-    return matches
+    print(f"[dup] image hashes: non-zero={non_zero_count}, "
+          f"skipped_no_frames={skipped_no_frames}, "
+          f"skipped_bad_hex={skipped_bad_hex}")
+
+    valid_k = np.where(valid)[0]
+    hashes_np = hashes_np[valid_k]
+    n_valid = len(valid_k)
+    print(f"[dup] image phase: {n_valid} valid photos "
+          f"({n - n_valid} skipped)")
+
+    if n_valid < 2:
+        return {}
+
+    if n_valid <= IMAGE_BRUTE_FORCE_LIMIT:
+        print(f"[dup] image mode: brute-force (n={n_valid})")
+        all_pairs = _image_bruteforce_np(hashes_np, max_hamming)
+    else:
+        print(f"[dup] image mode: MIH "
+              f"(n={n_valid}, lsh_hamming={lsh_hamming})")
+        t0 = time.time()
+        i_arr, j_arr = _image_mih_candidates_np(
+            hashes_np, lsh_hamming,
+            triu_threshold=IMAGE_MIH_TRIU_THRESHOLD,
+            max_bucket_size=IMAGE_MIH_MAX_BUCKET_SIZE,
+            max_pairs=IMAGE_MIH_MAX_PAIRS,
+        )
+        t_mih = time.time() - t0
+        print(f"[dup] image MIH done: {len(i_arr)} unique candidates "
+              f"in {t_mih:.1f}s")
+
+        t0 = time.time()
+        all_pairs = _image_verify_candidates_np(
+            hashes_np, i_arr, j_arr, max_hamming)
+        t_verify = time.time() - t0
+        print(f"[dup] image verify done: {len(all_pairs)} matched "
+              f"in {t_verify:.1f}s")
+
+    result = {}
+    for (local_i, local_j, hamming, ma, mb) in all_pairs:
+        i_path = image_indices[valid_k[local_i]]
+        j_path = image_indices[valid_k[local_j]]
+        result[(i_path, j_path)] = {
+            'hamming': hamming,
+            'mirror_a': ma,
+            'mirror_b': mb,
+        }
+
+    total_pairs = n_valid * (n_valid - 1) // 2
+    print(f"[dup] image matched: {len(result)} / {total_pairs}")
+    return result
 
 
 # ===================================================================
@@ -919,7 +1199,6 @@ def _classify_video_pair(ha, hb):
 
     subseq_len = len(chain)
     matched_count = len(greedy_pairs)
-
     coverage_a = matched_count / n_a
     coverage_b = len(set(p[1] for p in greedy_pairs)) / n_b
 
@@ -1052,7 +1331,6 @@ def _group_all(task_id, frames_by_path, audio_by_path,
     print(f"[dup] === GROUPING START (mode={mode}) ===")
     print(f"[dup] files with frames: {n}")
 
-    # ---- Разделяем на фото и видео ----
     image_path_set = set()
     for p in paths:
         item = item_by_path.get(p) or {}
@@ -1124,8 +1402,7 @@ def _group_all(task_id, frames_by_path, audio_by_path,
     image_matches_by_pair = {}
     if n_images >= 2:
         raw_image_matches = _image_pair_matches(
-            paths, hash_objs, item_by_path)
-        # фильтр blacklist + union
+            paths, frames_by_path, item_by_path)
         for (i, j), res in raw_image_matches.items():
             if is_ignored(i, j):
                 continue
@@ -1134,7 +1411,7 @@ def _group_all(task_id, frames_by_path, audio_by_path,
         print(f"[dup] image matched after blacklist: "
               f"{len(image_matches_by_pair)}")
 
-    # ---------- AUDIO (только в deep) ----------
+    # ---------- AUDIO ----------
     audio_matches_by_pair = {}
     if mode == 'deep':
         _set_progress(task_id, 65, 0, 0, 'Building audio LSH index...')
@@ -1172,12 +1449,37 @@ def _group_all(task_id, frames_by_path, audio_by_path,
     # ---------- СБОРКА ГРУПП ----------
     _set_progress(task_id, 95, 0, 0, 'Grouping results...')
 
+    print(f"[dup] pre-indexing matches by root...")
+
+    video_by_root = defaultdict(list)
+    for (i, j), res in video_matches_by_pair.items():
+        video_by_root[find(i)].append((i, j, res))
+
+    image_by_root = defaultdict(list)
+    for (i, j), res in image_matches_by_pair.items():
+        image_by_root[find(i)].append((i, j, res))
+
+    audio_by_root = defaultdict(list)
+    for (i, j), res in audio_matches_by_pair.items():
+        audio_by_root[find(i)].append((i, j, res))
+
     by_root = defaultdict(list)
     for i in range(n):
         by_root[find(i)].append(i)
 
+    print(f"[dup] roots: {len(by_root)}, "
+          f"video matches: {len(video_matches_by_pair)}, "
+          f"image matches: {len(image_matches_by_pair)}, "
+          f"audio matches: {len(audio_matches_by_pair)}")
+
     groups = []
+    done_g = 0
+    total_g = len(by_root)
     for root, idxs in by_root.items():
+        done_g += 1
+        if done_g % 500 == 0 or done_g == total_g:
+            print(f"[dup] grouping: {done_g}/{total_g}")
+
         if len(idxs) < 2:
             continue
         group_files = []
@@ -1187,14 +1489,12 @@ def _group_all(task_id, frames_by_path, audio_by_path,
                 group_files.append(item)
         if len(group_files) < 2:
             continue
-        group_ids = {f['id'] for f in group_files}
 
-        # --- VIDEO matches ---
         video_list = []
-        for (i, j), res in video_matches_by_pair.items():
+        for (i, j, res) in video_by_root.get(root, []):
             a = item_by_path.get(paths[i])
             b = item_by_path.get(paths[j])
-            if a and b and a['id'] in group_ids and b['id'] in group_ids:
+            if a and b:
                 video_list.append({
                     'a_id': a['id'],
                     'b_id': b['id'],
@@ -1206,12 +1506,11 @@ def _group_all(task_id, frames_by_path, audio_by_path,
                     'pairs': res['pairs'],
                 })
 
-        # --- IMAGE matches ---
         image_list = []
-        for (i, j), res in image_matches_by_pair.items():
+        for (i, j, res) in image_by_root.get(root, []):
             a = item_by_path.get(paths[i])
             b = item_by_path.get(paths[j])
-            if a and b and a['id'] in group_ids and b['id'] in group_ids:
+            if a and b:
                 image_list.append({
                     'a_id': a['id'],
                     'b_id': b['id'],
@@ -1221,12 +1520,11 @@ def _group_all(task_id, frames_by_path, audio_by_path,
                     'mirror_b': res['mirror_b'],
                 })
 
-        # --- AUDIO matches ---
         audio_list = []
-        for (i, j), res in audio_matches_by_pair.items():
+        for (i, j, res) in audio_by_root.get(root, []):
             a = item_by_path.get(paths[i])
             b = item_by_path.get(paths[j])
-            if a and b and a['id'] in group_ids and b['id'] in group_ids:
+            if a and b:
                 audio_list.append({
                     'a_id': a['id'],
                     'b_id': b['id'],
@@ -1237,7 +1535,6 @@ def _group_all(task_id, frames_by_path, audio_by_path,
                     'skipped_intro_sec': res.get('skipped_intro_sec', 0),
                 })
 
-        # reason
         if video_list and audio_list:
             reason = 'video+audio'
         elif video_list:
@@ -1249,7 +1546,6 @@ def _group_all(task_id, frames_by_path, audio_by_path,
         else:
             continue
 
-        # kind группы
         if image_list and not video_list and not audio_list:
             kind = 'image'
         else:
@@ -1264,7 +1560,7 @@ def _group_all(task_id, frames_by_path, audio_by_path,
             elif has_partial:
                 kind = 'partial'
             else:
-                kind = 'image'  # fallback (не должно случаться)
+                kind = 'image'
 
         groups.append({
             'files': group_files,
@@ -1277,6 +1573,7 @@ def _group_all(task_id, frames_by_path, audio_by_path,
             },
         })
 
+    print(f"[dup] grouped {len(groups)} groups")
     return groups
 
 
@@ -1341,10 +1638,18 @@ def _find_duplicates_worker(task_id, filters, scan_paths=None, mode='deep'):
             print(f"[dup] after path filter: {len(all_items)} "
                   f"(removed {before - len(all_items)})")
 
-        missing = [v['filepath'] for v in all_items
-                   if not os.path.exists(v.get('filepath', ''))]
-        if missing:
-            print(f"[dup] WARNING: {len(missing)} files in DB missing on disk")
+        # --- АВТООЧИСТКА: отсутствующие файлы удаляем из БД ---
+        valid_items = []
+        missing_count = 0
+        for v in all_items:
+            if not os.path.exists(v.get('filepath', '')):
+                missing_count += 1
+                delete_video(v['id'])
+            else:
+                valid_items.append(v)
+        if missing_count:
+            print(f"[dup] removed {missing_count} missing files from DB")
+        all_items = valid_items
 
         total = len(all_items)
         _set_progress(task_id, 0, 0, total, f'Scanning {total} files...')
@@ -1367,20 +1672,33 @@ def _find_duplicates_worker(task_id, filters, scan_paths=None, mode='deep'):
 
         include_audio = (mode == 'deep')
 
+        # --- ХЕШИРОВАНИЕ + АВТОПЕРЕНОС БИТЫХ В !Broken ---
         with ThreadPoolExecutor(max_workers=HASH_WORKERS) as ex:
-            futures = [ex.submit(_process_media, it, include_audio)
-                       for it in all_items]
+            futures = {ex.submit(_process_media, it, include_audio): it
+                       for it in all_items}
             for fut in as_completed(futures):
+                item = futures[fut]
+                entry = None
                 try:
                     entry = fut.result()
                 except Exception as e:
                     print(f"[dup] hash err: {e}")
-                    entry = None
+
                 processed += 1
                 pct = int(processed / total * 40)
                 _set_progress(task_id, pct, processed, total,
                               f'Hashing {processed}/{total}')
-                if entry:
+
+                if entry is None:
+                    path = item['filepath']
+                    if os.path.exists(path):
+                        print(f"[dup] file broken, moving to !Broken: {path}")
+                        try:
+                            move_to_broken(path, keep_name=item['filename'])
+                            delete_video(item['id'])
+                        except Exception as e:
+                            print(f"[dup] failed to move broken file: {e}")
+                else:
                     fp = entry['filepath']
                     frames_by_path[fp] = entry['frames']
                     if include_audio:
@@ -1588,13 +1906,18 @@ def get_duplicate_groups():
         _save_groups([])
         return []
 
+    # ★ ФИКС: чанки по SQL_PARAM_CHUNK (лимит SQLite ~999 параметров).
+    existing = set()
+    ids_list = list(all_ids)
     conn = get_db_connection()
     try:
         c = conn.cursor()
-        placeholders = ','.join('?' * len(all_ids))
-        c.execute(f'SELECT id FROM videos WHERE id IN ({placeholders})',
-                  tuple(all_ids))
-        existing = {row['id'] for row in c.fetchall()}
+        for i in range(0, len(ids_list), SQL_PARAM_CHUNK):
+            chunk = ids_list[i:i + SQL_PARAM_CHUNK]
+            placeholders = ','.join('?' * len(chunk))
+            c.execute(f'SELECT id FROM videos WHERE id IN ({placeholders})',
+                      tuple(chunk))
+            existing.update(row['id'] for row in c.fetchall())
     finally:
         conn.close()
 
