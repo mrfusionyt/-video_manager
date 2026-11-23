@@ -33,22 +33,16 @@
     </style>
 </head>
 <body>
-{# Страница редактора — без сайдбара, на всю ширину #}
 {% set NO_SIDEBAR = (request.endpoint == 'editor_page') %}
-{# Страницы с единым сайдбаром "Settings + Tools" #}
 {% set ADMIN_PAGES = ('settings', 'tools_page', 'download_vr', 'duplicates_page') %}
-{# Страницы, где в сайдбаре показываются фотокатегории #}
 {% set PHOTO_PAGES = ('photos_page', 'photo_view', 'photo_edit') %}
-{# Страницы, где активна вкладка Photo в хедере #}
 {% set PHOTO_ACTIVE = (request.endpoint in PHOTO_PAGES) %}
 
 <div class="container-fluid">
     <div class="row">
-        <!-- Sidebar (desktop only) -->
         {% if not NO_SIDEBAR %}
         <div class="col-md-3 col-lg-2 sidebar d-none d-md-block" style="padding-top: 10px;">
 
-            <!-- Profile switch -->
             <div class="profile-switch-wrap">
                 <button type="button" class="profile-switch-btn"
                         data-profile="{{ 'transgender' if current_profile == 'female' else 'female' }}"
@@ -95,6 +89,12 @@
                         <a class="nav-link {% if request.endpoint == 'instagram.index' %}active{% endif %}"
                            href="{{ url_for('instagram.index') }}">
                             Instagram Downloader
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.endpoint == 'photo_classifier.index' %}active{% endif %}"
+                           href="{{ url_for('photo_classifier.index') }}" target="_blank">
+                            PhotoClassifier
                         </a>
                     </li>
                     <li class="nav-item">
@@ -204,7 +204,6 @@
         </div>
         {% endif %}
 
-        <!-- Main content -->
         <div class="{% if NO_SIDEBAR %}col-12{% else %}col-md-9 col-lg-10{% endif %}">
             <div class="top-bar">
                 <div class="left-section">
@@ -306,7 +305,6 @@
     </div>
 </div>
 
-<!-- МОБИЛЬНОЕ МЕНЮ (DRAWER) -->
 <div class="mobile-drawer-overlay" id="mobileDrawerOverlay"></div>
 
 <aside class="mobile-drawer" id="mobileDrawer">
@@ -373,6 +371,11 @@
                 <li>
                     <a href="{{ url_for('instagram.index') }}">
                         <span>Instagram Downloader</span>
+                    </a>
+                </li>
+                <li>
+                    <a href="{{ url_for('photo_classifier.index') }}" target="_blank">
+                        <span>PhotoClassifier</span>
                     </a>
                 </li>
                 <li>
@@ -596,7 +599,6 @@
     </div>
 </aside>
 
-<!-- Модальное окно фильтра категорий -->
 <div class="modal fade" id="filterModal" tabindex="-1" aria-labelledby="filterModalLabel" aria-hidden="true">
     <div class="modal-dialog modal-lg">
         <div class="modal-content">
@@ -653,4 +655,4 @@
 <script src="{{ url_for('static', filename='js/preview_mobile.js') }}"></script>
 {% block scripts %}{% endblock %}
 </body>
-</html>
+</html> 

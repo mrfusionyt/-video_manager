@@ -1,15 +1,19 @@
 r"""
 Поиск дубликатов — версия с numpy-MIH, оптимизированной группировкой,
-авто-очисткой битых/отсутствующих файлов и защитой от ложных фото-дублей.
+авто-очисткой битых/отсутствующих файлов.
 
 Ключевое:
   • При старте отсутствующие на диске файлы удаляются из БД.
   • Битые файлы переносятся в !Broken.
-  • VIDEO — 25 кадров × 4 зеркала, LSH, full/partial.
-  • PHOTO — 1 кадр × 4 зеркала, numpy-MIH + low-entropy фильтр.
+  • VIDEO — 10 кадров × 2 зеркала (orig + mirror_h), LSH, full/partial.
+  • PHOTO — 1 кадр × 2 зеркала, numpy-MIH + low-entropy фильтр.
   • Safety net: image с видео-расширением → принудительно video.
   • Группировка — O(matches + groups) через pre-indexing по корням.
   • AUDIO — chromaprint → LSH → FFT → longest-run.
+
+Что убрано:
+  • Вертикальные перевороты (flip, flip_hv) — редкий кейс, много ложных.
+  • 25 кадров → 10 (декодирование — узкое место, экономия ~60%).
 """
 import os
 import json
@@ -44,20 +48,18 @@ FPCALC_CANDIDATES = [
 ]
 
 # ---------- Video ----------
-KEYFRAME_POSITIONS = [round(0.05 + i * 0.0375, 4) for i in range(25)]
+# 10 кадров: 5%, 15%, 25%, 35%, 45%, 55%, 65%, 75%, 85%, 95%.
+KEYFRAME_POSITIONS = [round(0.05 + i * 0.10, 4) for i in range(10)]
 
 FAST_MAX_HAMMING = 2
 FULL_COVERAGE = 0.80
-PARTIAL_MIN_SUBSEQ_FRAMES = 6
-MIN_MATCHED_FRAMES = 3
+PARTIAL_MIN_SUBSEQ_FRAMES = 3   # из 10 кадров
+MIN_MATCHED_FRAMES = 2           # из 10 кадров
 
 # ---------- Photo ----------
 IMAGE_MAX_HAMMING = 5
 IMAGE_LSH_HAMMING = 5
 IMAGE_BRUTE_FORCE_LIMIT = 3000
-
-# Минимальная энтропия (std grayscale). Ниже — пропускаем.
-# Отсекает аватарки, иконки, однотонные картинки, скриншоты.
 IMAGE_MIN_ENTROPY = 8.0
 
 IMAGE_MIH_TRIU_THRESHOLD = 200
@@ -87,12 +89,13 @@ AUDIO_SILENCE_MIN_MEAN_DIFF_BITS   = 2.5
 
 AUDIO_FFT_PEAK_STD_RATIO = 5.0
 
-# ---------- Параллелизм ----------
 COMPARE_WORKERS = min(8, max(2, (os.cpu_count() or 4)))
 HASH_WORKERS    = min(4, max(2, (os.cpu_count() or 4)))
 
-# SQLite имеет лимит на количество параметров (~999).
 SQL_PARAM_CHUNK = 500
+
+# Количество хешей на кадр: orig + mirror_h. Без flip и flip_hv.
+NUM_HASHES = 2
 
 _VIDEO_EXTS = {'.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv',
                '.webm', '.m4v', '.ts', '.m2ts', '.mpg', '.mpeg'}
@@ -106,6 +109,7 @@ for cand in FPCALC_CANDIDATES:
 
 print(f"[dup] fpcalc path = {FPCALC_PATH}")
 print(f"[dup] video: {len(KEYFRAME_POSITIONS)} keyframes, "
+      f"hashes/frame={NUM_HASHES} (orig+mirror), "
       f"max_hamming={FAST_MAX_HAMMING}, "
       f"full_coverage>={FULL_COVERAGE}, "
       f"partial_min_subseq={PARTIAL_MIN_SUBSEQ_FRAMES}")
@@ -228,14 +232,17 @@ def _load_video_frames(file_id):
     rows = c.fetchall()
     if not rows:
         return None
-    return [
-        {
+    result = []
+    for r in rows:
+        # ★ Берём только orig и mirror. flip/flip_hv игнорируем.
+        hashes = [h for h in (r['phash_orig'], r['phash_mirror']) if h]
+        if not hashes:
+            continue
+        result.append({
             'position': r['position'],
-            'hashes': [r['phash_orig'], r['phash_mirror'],
-                       r['phash_flip'], r['phash_hv']],
-        }
-        for r in rows
-    ]
+            'hashes': hashes,
+        })
+    return result if result else None
 
 
 def _save_video_frames(file_id, frames):
@@ -244,12 +251,15 @@ def _save_video_frames(file_id, frames):
     c.execute("DELETE FROM video_frames WHERE file_id = ?", (file_id,))
     for idx, f in enumerate(frames):
         h = f['hashes']
+        h0 = h[0] if len(h) > 0 else ''
+        h1 = h[1] if len(h) > 1 else ''
+        # flip и flip_hv всегда пишем пустыми — не используем.
         c.execute("""
             INSERT INTO video_frames
                 (file_id, frame_idx, position,
                  phash_orig, phash_mirror, phash_flip, phash_hv)
             VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (file_id, idx, f['position'], h[0], h[1], h[2], h[3]))
+        """, (file_id, idx, f['position'], h0, h1, '', ''))
     conn.commit()
 
 
@@ -475,11 +485,10 @@ def _extract_frames(video_path, positions):
 
 
 def _hash_image(pil_img):
+    """2 хеша: оригинал + горизонтальное зеркало."""
     return [
         str(imagehash.phash(pil_img)),
         str(imagehash.phash(ImageOps.mirror(pil_img))),
-        str(imagehash.phash(ImageOps.flip(pil_img))),
-        str(imagehash.phash(ImageOps.flip(ImageOps.mirror(pil_img)))),
     ]
 
 
@@ -512,8 +521,6 @@ def _process_image_frames(image_path):
         img = Image.open(image_path).convert('RGB')
         img.thumbnail((256, 256), Image.Resampling.LANCZOS)
 
-        # Отсеиваем низкоэнтропийные изображения (аватарки, однотонные,
-        # скриншоты — их phash близок к нулю и они все матчатся друг с другом).
         try:
             gray = np.asarray(img.convert('L'), dtype=np.float32)
             std = float(gray.std())
@@ -727,9 +734,6 @@ def _process_media(item, include_audio=True):
 
     media_type = item.get('media_type', 'video')
 
-    # Safety net: если media_type='image', но расширение видеофайла —
-    # принудительно считаем видео. Иначе получаем ложные дубли
-    # «фото», которые на самом деле — кадры из видео.
     _ext = os.path.splitext(path)[1].lower()
     if media_type == 'image' and _ext in _VIDEO_EXTS:
         print(f"[dup] WARNING: 'photo' with video extension {_ext}: {path}")
@@ -803,6 +807,9 @@ def _image_mih_candidates_np(hashes_np, lsh_hamming,
                              triu_threshold=IMAGE_MIH_TRIU_THRESHOLD,
                              max_bucket_size=IMAGE_MIH_MAX_BUCKET_SIZE,
                              max_pairs=IMAGE_MIH_MAX_PAIRS):
+    """
+    hashes_np — (n, NUM_HASHES) uint64.
+    """
     n = len(hashes_np)
     if n < 2:
         return (np.empty(0, dtype=np.int32),
@@ -829,12 +836,13 @@ def _image_mih_candidates_np(hashes_np, lsh_hamming,
     limit_hit = False
 
     t_start = time.time()
+    m_slots = hashes_np.shape[1]
 
     for b_idx in range(num_blocks):
         shift_val = shifts[b_idx]
         mask_val = masks[b_idx]
 
-        for m in range(4):
+        for m in range(m_slots):
             col = (hashes_np[:, m] >> np.uint64(shift_val)) & np.uint64(mask_val)
 
             order = np.argsort(col, kind='stable')
@@ -899,10 +907,6 @@ def _image_mih_candidates_np(hashes_np, lsh_hamming,
               f"skipped_by_limit={skipped_by_limit}, "
               f"elapsed={elapsed:.1f}s")
 
-        if limit_hit:
-            print(f"[dup] image MIH: HIT max_pairs={max_pairs} limit. "
-                  f"Further large buckets will be skipped.")
-
     if not all_i:
         return (np.empty(0, dtype=np.int32),
                 np.empty(0, dtype=np.int32))
@@ -932,6 +936,7 @@ def _image_bruteforce_np(hashes_np, max_hamming):
     n = len(hashes_np)
     all_pairs = []
     batch_size = 200
+    m_slots = hashes_np.shape[1]
 
     for start in range(0, n, batch_size):
         end = min(start + batch_size, n)
@@ -944,9 +949,9 @@ def _image_bruteforce_np(hashes_np, max_hamming):
         min_ma = np.zeros((b, n_rest), dtype=np.uint8)
         min_mb = np.zeros((b, n_rest), dtype=np.uint8)
 
-        for ka in range(4):
+        for ka in range(m_slots):
             a_col = batch[:, ka]
-            for kb in range(4):
+            for kb in range(m_slots):
                 b_col = rest[:, kb]
                 xor = np.bitwise_xor(a_col[:, None], b_col[None, :])
                 pc = _popcount64_np(xor)
@@ -984,6 +989,7 @@ def _image_verify_candidates_np(hashes_np, i_arr, j_arr, max_hamming):
     all_pairs = []
     batch_size = 200000
     total = len(i_arr)
+    m_slots = hashes_np.shape[1]
 
     t_start = time.time()
 
@@ -999,9 +1005,9 @@ def _image_verify_candidates_np(hashes_np, i_arr, j_arr, max_hamming):
         min_ma = np.zeros(len(bi), dtype=np.uint8)
         min_mb = np.zeros(len(bi), dtype=np.uint8)
 
-        for ka in range(4):
+        for ka in range(m_slots):
             a_col = h_i[:, ka]
-            for kb in range(4):
+            for kb in range(m_slots):
                 b_col = h_j[:, kb]
                 xor = np.bitwise_xor(a_col, b_col)
                 pc = _popcount64_np(xor)
@@ -1043,7 +1049,7 @@ def _image_pair_matches(paths, frames_by_path, item_by_path,
 
     print(f"[dup] image phase: {n} photos")
 
-    hashes_np = np.zeros((n, 4), dtype=np.uint64)
+    hashes_np = np.zeros((n, NUM_HASHES), dtype=np.uint64)
     valid = np.zeros(n, dtype=bool)
 
     skipped_no_frames = 0
@@ -1056,11 +1062,11 @@ def _image_pair_matches(paths, frames_by_path, item_by_path,
             skipped_no_frames += 1
             continue
         hashes_list = frames[0].get('hashes') or []
-        if len(hashes_list) < 4:
+        if len(hashes_list) < NUM_HASHES:
             skipped_no_frames += 1
             continue
         ok = False
-        for m in range(4):
+        for m in range(NUM_HASHES):
             hx = hashes_list[m]
             if not hx:
                 continue
@@ -1638,7 +1644,6 @@ def _find_duplicates_worker(task_id, filters, scan_paths=None, mode='deep'):
             print(f"[dup] after path filter: {len(all_items)} "
                   f"(removed {before - len(all_items)})")
 
-        # --- АВТООЧИСТКА: отсутствующие файлы удаляем из БД ---
         valid_items = []
         missing_count = 0
         for v in all_items:
@@ -1672,7 +1677,6 @@ def _find_duplicates_worker(task_id, filters, scan_paths=None, mode='deep'):
 
         include_audio = (mode == 'deep')
 
-        # --- ХЕШИРОВАНИЕ + АВТОПЕРЕНОС БИТЫХ В !Broken ---
         with ThreadPoolExecutor(max_workers=HASH_WORKERS) as ex:
             futures = {ex.submit(_process_media, it, include_audio): it
                        for it in all_items}
@@ -1906,7 +1910,6 @@ def get_duplicate_groups():
         _save_groups([])
         return []
 
-    # ★ ФИКС: чанки по SQL_PARAM_CHUNK (лимит SQLite ~999 параметров).
     existing = set()
     ids_list = list(all_ids)
     conn = get_db_connection()

@@ -1,20 +1,27 @@
 """
-Точка входа VideoManager.
+Точка входа VideoManager (Flask app factory).
+
+Запуск:
+    python app.py          — только Flask (без окна)
+    python launcher.py     — Flask + окно + трей + автообновление
 """
 import os
 import sys
 
 from flask import Flask, request, send_from_directory
 
+
 def resource_path(relative_path: str) -> str:
     if hasattr(sys, "_MEIPASS"):
         return os.path.join(sys._MEIPASS, relative_path)
     return os.path.join(os.path.abspath(os.path.dirname(__file__)), relative_path)
 
+
 if getattr(sys, "frozen", False):
     BASE_DIR = os.path.dirname(sys.executable)
 else:
     BASE_DIR = os.path.abspath(os.path.dirname(__file__))
+
 
 from models import (
     init_db, get_categories, get_all_videos, get_libraries, count_videos,
@@ -26,7 +33,9 @@ from helpers.profiles import get_current_profile, profile_to_mode
 from helpers.pagination import paginate_range
 from addon.instagram_downloader import instagram_bp, set_post_download_hook
 from addon.youtube_downloader import youtube_bp
+from addon.photo_classifier import photo_classifier_bp
 from views import register_all
+
 
 app = Flask(
     __name__,
@@ -48,6 +57,8 @@ init_artists_db()
 
 app.register_blueprint(instagram_bp)
 app.register_blueprint(youtube_bp)
+app.register_blueprint(photo_classifier_bp)
+
 set_post_download_hook(scan_libraries)
 register_all(app)
 
@@ -56,16 +67,6 @@ try:
     views_tools.register(app)
 except Exception as _e:
     print(f"[app] WARNING: tools page not registered: {_e}")
-
-
-# ===================================================================
-#                       СТАТИКА (image/*)
-# ===================================================================
-# NB: эндпоинт 'serve_image' определён в views/main.py.
-# Здесь дубликат не нужен — url_for('serve_image', ...) резолвится
-# на тот, что зарегистрирован первым (main).
-# Оставляем только общую раздачу содержимого IMAGE_DIR для случаев,
-# когда image/ содержит большие вложения, не покрытые main.serve_image.
 
 
 @app.template_filter('mode_name')
@@ -82,23 +83,18 @@ def inject_globals():
     current_profile = get_current_profile()
     current_mode = profile_to_mode(current_profile)
 
-    # --- Категории (раздельно video/image) ---
     categories_video = get_categories(mode=current_mode, media_type='video')
     categories_image = get_categories(mode=current_mode, media_type='image')
 
-    # --- Видео текущего профиля (только media_type='video') ---
     all_videos = get_all_videos(mode=current_mode, media_type='video')
 
-    # --- Количество фото (для бейджа в хедере) ---
     try:
         photos_count = count_videos(mode=current_mode, media_type='image')
     except Exception:
         photos_count = 0
 
-    # --- Количество видео (только video) ---
     videos_count = len(all_videos)
 
-    # --- Присваиваем счётчики категориям видео для сайдбара ---
     cat_counts = {}
     for video in all_videos:
         for cat in video.get('categories', []):
@@ -130,15 +126,11 @@ def inject_globals():
     ]
 
     return dict(
-        # video-категории (для обратной совместимости с base.html)
         all_categories=categories_video,
-        # image-категории (для фильтров на /photos и настроек)
         all_photo_categories=categories_image,
-
         all_libraries=libraries,
         all_videos_count=videos_count,
         all_photos_count=photos_count,
-
         dark_mode=DARK_MODE,
         settings_tabs=settings_tabs,
         app_config=app_config,
