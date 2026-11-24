@@ -93,7 +93,7 @@
                     </li>
                     <li class="nav-item">
                         <a class="nav-link {% if request.endpoint == 'photo_classifier.index' %}active{% endif %}"
-                           href="{{ url_for('photo_classifier.index') }}" target="_blank">
+                           href="{{ url_for('photo_classifier.index') }}">
                             PhotoClassifier
                         </a>
                     </li>
@@ -374,7 +374,7 @@
                     </a>
                 </li>
                 <li>
-                    <a href="{{ url_for('photo_classifier.index') }}" target="_blank">
+                    <a href="{{ url_for('photo_classifier.index') }}">
                         <span>PhotoClassifier</span>
                     </a>
                 </li>
@@ -655,4 +655,4 @@
 <script src="{{ url_for('static', filename='js/preview_mobile.js') }}"></script>
 {% block scripts %}{% endblock %}
 </body>
-</html> 
+</html>

@@ -1,132 +1,510 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>{% block title %}YouTube Downloader{% endblock %}</title>
-    <link rel="icon" type="image/png" href="{{ url_for('serve_image', filename='youtube.png') }}">
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/youtube.css') }}">
-    {% block styles %}{% endblock %}
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>PhotoClassifier — VideoManager</title>
+<link rel="icon" type="image/png" href="{{ url_for('photo_classifier.favicon') }}">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; overflow: hidden; -webkit-text-size-adjust: 100%; -webkit-tap-highlight-color: transparent; touch-action: none; }
+  body { background: #111; color: #eee; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif; display: flex; flex-direction: column; height: 100vh; height: 100dvh; }
 
-    <style>
-    .vm-sidebar { background: var(--bg-surface); border-right: 1px solid var(--border); min-height: calc(100vh - 70px); padding-top: 10px; }
-    .vm-sidebar h5 { color: #fff; font-size: 1rem; font-weight: 600; padding: 0 1rem; margin-bottom: 0.75rem; }
-    .vm-sidebar .nav-link { color: var(--text-secondary); padding: 0.5rem 1rem; border-radius: var(--radius); display: block; text-decoration: none; font-size: 0.9rem; transition: background var(--tr), color var(--tr); }
-    .vm-sidebar .nav-link:hover { background: var(--bg-elevated); color: #fff; }
-    .vm-sidebar .nav-link.active { background: var(--red); color: #fff; }
+  #progress-container { position: absolute; top: 0; left: 0; width: 100%; height: 3px; background: #333; z-index: 10; }
+  #progress-bar { height: 100%; background: #2d7d46; width: 0%; transition: width 0.3s ease; }
 
-    .vm-sidebar .profile-switch-wrap { padding: 8px 0.75rem 1rem 0.75rem; margin-bottom: 0.5rem; border-bottom: 1px solid var(--border); }
-    .vm-sidebar .profile-switch-btn { display: flex; align-items: center; gap: 0.6rem; width: 100%; padding: 0.65rem 0.8rem; background: var(--bg-elevated); border: 1px solid var(--border-strong); color: var(--text-primary); border-radius: var(--radius); cursor: pointer; text-align: left; transition: background var(--tr), border-color var(--tr); font-family: inherit; }
-    .vm-sidebar .profile-switch-btn:hover { background: var(--bg-btn-hover); border-color: var(--red); }
-    .vm-sidebar .profile-switch-btn:hover .profile-switch-arrow { color: var(--red); }
-    .vm-sidebar .profile-switch-icon { display: block; width: 22px; height: 22px; background-color: var(--red); -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat; -webkit-mask-position: center; mask-position: center; -webkit-mask-size: contain; mask-size: contain; flex-shrink: 0; }
-    .vm-sidebar .profile-switch-info { display: flex; flex-direction: column; gap: 0; flex: 1; min-width: 0; line-height: 1.15; }
-    .vm-sidebar .profile-switch-label { color: var(--text-muted); font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; margin-bottom: 2px; }
-    .vm-sidebar .profile-switch-name { color: var(--text-primary); font-size: 0.92rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .vm-sidebar .profile-switch-arrow { color: var(--text-muted); font-size: 1.15rem; line-height: 1; flex-shrink: 0; transition: color var(--tr); }
+  header { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: #1a1a1a; border-bottom: 1px solid #333; flex-wrap: wrap; position: relative; z-index: 5; }
+  header .title { font-weight: 600; font-size: 14px; }
+  header .spacer { flex: 1; }
+  header button { background: #2a2a2a; color: #eee; border: 1px solid #444; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 13px; touch-action: manipulation; white-space: nowrap; }
+  header button:hover { background: #3a3a3a; }
+  header button:disabled { opacity: 0.35; cursor: not-allowed; }
 
-    .vm-main-col .main-content { max-width: 100%; margin: 0; padding: 1.5rem; }
-    </style>
+  #main { flex: 1; display: flex; align-items: center; justify-content: center; position: relative; overflow: hidden; padding: 6px; touch-action: none; min-height: 0; }
+  #img-container { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; overflow: hidden; touch-action: none; }
+
+  #photo {
+    max-width: 100%; max-height: 100%; object-fit: contain; display: none;
+    user-select: none; -webkit-user-select: none; -moz-user-select: none; -ms-user-select: none;
+    -webkit-user-drag: none;
+    transition: filter 0.1s linear; will-change: filter, transform; transform-origin: center center;
+    pointer-events: none;
+  }
+
+  #photo-placeholder { color: #666; font-size: 16px; text-align: center; padding: 30px; }
+
+  .nav { position: absolute; top: 50%; transform: translateY(-50%); background: rgba(0,0,0,0.35); color: #fff; border: none; width: 70px; height: 130px; font-size: 40px; cursor: pointer; opacity: 0.65; transition: opacity 0.15s, background 0.15s; user-select: none; touch-action: manipulation; display: flex; align-items: center; justify-content: center; z-index: 10; }
+  .nav:hover { opacity: 1; background: rgba(0,0,0,0.6); }
+  .nav:active { background: rgba(0,0,0,0.8); }
+  #prev { left: 0; border-radius: 0 10px 10px 0; }
+  #next { right: 0; border-radius: 10px 0 0 10px; }
+
+  #toolbar { display: flex; align-items: center; gap: 10px; padding: 8px 14px; background: #1a1a1a; border-top: 1px solid #333; justify-content: center; flex-wrap: wrap; z-index: 5; position: relative; touch-action: manipulation; }
+  #toolbar button { background: #2a2a2a; color: #eee; border: 1px solid #444; width: 48px; height: 48px; border-radius: 8px; cursor: pointer; font-size: 22px; font-weight: 600; touch-action: manipulation; display: flex; align-items: center; justify-content: center; }
+  #toolbar button:hover { background: #3a3a3a; }
+  #toolbar button:active { background: #4a4a4a; }
+  #brightness-value { font-family: Consolas, monospace; color: #ccc; font-size: 16px; min-width: 60px; text-align: center; }
+  #counter { margin-left: auto; font-size: 18px; color: #ddd; font-family: Consolas, monospace; padding-left: 12px; white-space: nowrap; }
+
+  footer { display: flex; gap: 20px; padding: 16px 24px; justify-content: center; background: #1a1a1a; border-top: 1px solid #333; flex-wrap: wrap; z-index: 5; position: relative; touch-action: manipulation; }
+  .action-btn { padding: 42px 96px; font-size: 48px; font-weight: 700; border: none; border-radius: 14px; cursor: pointer; min-width: 280px; letter-spacing: 1px; transition: transform 0.1s, filter 0.15s; touch-action: manipulation; box-shadow: 0 4px 12px rgba(0,0,0,0.4); word-break: break-word; }
+  .action-btn:active { transform: scale(0.97); }
+  .action-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+  #btn-not-nude { background: #a83a3a; color: #fff; }
+  #btn-not-nude:hover:not(:disabled) { filter: brightness(1.15); }
+  #btn-nude { background: #2d7d46; color: #fff; }
+  #btn-nude:hover:not(:disabled) { filter: brightness(1.15); }
+
+  .modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,0.7); display: none; align-items: center; justify-content: center; z-index: 100; padding: 16px; touch-action: auto; }
+  .modal-bg.open { display: flex; }
+  .modal { background: #1e1e1e; border: 1px solid #444; border-radius: 12px; padding: 22px; width: 640px; max-width: 100%; max-height: 90vh; overflow-y: auto; }
+  .modal h2 { margin-bottom: 16px; font-size: 18px; }
+  .modal .field { margin-bottom: 12px; }
+  .modal label { display: block; margin-bottom: 6px; font-size: 13px; color: #aaa; }
+  .modal .row { display: flex; gap: 8px; }
+  .modal input { flex: 1; min-width: 0; padding: 8px 10px; background: #111; border: 1px solid #444; border-radius: 6px; color: #eee; font-size: 13px; font-family: Consolas, monospace; }
+  .modal button { padding: 8px 14px; background: #2a2a2a; color: #eee; border: 1px solid #444; border-radius: 6px; cursor: pointer; font-size: 13px; white-space: nowrap; touch-action: manipulation; }
+  .modal button:hover { background: #3a3a3a; }
+  .modal .actions { display: flex; justify-content: flex-end; align-items: center; gap: 8px; margin-top: 18px; }
+  .modal .primary { background: #2d7d46; border-color: #2d7d46; color: #fff; }
+  .modal .primary:hover { background: #369b56; }
+
+  #toast { position: fixed; top: 60px; left: 50%; transform: translateX(-50%); background: rgba(40,40,40,0.96); border: 1px solid #555; color: #eee; padding: 10px 20px; border-radius: 8px; font-size: 14px; opacity: 0; transition: opacity 0.2s; pointer-events: none; z-index: 200; max-width: 80vw; text-align: center; }
+  #toast.show { opacity: 1; }
+  #toast.error { border-color: #a83a3a; }
+
+  @media (max-width: 900px) {
+    header { padding: 6px 8px; gap: 6px; }
+    header .title { font-size: 13px; }
+    header button { padding: 5px 10px; font-size: 12px; }
+    #toolbar { padding: 6px 10px; gap: 8px; }
+    #toolbar button { width: 42px; height: 42px; font-size: 20px; }
+    #counter { font-size: 16px; }
+    .nav { width: 56px; height: 110px; font-size: 34px; opacity: 0.75; }
+    footer { flex-direction: column; gap: 10px; padding: 12px; }
+    .action-btn { width: 100%; min-width: 0; padding: 28px 16px; font-size: 38px; border-radius: 12px; }
+    .modal .actions { flex-wrap: wrap; }
+    .modal .actions button { flex: 1 1 auto; }
+    .modal .actions button:first-child { flex-basis: 100%; margin-right: 0 !important; }
+  }
+  @media (max-width: 420px) {
+    .action-btn { font-size: 32px; padding: 24px 12px; }
+    .nav { width: 46px; height: 90px; font-size: 28px; }
+    #toolbar button { width: 38px; height: 38px; font-size: 18px; }
+    #counter { font-size: 14px; }
+  }
+</style>
 </head>
 <body>
-<div class="top-bar">
-    <a href="{{ url_for('youtube.index') }}" class="brand">
-        <img src="{{ url_for('serve_image', filename='youtube.png') }}" alt="">
-        YouTube Downloader
-    </a>
-    <div class="nav-links">
-        <a href="{{ url_for('youtube.index') }}" class="btn-icon" title="Download">
-            <img src="{{ url_for('serve_image', filename='download.png') }}" alt="Download">
-        </a>
-        <a href="{{ url_for('index') }}" class="btn-icon" title="Video Manager">
-            <img src="{{ url_for('serve_image', filename='video.png') }}" alt="Video Manager">
-        </a>
+  <div id="progress-container"><div id="progress-bar"></div></div>
+
+  <header>
+    <span class="title">PhotoClassifier</span>
+    <span class="spacer"></span>
+    <button id="btn-fullscreen" title="Toggle Fullscreen (F)">⛶</button>
+    <button id="btn-undo" disabled title="Undo last move (Ctrl+Z)">↶ (0)</button>
+    <button id="btn-settings" title="Settings">⚙</button>
+  </header>
+  <div id="main">
+    <button id="prev" class="nav" title="Back (←)">‹</button>
+    <button id="next" class="nav" title="Next (→)">›</button>
+    <div id="img-container">
+      <img id="photo" alt="" draggable="false">
+      <div id="photo-placeholder">Click ⚙ to select a photo folder</div>
     </div>
-</div>
+  </div>
+  <div id="toolbar">
+    <button id="b-down" title="Darker (↓)">☀−</button>
+    <span id="brightness-value">1.00</span>
+    <button id="b-up" title="Brighter (↑)">☀+</button>
+    <button id="b-reset" title="Reset brightness (R)">↺</button>
+    <span id="counter"></span>
+  </div>
+  <footer>
+    <button class="action-btn" id="btn-not-nude" disabled>Not Nude</button>
+    <button class="action-btn" id="btn-nude" disabled>Nude</button>
+  </footer>
+  <div class="modal-bg" id="settings-modal">
+    <div class="modal">
+      <h2>Folder Settings</h2>
 
-<div class="container-fluid">
-    <div class="row">
-        <div class="col-md-3 col-lg-2 vm-sidebar d-none d-md-block">
+      <div class="field">
+        <label>Button 1 Name (Red)</label>
+        <div class="row"><input type="text" id="label-not-nude" placeholder="Not Nude"></div>
+      </div>
+      <div class="field">
+        <label>Button 2 Name (Green)</label>
+        <div class="row"><input type="text" id="label-nude" placeholder="Nude"></div>
+      </div>
 
-            <div class="profile-switch-wrap">
-                <button type="button" class="profile-switch-btn"
-                        data-profile="{{ 'transgender' if current_profile == 'female' else 'female' }}"
-                        onclick="switchProfile(this.dataset.profile)"
-                        title="Switch to {{ 'Transgender' if current_profile == 'female' else 'Female' }}">
-                    <span class="profile-switch-icon"
-                          style="-webkit-mask-image: url('{{ url_for('serve_image', filename='icon' + ('1' if current_profile == 'female' else '2') + '.png') }}'); mask-image: url('{{ url_for('serve_image', filename='icon' + ('1' if current_profile == 'female' else '2') + '.png') }}');"></span>
-                    <span class="profile-switch-info">
-                        <span class="profile-switch-label">Profile</span>
-                        <span class="profile-switch-name">{{ 'Female' if current_profile == 'female' else 'Transgender' }}</span>
-                    </span>
-                    <span class="profile-switch-arrow">⇄</span>
-                </button>
-            </div>
-
-            <h5>Settings</h5>
-            <ul class="nav flex-column">
-                {% for item in settings_tabs %}
-                <li class="nav-item">
-                    <a class="nav-link" href="{{ url_for('settings', tab=item.id, profile=current_profile) }}">
-                        {{ item.label }}
-                    </a>
-                </li>
-                {% endfor %}
-            </ul>
-
-            <h5 style="margin-top: 1.25rem;">Tools</h5>
-            <ul class="nav flex-column">
-                <li class="nav-item">
-                    <a class="nav-link" href="{{ url_for('tools_page', profile=current_profile) }}">
-                        Library Maintenance
-                    </a>
-                </li>
-                <li class="nav-item">
-                    <a class="nav-link active" href="{{ url_for('youtube.index') }}">
-                        YouTube Downloader
-                    </a>
-                </li>
-                <li class="nav-item">
-                    <a class="nav-link" href="{{ url_for('instagram.index') }}">
-                        Instagram Downloader
-                    </a>
-                </li>
-                <li class="nav-item">
-                    <a class="nav-link" href="{{ url_for('photo_classifier.index') }}" target="_blank">
-                        PhotoClassifier
-                    </a>
-                </li>
-                <li class="nav-item">
-                    <a class="nav-link" href="{{ url_for('download_vr', profile=current_profile) }}">
-                        Download VR
-                    </a>
-                </li>
-                <li class="nav-item">
-                    <a class="nav-link" href="{{ url_for('duplicates_page', profile=current_profile) }}">
-                        Duplicates
-                    </a>
-                </li>
-            </ul>
+      <div class="field">
+        <label>Photo folder (source)</label>
+        <div class="row">
+          <input type="text" id="source-folder" placeholder="Type path or Browse...">
+          <button onclick="pickFolder('source')">Browse...</button>
         </div>
-
-        <div class="col-md-9 col-lg-10 vm-main-col">
-            <div class="main-content">
-                {% block content %}{% endblock %}
-            </div>
+      </div>
+      <div class="field">
+        <label>Save Button 1 photos to</label>
+        <div class="row">
+          <input type="text" id="not-nude-folder" placeholder="Type path or Browse...">
+          <button onclick="pickFolder('not_nude')">Browse...</button>
         </div>
+      </div>
+      <div class="field">
+        <label>Save Button 2 photos to</label>
+        <div class="row">
+          <input type="text" id="nude-folder" placeholder="Type path or Browse...">
+          <button onclick="pickFolder('nude')">Browse...</button>
+        </div>
+      </div>
+      <div class="actions">
+        <button onclick="restartServer()" style="margin-right:auto;" title="Reload settings and rescan source folder">🔄 Restart server</button>
+        <button onclick="closeSettings()">Cancel</button>
+        <button class="primary" onclick="saveSettings()">Save Changes</button>
+      </div>
     </div>
-</div>
-
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  </div>
+  <div id="toast"></div>
 <script>
-window.switchProfile = window.switchProfile || function (profile) {
-    var url = new URL(window.location.href);
-    url.searchParams.set('profile', profile);
-    url.searchParams.delete('page');
-    window.location.href = url.toString();
-};
+const BP = window.location.pathname.replace(/\/$/, '') || '/pv';
+
+let images = [];
+let currentIndex = 0;
+let settings = { source: '', not_nude: '', nude: '', label_not_nude: 'Not Nude', label_nude: 'Nude' };
+let brightness = 1.0;
+
+let scale = 1.0;
+let translateX = 0, translateY = 0;
+
+let touchMode = 'none';
+let initialDistance = 0;
+let touchStartX = 0, touchStartY = 0;
+let dragStartTouchX = 0, dragStartTouchY = 0;
+
+const $ = (id) => document.getElementById(id);
+
+async function loadState() {
+  const r = await fetch(BP + '/api/state');
+  const data = await r.json();
+  images = data.images || [];
+
+  const savedIndex = localStorage.getItem('lastPhotoIndex');
+  if (savedIndex !== null && parseInt(savedIndex) < images.length) {
+    currentIndex = parseInt(savedIndex);
+  } else {
+    currentIndex = 0;
+  }
+
+  settings = data.settings || settings;
+
+  $('source-folder').value = settings.source || '';
+  $('not-nude-folder').value = settings.not_nude || '';
+  $('nude-folder').value = settings.nude || '';
+  $('label-not-nude').value = settings.label_not_nude || 'Not Nude';
+  $('label-nude').value = settings.label_nude || 'Nude';
+
+  updateUI();
+  updateUndoButton(data.undo_count || 0);
+  render();
+}
+
+function updateUI() {
+  $('btn-not-nude').textContent = settings.label_not_nude || 'Not Nude';
+  $('btn-nude').textContent = settings.label_nude || 'Nude';
+}
+
+function updateUndoButton(count) {
+  const btn = $('btn-undo');
+  btn.textContent = '↶ (' + count + ')';
+  btn.disabled = count === 0;
+  btn.title = count > 0 ? 'Undo last move (' + count + ' available)' : 'Nothing to undo';
+}
+
+async function render() {
+  const img = $('photo'); const ph = $('photo-placeholder');
+  const counter = $('counter'); const btnNN = $('btn-not-nude'); const btnN = $('btn-nude');
+  const progressBar = $('progress-bar');
+
+  scale = 1.0; translateX = 0; translateY = 0;
+  applyTransform();
+
+  if (images.length === 0) {
+    img.style.display = 'none'; img.removeAttribute('src'); ph.style.display = 'block';
+    ph.textContent = settings.source ? 'No images in the selected folder (or all processed)' : 'Click ⚙ to select a photo folder';
+    counter.textContent = ''; btnNN.disabled = true; btnN.disabled = true; applyBrightness();
+    progressBar.style.width = '0%';
+    return;
+  }
+  if (currentIndex < 0) currentIndex = images.length - 1;
+  if (currentIndex >= images.length) currentIndex = images.length - 1;
+
+  const name = images[currentIndex];
+  img.src = BP + '/api/image?name=' + encodeURIComponent(name) + '&thumb=1';
+  img.style.display = 'block'; ph.style.display = 'none';
+
+  counter.textContent = (currentIndex + 1) + ' / ' + images.length;
+  counter.title = name;
+
+  btnNN.disabled = false; btnN.disabled = false; applyBrightness();
+
+  const progressPercent = ((currentIndex + 1) / images.length) * 100;
+  progressBar.style.width = progressPercent + '%';
+
+  localStorage.setItem('lastPhotoIndex', currentIndex);
+
+  if (images.length > 1) {
+      const nextIndex = (currentIndex + 1) % images.length;
+      const nextName = images[nextIndex];
+      const preloadImg = new Image();
+      preloadImg.src = BP + '/api/image?name=' + encodeURIComponent(nextName) + '&thumb=1';
+  }
+}
+
+function applyBrightness() {
+  const img = $('photo'); if (!img) return;
+  img.style.filter = (brightness === 1.0) ? '' : 'brightness(' + brightness.toFixed(2) + ')';
+  $('brightness-value').textContent = brightness.toFixed(2);
+}
+
+function changeBrightness(delta) {
+  if (images.length === 0) return;
+  brightness = Math.max(0.1, Math.min(3.0, brightness + delta));
+  applyBrightness();
+}
+
+function resetBrightness() { brightness = 1.0; applyBrightness(); }
+function nextImage() { if (images.length === 0) return; currentIndex = (currentIndex + 1) % images.length; brightness = 1.0; render(); }
+function prevImage() { if (images.length === 0) return; currentIndex = (currentIndex - 1 + images.length) % images.length; brightness = 1.0; render(); }
+
+function applyTransform() {
+    const img = $('photo');
+    if (img) {
+        img.style.transform = `translate(${translateX}px, ${translateY}px) scale(${scale})`;
+    }
+}
+
+$('img-container').addEventListener('wheel', (e) => {
+    if (images.length === 0) return;
+    if (e.ctrlKey) return;
+
+    if (scale > 1.0) {
+        e.preventDefault();
+        const delta = e.deltaY > 0 ? -0.2 : 0.2;
+        scale = Math.max(1.0, Math.min(5.0, scale + delta));
+        if (scale === 1.0) { translateX = 0; translateY = 0; }
+        applyTransform();
+    } else {
+        if (e.deltaY > 0) nextImage();
+        else prevImage();
+    }
+}, { passive: false });
+
+let isDragging = false, dragStartX = 0, dragStartY = 0;
+$('img-container').addEventListener('mousedown', (e) => {
+    if (scale > 1.0) {
+        e.preventDefault();
+        isDragging = true;
+        dragStartX = e.clientX - translateX; dragStartY = e.clientY - translateY;
+        $('img-container').style.cursor = 'grabbing';
+    }
+});
+window.addEventListener('mousemove', (e) => {
+    if (isDragging) {
+        e.preventDefault();
+        translateX = e.clientX - dragStartX; translateY = e.clientY - dragStartY;
+        applyTransform();
+    }
+});
+window.addEventListener('mouseup', () => {
+    if (isDragging) { isDragging = false; $('img-container').style.cursor = 'grab'; }
+});
+
+$('img-container').addEventListener('touchstart', (e) => {
+    if (images.length === 0) return;
+    if (e.touches.length === 2) {
+        touchMode = 'pinch';
+        initialDistance = Math.hypot(
+            e.touches[0].pageX - e.touches[1].pageX,
+            e.touches[0].pageY - e.touches[1].pageY
+        );
+    } else if (e.touches.length === 1) {
+        if (scale > 1.0) {
+            touchMode = 'drag';
+            dragStartTouchX = e.touches[0].clientX - translateX;
+            dragStartTouchY = e.touches[0].clientY - translateY;
+        } else {
+            touchMode = 'swipe';
+            touchStartX = e.touches[0].clientX;
+            touchStartY = e.touches[0].clientY;
+        }
+    }
+}, { passive: false });
+
+$('img-container').addEventListener('touchmove', (e) => {
+    if (touchMode === 'drag' && e.touches.length === 1) {
+        e.preventDefault();
+        translateX = e.touches[0].clientX - dragStartTouchX;
+        translateY = e.touches[0].clientY - dragStartTouchY;
+        applyTransform();
+    } else if (touchMode === 'pinch' && e.touches.length === 2) {
+        e.preventDefault();
+        const currentDistance = Math.hypot(
+            e.touches[0].pageX - e.touches[1].pageX,
+            e.touches[0].pageY - e.touches[1].pageY
+        );
+        if (initialDistance > 0) {
+            scale = Math.max(1.0, Math.min(5.0, scale * (currentDistance / initialDistance)));
+            if (scale === 1.0) { translateX = 0; translateY = 0; }
+            applyTransform();
+            initialDistance = currentDistance;
+        }
+    }
+}, { passive: false });
+
+$('img-container').addEventListener('touchend', (e) => {
+    if (touchMode === 'swipe') {
+        const t = e.changedTouches[0];
+        const dx = t.clientX - touchStartX;
+        const dy = t.clientY - touchStartY;
+        if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy)) {
+            if (dx < 0) nextImage(); else prevImage();
+        }
+    }
+    if (e.touches.length === 0) {
+        touchMode = 'none';
+    }
+}, { passive: false });
+
+async function classify(category) {
+  if (images.length === 0) return;
+  if (!settings[category]) { toast('Select a folder in settings first', true); return; }
+  const name = images[currentIndex];
+  const r = await fetch(BP + '/api/classify', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ name: name, category: category }) });
+  const data = await r.json();
+  if (!data.ok) { toast('Error: ' + data.error, true); return; }
+  images = data.images;
+  if (images.length === 0) currentIndex = 0; else if (currentIndex >= images.length) currentIndex = images.length - 1;
+  brightness = 1.0; updateUndoButton(data.undo_count); render();
+}
+
+async function undoLast() {
+  const r = await fetch(BP + '/api/undo', { method: 'POST' });
+  const data = await r.json();
+  updateUndoButton(data.undo_count || 0);
+  if (!data.ok) { toast('Error: ' + data.error, true); return; }
+  images = data.images;
+  if (currentIndex >= images.length) currentIndex = Math.max(0, images.length - 1);
+  brightness = 1.0; render();
+}
+
+async function deleteImage() {
+  if (images.length === 0) return;
+  if (!confirm('Move file to Recycle Bin?\n\n' + images[currentIndex])) return;
+  const name = images[currentIndex];
+  const r = await fetch(BP + '/api/delete', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ name: name }) });
+  const data = await r.json();
+  if (!data.ok) { toast('Error: ' + data.error, true); return; }
+  images = data.images;
+  if (currentIndex >= images.length) currentIndex = Math.max(0, images.length - 1);
+  brightness = 1.0; updateUndoButton(data.undo_count); render();
+}
+
+async function pickFolder(key) {
+  const titles = { 'source': 'Select photo folder', 'not_nude': 'Select folder for Button 1', 'nude': 'Select folder for Button 2' };
+  toast('Opening folder selection dialog...');
+  const r = await fetch(BP + '/api/pick-folder', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ title: titles[key] }) });
+  const data = await r.json();
+  if (data.path) {
+    if (key === 'source') $('source-folder').value = data.path;
+    else if (key === 'not_nude') $('not-nude-folder').value = data.path;
+    else $('nude-folder').value = data.path;
+  } else if (data.error) {
+    toast(data.error + ' — введите путь вручную.', true);
+  }
+}
+
+async function saveSettings() {
+  const body = {
+    source: $('source-folder').value,
+    not_nude: $('not-nude-folder').value,
+    nude: $('nude-folder').value,
+    label_not_nude: $('label-not-nude').value.trim() || 'Not Nude',
+    label_nude: $('label-nude').value.trim() || 'Nude'
+  };
+
+  const r = await fetch(BP + '/api/save-settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) });
+  const data = await r.json();
+  if (!data.ok) { toast('Error: ' + data.error, true); return; }
+
+  settings = body; images = data.images; currentIndex = 0; brightness = 1.0;
+  updateUI();
+  updateUndoButton(data.undo_count); render(); closeSettings(); toast('Settings saved');
+}
+
+async function restartServer() {
+  try {
+    const r = await fetch(BP + '/api/restart', { method: 'POST' });
+    const data = await r.json();
+    if (!data.ok) { toast('Restart error', true); return; }
+    images = data.images || []; settings = data.settings || settings; currentIndex = 0; brightness = 1.0;
+
+    $('source-folder').value = settings.source || '';
+    $('not-nude-folder').value = settings.not_nude || '';
+    $('nude-folder').value = settings.nude || '';
+    $('label-not-nude').value = settings.label_not_nude || 'Not Nude';
+    $('label-nude').value = settings.label_nude || 'Nude';
+
+    updateUI();
+    updateUndoButton(data.undo_count || 0); render(); closeSettings(); toast('Server restarted');
+  } catch (e) { toast('Error: ' + e.message, true); }
+}
+
+function openSettings() { $('settings-modal').classList.add('open'); }
+function closeSettings() { $('settings-modal').classList.remove('open'); }
+
+function toggleFullscreen() {
+  if (!document.fullscreenElement) {
+    document.documentElement.requestFullscreen().catch(err => {
+      toast(`Error attempting to enable fullscreen: ${err.message}`, true);
+    });
+  } else {
+    document.exitFullscreen();
+  }
+}
+
+let toastTimer = null;
+function toast(msg, isError) {
+  const el = $('toast'); el.textContent = msg; el.classList.toggle('error', !!isError); el.classList.add('show');
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove('show'), 2200);
+}
+
+$('btn-fullscreen').onclick = toggleFullscreen;
+$('btn-settings').onclick = openSettings;
+$('btn-undo').onclick = undoLast;
+$('prev').onclick = prevImage; $('next').onclick = nextImage;
+$('b-up').onclick = () => changeBrightness(+0.1);
+$('b-down').onclick = () => changeBrightness(-0.1);
+$('b-reset').onclick = resetBrightness;
+$('btn-not-nude').onclick = () => classify('not_nude');
+$('btn-nude').onclick = () => classify('nude');
+
+document.addEventListener('keydown', (e) => {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+  if (e.ctrlKey && e.key === 'z') { undoLast(); e.preventDefault(); return; }
+  if (e.key === 'ArrowRight') { nextImage(); e.preventDefault(); }
+  else if (e.key === 'ArrowLeft') { prevImage(); e.preventDefault(); }
+  else if (e.key === 'ArrowUp') { changeBrightness(+0.1); e.preventDefault(); }
+  else if (e.key === 'ArrowDown') { changeBrightness(-0.1); e.preventDefault(); }
+  else if (e.key === 'Delete') { deleteImage(); e.preventDefault(); }
+  else if (e.key === '1') { classify('not_nude'); }
+  else if (e.key === '2') { classify('nude'); }
+  else if (e.key === 'r' || e.key === 'R') { resetBrightness(); }
+  else if (e.key === 'f' || e.key === 'F') { toggleFullscreen(); }
+  else if (e.key === 'Escape') { closeSettings(); }
+});
+
+loadState();
 </script>
-{% block scripts %}{% endblock %}
 </body>
 </html>

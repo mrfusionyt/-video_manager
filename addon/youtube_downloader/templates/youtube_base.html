@@ -10,98 +10,23 @@
     {% block styles %}{% endblock %}
 
     <style>
-    /* ============================================================
-       VM SIDEBAR — унифицированный стиль (как в base.html)
-       ============================================================ */
-    .vm-sidebar {
-        background: var(--bg-surface);
-        border-right: 1px solid var(--border);
-        min-height: calc(100vh - 70px);
-        padding-top: 10px;
-    }
-    .vm-sidebar h5 {
-        color: #fff;
-        font-size: 1rem;
-        font-weight: 600;
-        padding: 0 1rem;
-        margin-bottom: 0.75rem;
-    }
-    .vm-sidebar .nav-link {
-        color: var(--text-secondary);
-        padding: 0.5rem 1rem;
-        border-radius: var(--radius);
-        display: block;
-        text-decoration: none;
-        font-size: 0.9rem;
-        transition: background var(--tr), color var(--tr);
-    }
-    .vm-sidebar .nav-link:hover {
-        background: var(--bg-elevated);
-        color: #fff;
-    }
-    .vm-sidebar .nav-link.active {
-        background: var(--red);
-        color: #fff;
-    }
+    .vm-sidebar { background: var(--bg-surface); border-right: 1px solid var(--border); min-height: calc(100vh - 70px); padding-top: 10px; }
+    .vm-sidebar h5 { color: #fff; font-size: 1rem; font-weight: 600; padding: 0 1rem; margin-bottom: 0.75rem; }
+    .vm-sidebar .nav-link { color: var(--text-secondary); padding: 0.5rem 1rem; border-radius: var(--radius); display: block; text-decoration: none; font-size: 0.9rem; transition: background var(--tr), color var(--tr); }
+    .vm-sidebar .nav-link:hover { background: var(--bg-elevated); color: #fff; }
+    .vm-sidebar .nav-link.active { background: var(--red); color: #fff; }
 
-    /* Profile switch */
-    .vm-sidebar .profile-switch-wrap {
-        padding: 8px 0.75rem 1rem 0.75rem;
-        margin-bottom: 0.5rem;
-        border-bottom: 1px solid var(--border);
-    }
-    .vm-sidebar .profile-switch-btn {
-        display: flex;
-        align-items: center;
-        gap: 0.6rem;
-        width: 100%;
-        padding: 0.65rem 0.8rem;
-        background: var(--bg-elevated);
-        border: 1px solid var(--border-strong);
-        color: var(--text-primary);
-        border-radius: var(--radius);
-        cursor: pointer;
-        text-align: left;
-        transition: background var(--tr), border-color var(--tr);
-        font-family: inherit;
-    }
-    .vm-sidebar .profile-switch-btn:hover {
-        background: var(--bg-btn-hover);
-        border-color: var(--red);
-    }
+    .vm-sidebar .profile-switch-wrap { padding: 8px 0.75rem 1rem 0.75rem; margin-bottom: 0.5rem; border-bottom: 1px solid var(--border); }
+    .vm-sidebar .profile-switch-btn { display: flex; align-items: center; gap: 0.6rem; width: 100%; padding: 0.65rem 0.8rem; background: var(--bg-elevated); border: 1px solid var(--border-strong); color: var(--text-primary); border-radius: var(--radius); cursor: pointer; text-align: left; transition: background var(--tr), border-color var(--tr); font-family: inherit; }
+    .vm-sidebar .profile-switch-btn:hover { background: var(--bg-btn-hover); border-color: var(--red); }
     .vm-sidebar .profile-switch-btn:hover .profile-switch-arrow { color: var(--red); }
-    .vm-sidebar .profile-switch-icon {
-        display: block; width: 22px; height: 22px;
-        background-color: var(--red);
-        -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
-        -webkit-mask-position: center; mask-position: center;
-        -webkit-mask-size: contain; mask-size: contain;
-        flex-shrink: 0;
-    }
-    .vm-sidebar .profile-switch-info {
-        display: flex; flex-direction: column; gap: 0;
-        flex: 1; min-width: 0; line-height: 1.15;
-    }
-    .vm-sidebar .profile-switch-label {
-        color: var(--text-muted); font-size: 0.66rem;
-        text-transform: uppercase; letter-spacing: 0.06em;
-        font-weight: 600; margin-bottom: 2px;
-    }
-    .vm-sidebar .profile-switch-name {
-        color: var(--text-primary); font-size: 0.92rem; font-weight: 600;
-        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-    }
-    .vm-sidebar .profile-switch-arrow {
-        color: var(--text-muted); font-size: 1.15rem; line-height: 1;
-        flex-shrink: 0; transition: color var(--tr);
-    }
+    .vm-sidebar .profile-switch-icon { display: block; width: 22px; height: 22px; background-color: var(--red); -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat; -webkit-mask-position: center; mask-position: center; -webkit-mask-size: contain; mask-size: contain; flex-shrink: 0; }
+    .vm-sidebar .profile-switch-info { display: flex; flex-direction: column; gap: 0; flex: 1; min-width: 0; line-height: 1.15; }
+    .vm-sidebar .profile-switch-label { color: var(--text-muted); font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; margin-bottom: 2px; }
+    .vm-sidebar .profile-switch-name { color: var(--text-primary); font-size: 0.92rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .vm-sidebar .profile-switch-arrow { color: var(--text-muted); font-size: 1.15rem; line-height: 1; flex-shrink: 0; transition: color var(--tr); }
 
-    /* main-content внутри колонки */
-    .vm-main-col .main-content {
-        max-width: 100%;
-        margin: 0;
-        padding: 1.5rem;
-    }
+    .vm-main-col .main-content { max-width: 100%; margin: 0; padding: 1.5rem; }
     </style>
 </head>
 <body>
@@ -122,7 +47,6 @@
 
 <div class="container-fluid">
     <div class="row">
-        <!-- Sidebar (desktop only) -->
         <div class="col-md-3 col-lg-2 vm-sidebar d-none d-md-block">
 
             <div class="profile-switch-wrap">
@@ -169,6 +93,11 @@
                     </a>
                 </li>
                 <li class="nav-item">
+                    <a class="nav-link" href="{{ url_for('photo_classifier.index') }}">
+                        PhotoClassifier
+                    </a>
+                </li>
+                <li class="nav-item">
                     <a class="nav-link" href="{{ url_for('download_vr', profile=current_profile) }}">
                         Download VR
                     </a>
@@ -181,7 +110,6 @@
             </ul>
         </div>
 
-        <!-- Main content -->
         <div class="col-md-9 col-lg-10 vm-main-col">
             <div class="main-content">
                 {% block content %}{% endblock %}

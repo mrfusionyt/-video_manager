@@ -1,24 +1,7 @@
 """
 Десктоп-лаунчер VideoManager.
-
 Запускает Flask в фоновом потоке, открывает окно Tkinter, добавляет
 иконку в системный трей и умеет автообновляться с GitHub.
-
-Использование:
-    python launcher.py
-
-Сборка:
-    pyinstaller --noconfirm --windowed --name VideoManager ^
-        --icon=image/video.png ^
-        --add-data "templates;templates" ^
-        --add-data "static;static" ^
-        --add-data "image;image" ^
-        --add-data "_dop;_dop" ^
-        --add-data "addon;addon" ^
-        --add-data "views;views" ^
-        --add-data "db;db" ^
-        --add-data "helpers;helpers" ^
-        launcher.py
 """
 import os
 import sys
@@ -47,7 +30,6 @@ CURRENT_VERSION = '1.0.0'
 GITHUB_USER = 'mrfusionyt'
 GITHUB_REPO = '-video_manager'
 # =====================================================================
-
 
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 
@@ -118,12 +100,9 @@ def load_app_icon_pil():
     return img
 
 
-# ---------- Tray ----------
-
 def show_window(icon=None, item=None):
     if tk_root:
-        tk_root.after(0, lambda: (tk_root.deiconify(), tk_root.lift(),
-                                  tk_root.focus_force()))
+        tk_root.after(0, lambda: (tk_root.deiconify(), tk_root.lift(), tk_root.focus_force()))
 
 
 def hide_window(icon=None, item=None):
@@ -159,13 +138,10 @@ def create_tray():
         print('[tray] failed:', e)
 
 
-# ---------- Auto-update ----------
-
 def check_for_updates(manual=False):
     global ignored_version
     if GITHUB_USER == 'YOUR_NICKNAME' or GITHUB_REPO == 'YOUR_REPO':
         return False
-
     try:
         url = f'https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/releases/latest'
         r = requests.get(url, timeout=5)
@@ -180,7 +156,6 @@ def check_for_updates(manual=False):
                 if asset['name'].endswith('.zip'):
                     download_url = asset['browser_download_url']
                     break
-
             if tk_root and download_url:
                 tk_root.after(0, lambda: show_update_indicator(latest_version, download_url))
             return True
@@ -205,16 +180,13 @@ def force_check_update():
             def show_latest_msg():
                 if status_label:
                     status_label.config(text='Latest version installed.', fg='#22c55e')
-
                 def revert_msg():
                     if status_label and status_label.cget('text') == 'Latest version installed.':
                         status_label.config(text='Running.', fg='#e5e7eb')
                 tk_root.after(20000, revert_msg)
-
             tk_root.after(0, show_latest_msg)
         elif not found and status_label:
             tk_root.after(0, lambda: status_label.config(text='Running.', fg='#e5e7eb'))
-
     threading.Thread(target=do_check, daemon=True).start()
 
 
@@ -241,27 +213,21 @@ def trigger_update():
     global pending_update_url
     if not pending_update_url:
         return
-
     if update_btn:
         update_btn.config(state=tk.DISABLED, text='Downloading...', bg='#666666')
     if status_label:
         status_label.config(text='Downloading update...', fg='#ff3b5c')
-
     threading.Thread(target=download_and_update, args=(pending_update_url,), daemon=True).start()
 
 
 def download_and_update(download_url):
     if not getattr(sys, 'frozen', False):
-        tk_root.after(0, lambda: messagebox.showinfo(
-            'Info', 'Auto-update works only in the compiled .exe.',
-            parent=tk_root))
+        tk_root.after(0, lambda: messagebox.showinfo('Info', 'Auto-update works only in the compiled .exe.', parent=tk_root))
         return
-
     try:
         exe_path = sys.executable
         exe_dir = os.path.dirname(exe_path)
         exe_name = os.path.basename(exe_path)
-
         zip_path = os.path.join(os.environ.get('TEMP', '.'), 'vm_update.zip')
         update_dir = os.path.join(os.environ.get('TEMP', '.'), 'vm_update_temp')
 
@@ -288,20 +254,14 @@ del "{zip_path}"
 start "" "{exe_dir}\\{exe_name}"
 del "%~f0"
 ''')
-
-        subprocess.Popen(f'"{bat_path}"', shell=True,
-                         creationflags=subprocess.CREATE_NO_WINDOW)
+        subprocess.Popen(f'"{bat_path}"', shell=True, creationflags=subprocess.CREATE_NO_WINDOW)
         quit_requested.set()
         if tray_icon:
             tray_icon.stop()
-
     except Exception as e:
         if tk_root:
-            tk_root.after(0, lambda: messagebox.showerror(
-                'Update Error', f'Failed to update: {e}', parent=tk_root))
+            tk_root.after(0, lambda: messagebox.showerror('Update Error', f'Failed to update: {e}', parent=tk_root))
 
-
-# ---------- Tkinter ----------
 
 def tk_pump():
     if quit_requested.is_set():
@@ -310,13 +270,11 @@ def tk_pump():
         except Exception:
             pass
         return
-
     try:
         title = pv_state.dialog_req.get_nowait()
     except Exception:
         tk_root.after(100, tk_pump)
         return
-
     try:
         path = filedialog.askdirectory(title=title, parent=tk_root) or ''
     except Exception:
@@ -326,39 +284,38 @@ def tk_pump():
 
 
 def copy_to_clipboard(text: str, feedback_label: tk.Label):
-    """Копирует в системный буфер + короткий визуальный фидбек."""
     try:
         tk_root.clipboard_clear()
         tk_root.clipboard_append(text)
         tk_root.update()
         if feedback_label is not None:
             old = feedback_label.cget('text')
-            feedback_label.config(text='Copied!', fg='#22c55e')
-            tk_root.after(1200, lambda: feedback_label.config(text=old, fg='#9ca3af'))
+            feedback_label.config(text='✓', fg='#22c55e')
+            tk_root.after(1200, lambda: feedback_label.config(text=old, fg='#6b7280'))
     except Exception as e:
         print('[copy] failed:', e)
 
 
 def make_url_row(parent, label_text: str, url: str):
-    """Одна строка: [метка] [Entry readonly] [Copy]."""
     row = tk.Frame(parent, bg='#141417')
     row.pack(fill=tk.X, pady=1)
 
-    lbl = tk.Label(row, text=label_text, bg='#141417', fg='#9ca3af',
-                   font=('Segoe UI', 9), width=12, anchor='w')
-    lbl.pack(side=tk.LEFT)
+    if label_text:
+        lbl = tk.Label(row, text=label_text, bg='#141417', fg='#9ca3af',
+                       font=('Segoe UI', 8), width=12, anchor='w')
+        lbl.pack(side=tk.LEFT)
 
-    entry = tk.Entry(row, font=('Consolas', 10), bg='#1f1f24',
+    entry = tk.Entry(row, font=('Consolas', 9), bg='#1f1f24',
                      fg='#fca5a5', readonlybackground='#1f1f24',
                      relief='flat', bd=0, highlightthickness=1,
                      highlightbackground='#333', highlightcolor='#dc3545',
                      insertbackground='#fff')
     entry.insert(0, url)
     entry.config(state='readonly')
-    entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 4), ipady=3)
+    entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 4), ipady=2)
 
-    fb = tk.Label(row, text='Copy', bg='#141417', fg='#9ca3af',
-                  font=('Segoe UI', 9, 'underline'), cursor='hand2', width=6)
+    fb = tk.Label(row, text='⎘', bg='#141417', fg='#6b7280',
+                  font=('Segoe UI', 12), cursor='hand2', width=3)
     fb.pack(side=tk.LEFT)
 
     def on_copy(_):
@@ -366,7 +323,6 @@ def make_url_row(parent, label_text: str, url: str):
 
     fb.bind('<Button-1>', on_copy)
     entry.bind('<Control-c>', on_copy)
-    return entry
 
 
 def main():
@@ -379,8 +335,10 @@ def main():
 
     tk_root = tk.Tk()
     tk_root.title('VideoManager')
-    tk_root.geometry('500x420')
-    tk_root.minsize(460, 380)
+    
+    # Высота 240px, как ты просил
+    tk_root.geometry('440x240') 
+    tk_root.minsize(400, 200)
     tk_root.configure(bg='#18181b')
 
     try:
@@ -397,12 +355,12 @@ def main():
     pv_state.load_config()
     pv_state.scan_source()
 
+    # Основной фрейм без expand, чтобы не было пустоты
     root_frame = tk.Frame(tk_root, bg='#18181b')
-    root_frame.pack(fill=tk.BOTH, expand=True, padx=14, pady=12)
+    root_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=8)
 
-    # Заголовок + версия в одну строку
     head = tk.Frame(root_frame, bg='#18181b')
-    head.pack(fill=tk.X, pady=(0, 6))
+    head.pack(fill=tk.X, pady=(0, 4))
 
     status_label = tk.Label(head, text='Running.', bg='#18181b',
                             fg='#e5e7eb', font=('Segoe UI', 11, 'bold'),
@@ -412,29 +370,26 @@ def main():
     tk.Label(head, text=f'v{CURRENT_VERSION}', bg='#18181b', fg='#6b7280',
              font=('Segoe UI', 8), anchor='e').pack(side=tk.RIGHT)
 
-    # Кнопка Update (появляется при наличии)
     update_btn = tk.Button(root_frame, text='', command=trigger_update,
                            bg='#22c55e', fg='#ffffff', activebackground='#16a34a',
                            activeforeground='#ffffff', relief='flat', bd=0,
-                           font=('Segoe UI', 10, 'bold'), cursor='hand2',
-                           padx=10, pady=6)
+                           font=('Segoe UI', 9, 'bold'), cursor='hand2',
+                           padx=10, pady=4)
 
-    # URL-панель
-    urls_frame = tk.Frame(root_frame, bg='#141417', padx=10, pady=8)
-    urls_frame.pack(fill=tk.X, pady=(0, 8))
+    urls_frame = tk.Frame(root_frame, bg='#141417', padx=6, pady=4)
+    urls_frame.pack(fill=tk.X, pady=(0, 6))
 
     make_url_row(urls_frame, 'On this PC:', local_url)
 
     if lan_ips:
-        tk.Label(urls_frame, text='Local network / VPN:',
+        tk.Label(urls_frame, text='Network:',
                  bg='#141417', fg='#6b7280',
-                 font=('Segoe UI', 8), anchor='w').pack(fill=tk.X, pady=(6, 2))
+                 font=('Segoe UI', 8), anchor='w').pack(fill=tk.X, pady=(4, 0))
         for ip in lan_ips[:5]:
             make_url_row(urls_frame, '', f'http://{ip}:{port}')
 
-    # Кнопки (плотные, в один ряд если влезут)
     btn_bar = tk.Frame(root_frame, bg='#18181b')
-    btn_bar.pack(side=tk.BOTTOM, fill=tk.X, pady=(8, 0))
+    btn_bar.pack(fill=tk.X, pady=(6, 0))
 
     def mk_btn(text, cmd, primary=False):
         bg = '#dc3545' if primary else '#27272a'
@@ -449,8 +404,7 @@ def main():
 
     mk_btn('Check Updates', force_check_update).pack(side=tk.LEFT, padx=(0, 5))
     mk_btn('PhotoClassifier', open_photo_classifier).pack(side=tk.LEFT, padx=(0, 5))
-    mk_btn('Open Browser', lambda: webbrowser.open(local_url_global),
-           primary=True).pack(side=tk.RIGHT)
+    mk_btn('Open Browser', lambda: webbrowser.open(local_url_global), primary=True).pack(side=tk.RIGHT)
 
     tk_root.protocol('WM_DELETE_WINDOW', hide_window)
 

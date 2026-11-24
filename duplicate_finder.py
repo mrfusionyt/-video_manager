@@ -1,6 +1,6 @@
 r"""
 Поиск дубликатов — версия с numpy-MIH, оптимизированной группировкой,
-авто-очисткой битых/отсутствующих файлов.
+авто-очисткой битых/отсутствующих файлов и подробными логами.
 
 Ключевое:
   • При старте отсутствующие на диске файлы удаляются из БД.
@@ -48,13 +48,12 @@ FPCALC_CANDIDATES = [
 ]
 
 # ---------- Video ----------
-# 10 кадров: 5%, 15%, 25%, 35%, 45%, 55%, 65%, 75%, 85%, 95%.
 KEYFRAME_POSITIONS = [round(0.05 + i * 0.10, 4) for i in range(10)]
 
 FAST_MAX_HAMMING = 2
 FULL_COVERAGE = 0.80
-PARTIAL_MIN_SUBSEQ_FRAMES = 3   # из 10 кадров
-MIN_MATCHED_FRAMES = 2           # из 10 кадров
+PARTIAL_MIN_SUBSEQ_FRAMES = 3
+MIN_MATCHED_FRAMES = 2
 
 # ---------- Photo ----------
 IMAGE_MAX_HAMMING = 5
@@ -94,7 +93,6 @@ HASH_WORKERS    = min(4, max(2, (os.cpu_count() or 4)))
 
 SQL_PARAM_CHUNK = 500
 
-# Количество хешей на кадр: orig + mirror_h. Без flip и flip_hv.
 NUM_HASHES = 2
 
 _VIDEO_EXTS = {'.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv',
@@ -234,7 +232,6 @@ def _load_video_frames(file_id):
         return None
     result = []
     for r in rows:
-        # ★ Берём только orig и mirror. flip/flip_hv игнорируем.
         hashes = [h for h in (r['phash_orig'], r['phash_mirror']) if h]
         if not hashes:
             continue
@@ -253,7 +250,6 @@ def _save_video_frames(file_id, frames):
         h = f['hashes']
         h0 = h[0] if len(h) > 0 else ''
         h1 = h[1] if len(h) > 1 else ''
-        # flip и flip_hv всегда пишем пустыми — не используем.
         c.execute("""
             INSERT INTO video_frames
                 (file_id, frame_idx, position,
@@ -463,6 +459,8 @@ def _filter_videos_by_scan_paths(videos, scan_paths):
 #                     Видео: кадры
 # ===================================================================
 def _extract_frames(video_path, positions):
+    # Отключаем внутреннюю многопоточность OpenCV во избежание дедлоков на Windows
+    cv2.setNumThreads(0)
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         return []
@@ -485,7 +483,6 @@ def _extract_frames(video_path, positions):
 
 
 def _hash_image(pil_img):
-    """2 хеша: оригинал + горизонтальное зеркало."""
     return [
         str(imagehash.phash(pil_img)),
         str(imagehash.phash(ImageOps.mirror(pil_img))),
@@ -725,6 +722,8 @@ def _find_audio_match(a_raw, b_raw):
 # ===================================================================
 def _process_media(item, include_audio=True):
     path = item['filepath']
+    filename = item['filename']
+    
     if not os.path.exists(path):
         return None
     try:
@@ -741,6 +740,7 @@ def _process_media(item, include_audio=True):
         item = dict(item)
         item['media_type'] = 'video'
 
+    print(f"[dup]   [START] {filename}", flush=True)
     file_id, is_fresh = _get_or_create_file(
         path, st.st_mtime, st.st_size, media_type)
 
@@ -748,6 +748,7 @@ def _process_media(item, include_audio=True):
         frames = _load_video_frames(file_id)
         audio_fp = _load_audio_fp(file_id) if (media_type == 'video' and include_audio) else None
         if frames:
+            print(f"[dup]   [CACHED] {filename}", flush=True)
             return {
                 'file_id': file_id,
                 'filepath': path,
@@ -763,18 +764,22 @@ def _process_media(item, include_audio=True):
         audio_fp = None
     else:
         frames = _process_video_frames(path)
+        print(f"[dup]   [FRAMES OK] {filename}", flush=True)
         if include_audio:
             audio_fp = _extract_audio_fingerprint(path)
+            print(f"[dup]   [AUDIO OK] {filename}", flush=True)
         else:
             audio_fp = None
 
     if not frames:
+        print(f"[dup]   [NO FRAMES] {filename}", flush=True)
         return None
 
     _save_video_frames(file_id, frames)
     if include_audio:
         _save_audio_fp(file_id, audio_fp)
 
+    print(f"[dup]   [DONE] {filename}", flush=True)
     return {
         'file_id': file_id,
         'filepath': path,
@@ -807,9 +812,6 @@ def _image_mih_candidates_np(hashes_np, lsh_hamming,
                              triu_threshold=IMAGE_MIH_TRIU_THRESHOLD,
                              max_bucket_size=IMAGE_MIH_MAX_BUCKET_SIZE,
                              max_pairs=IMAGE_MIH_MAX_PAIRS):
-    """
-    hashes_np — (n, NUM_HASHES) uint64.
-    """
     n = len(hashes_np)
     if n < 2:
         return (np.empty(0, dtype=np.int32),
@@ -1686,7 +1688,7 @@ def _find_duplicates_worker(task_id, filters, scan_paths=None, mode='deep'):
                 try:
                     entry = fut.result()
                 except Exception as e:
-                    print(f"[dup] hash err: {e}")
+                    print(f"[dup] hash err: {e}", flush=True)
 
                 processed += 1
                 pct = int(processed / total * 40)
@@ -1696,12 +1698,12 @@ def _find_duplicates_worker(task_id, filters, scan_paths=None, mode='deep'):
                 if entry is None:
                     path = item['filepath']
                     if os.path.exists(path):
-                        print(f"[dup] file broken, moving to !Broken: {path}")
+                        print(f"[dup] file broken, moving to !Broken: {path}", flush=True)
                         try:
                             move_to_broken(path, keep_name=item['filename'])
                             delete_video(item['id'])
                         except Exception as e:
-                            print(f"[dup] failed to move broken file: {e}")
+                            print(f"[dup] failed to move broken file: {e}", flush=True)
                 else:
                     fp = entry['filepath']
                     frames_by_path[fp] = entry['frames']
