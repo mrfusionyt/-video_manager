@@ -29,21 +29,29 @@
         margin-bottom: 0.75rem;
     }
     .vm-sidebar .nav-link {
-        color: var(--text-secondary);
-        padding: 0.5rem 1rem;
-        border-radius: var(--radius);
+        color: #e6e7ea;
+        margin: 3px 8px;
+        padding: 7px 10px;
+        background: transparent;
+        border: 1px solid transparent;
+        border-radius: 8px;
         display: block;
         text-decoration: none;
         font-size: 0.9rem;
-        transition: background var(--tr), color var(--tr);
+        font-weight: 500;
+        line-height: 1.25;
+        transition: background .18s ease, border-color .18s ease, color .18s ease, box-shadow .18s ease;
     }
     .vm-sidebar .nav-link:hover {
-        background: var(--bg-elevated);
+        background: rgba(220, 53, 69, 0.10);
+        border-color: rgba(220, 53, 69, 0.30);
         color: #fff;
     }
     .vm-sidebar .nav-link.active {
-        background: var(--red);
+        background: rgba(220, 53, 69, 0.26);
+        border-color: rgba(220, 53, 69, 0.62);
         color: #fff;
+        box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.25);
     }
 
     /* Profile switch */
@@ -107,20 +115,8 @@
     </style>
 </head>
 <body class="vm-blueprint">
-<div class="top-bar">
-    <a href="{{ url_for('instagram.index') }}" class="brand">
-        <img src="{{ url_for('serve_image', filename='instagram.png') }}" alt="">
-        Instagram Downloader
-    </a>
-    <div class="nav-links">
-        <a href="{{ url_for('instagram.index') }}" class="btn-icon" title="Download">
-            <img src="{{ url_for('serve_image', filename='download.png') }}" alt="Download">
-        </a>
-        <a href="{{ url_for('index') }}" class="btn-icon" title="Video Manager">
-            <img src="{{ url_for('serve_image', filename='video.png') }}" alt="Video Manager">
-        </a>
-    </div>
-</div>
+{% set BACK_URL = url_for('index', profile=current_profile) %}
+{% include "_topbar.html" %}
 
 <div class="container-fluid">
     <div class="row">
@@ -153,7 +149,7 @@
                 {% endfor %}
             </ul>
 
-            <h5 style="margin-top: 1.25rem;">Tools</h5>
+            <h5 class="sidebar-divider">Tools</h5>
             <ul class="nav flex-column">
                 <li class="nav-item">
                     <a class="nav-link" href="{{ url_for('tools_page', profile=current_profile) }}">
@@ -171,8 +167,8 @@
                     </a>
                 </li>
                 <li class="nav-item">
-                    <a class="nav-link" href="{{ url_for('download_vr', profile=current_profile) }}">
-                        Download VR
+                    <a class="nav-link" href="{{ url_for('photo_classifier.index') }}">
+                        PhotoClassifier
                     </a>
                 </li>
                 <li class="nav-item">
@@ -192,7 +188,49 @@
     </div>
 </div>
 
+<div class="mobile-drawer-overlay" id="mobileDrawerOverlay"></div>
+
+<aside class="mobile-drawer" id="mobileDrawer">
+    <div class="mobile-drawer-header">
+        <span class="drawer-title">Menu</span>
+        <button type="button" class="drawer-close" id="mobileDrawerClose" aria-label="Close">✕</button>
+    </div>
+    <div class="mobile-drawer-body">
+        <div class="drawer-section">
+            <ul class="drawer-nav">
+                <li><a href="{{ url_for('instagram.index') }}" class="{% if request.endpoint == 'instagram.index' %}active{% endif %}">Instagram Downloader</a></li>
+                <li><a href="{{ url_for('index', profile=current_profile) }}" class="{% if request.endpoint == 'index' %}active{% endif %}">Videos</a></li>
+                <li><a href="{{ url_for('photos_page', profile=current_profile) }}" class="{% if request.endpoint == 'photos_page' %}active{% endif %}">Photo</a></li>
+                <li><a href="{{ url_for('artists_page', profile=current_profile) }}" class="{% if request.endpoint == 'artists_page' %}active{% endif %}">Artists</a></li>
+                <li><a href="{{ url_for('folders', profile=current_profile) }}" class="{% if request.endpoint == 'folders' %}active{% endif %}">Folders</a></li>
+                <li><a href="{{ url_for('photo_classifier.index') }}">PhotoClassifier</a></li>
+            </ul>
+        </div>
+        <div class="drawer-section">
+            <div class="drawer-section-title">Profile</div>
+            <button type="button" class="drawer-btn primary"
+                    onclick="switchProfile('{{ 'transgender' if current_profile == 'female' else 'female' }}')">
+                Switch to {{ 'Transgender' if current_profile == 'female' else 'Female' }}
+            </button>
+        </div>
+        <div class="drawer-section">
+            <div class="drawer-section-title">More</div>
+            <ul class="drawer-nav">
+                <li>
+                    <a href="{{ url_for('settings', profile=current_profile) }}">
+                        <svg class="drawer-icon vm-nav-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8.2a3.8 3.8 0 1 0 0 7.6 3.8 3.8 0 0 0 0-7.6Z"/><path d="m19.4 13.5 1.1.9-1.5 2.6-1.4-.5a7.8 7.8 0 0 1-1.5.9l-.2 1.5h-3l-.3-1.5a7.8 7.8 0 0 1-1.6-.9l-1.3.5-1.5-2.6 1.1-.9a7 7 0 0 1 0-1.8l-1.1-.9 1.5-2.6 1.3.5a7.8 7.8 0 0 1 1.6-.9l.3-1.5h3l.2 1.5a7.8 7.8 0 0 1 1.5.9l1.4-.5 1.5 2.6-1.1.9a7 7 0 0 1 0 1.8Z"/></svg>
+                        <span>Settings</span>
+                    </a>
+                </li>
+            </ul>
+        </div>
+    </div>
+</aside>
+
+{% include "_filter_modal.html" %}
+
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script src="{{ url_for('static', filename='js/base.js') }}"></script>
 <script>
 window.switchProfile = window.switchProfile || function (profile) {
     var url = new URL(window.location.href);

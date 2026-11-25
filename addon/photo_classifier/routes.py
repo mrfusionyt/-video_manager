@@ -16,7 +16,13 @@ from .state import (
 
 @photo_classifier_bp.route('/')
 def index():
-    return render_template('photo_classifier.html')
+    return render_template(
+        'photo_classifier.html',
+        app_labels={
+            'not_nude': state['labels'].get('not_nude') or 'Not Nude',
+            'nude': state['labels'].get('nude') or 'Nude',
+        },
+    )
 
 
 @photo_classifier_bp.route('/favicon.ico')

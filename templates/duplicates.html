@@ -6,7 +6,7 @@
 {% block content %}
 <div class="mb-3">
     <div class="d-flex align-items-center gap-2 flex-wrap">
-        <a href="{{ url_for('settings', tab='libraries', profile=current_profile) }}" class="btn-add">← Back to Settings</a>
+        <a href="{{ url_for('settings', tab='libraries', profile=current_profile) }}" class="btn-nav"><span class="btn-nav-label">Back to Settings</span></a>
         <a href="{{ url_for('duplicates_blacklist_page', profile=current_profile) }}" class="btn-add">Ignored pairs</a>
         <button id="refreshDuplicates" class="btn-add">Refresh</button>
     </div>

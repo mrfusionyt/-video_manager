@@ -12,14 +12,11 @@ import json
 import uuid
 import time
 import sqlite3
-import mimetypes
 import threading
 import subprocess
 
-import yt_dlp
 from flask import (
-    render_template, request, redirect, url_for, jsonify, abort,
-    send_file, Response,
+    render_template, request, redirect, url_for, jsonify, Response,
 )
 
 from models import (
@@ -40,7 +37,6 @@ from scanner import (
 )
 from config import app_config, save_config
 from helpers.profiles import get_current_profile, profile_to_mode
-from helpers.vr_downloads import get_vr_downloads
 from duplicate_finder import (
     find_duplicates_async,
     get_duplicate_groups,
@@ -107,9 +103,12 @@ def _spawn_restart():
         else:
             cmd = [sys.executable] + list(sys.argv)
 
-        base_dir = os.path.abspath(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        )
+        if getattr(sys, 'frozen', False):
+            base_dir = os.path.dirname(os.path.abspath(sys.executable))
+        else:
+            base_dir = os.path.abspath(
+                os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            )
 
         kwargs = {
             'close_fds': True,
@@ -241,8 +240,6 @@ def register(app):
                                         profile=current_profile))
             return redirect(url_for('settings', tab=tab, profile=current_profile))
 
-        if tab == 'download_vr':
-            return redirect(url_for('download_vr', profile=current_profile))
         if tab == 'duplicates':
             return redirect(url_for('duplicates_page', profile=current_profile))
 
@@ -345,73 +342,6 @@ def register(app):
                     break
                 time.sleep(0.5)
         return Response(generate(), mimetype="text/event-stream")
-
-    @app.route('/download_vr', methods=['GET', 'POST'])
-    def download_vr():
-        if request.method == 'POST':
-            url = request.form.get('url')
-            download_path = request.form.get('download_path', '').strip()
-
-            if not url:
-                return render_template('download_vr.html',
-                                       error='URL is required',
-                                       files=get_vr_downloads())
-
-            base_dir = os.path.dirname(CONFIG_PATH)
-            if download_path and os.path.exists(download_path) and os.path.isdir(download_path):
-                save_dir = download_path
-            else:
-                save_dir = os.path.join(base_dir, 'vr_downloads')
-                if not os.path.exists(save_dir):
-                    os.makedirs(save_dir)
-
-            dop_dir = os.path.join(base_dir, '_dop')
-            if os.path.exists(dop_dir):
-                os.environ['PATH'] = dop_dir + os.pathsep + os.environ.get('PATH', '')
-
-            ffmpeg_available = os.path.exists(os.path.join(dop_dir, 'ffmpeg.exe'))
-            deno_available = os.path.exists(os.path.join(dop_dir, 'deno.exe'))
-
-            ydl_opts = {
-                'outtmpl': os.path.join(save_dir, '%(title)s.%(ext)s'),
-                'quiet': True,
-                'extractor_args': {'youtube': {'player_client': ['default', '-web_safari']}},
-                'socket_timeout': 30,
-                'retries': 10,
-            }
-            if ffmpeg_available:
-                ydl_opts['format'] = 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best'
-                ydl_opts['ffmpeg_location'] = dop_dir
-            else:
-                ydl_opts['format'] = 'best[ext=mp4]'
-
-            try:
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    info = ydl.extract_info(url, download=True)
-                    message = f"Downloaded: {info.get('title', 'video')}"
-                    if not ffmpeg_available:
-                        message += " (ffmpeg not found)"
-                    if not deno_available:
-                        message += " (Deno not found)"
-                    return render_template('download_vr.html',
-                                           success=message,
-                                           files=get_vr_downloads())
-            except Exception as e:
-                return render_template('download_vr.html',
-                                       error=str(e),
-                                       files=get_vr_downloads())
-        return render_template('download_vr.html', files=get_vr_downloads())
-
-    @app.route('/vr_download/<filename>')
-    def vr_download_file(filename):
-        vr_dir = os.path.join(os.path.dirname(CONFIG_PATH), 'vr_downloads')
-        filepath = os.path.join(vr_dir, filename)
-        if not os.path.exists(filepath):
-            abort(404)
-        mimetype, _ = mimetypes.guess_type(filepath)
-        if not mimetype:
-            mimetype = 'video/mp4'
-        return send_file(filepath, mimetype=mimetype, as_attachment=False)
 
     @app.route('/progress/<task_id>')
     def progress_stream(task_id):

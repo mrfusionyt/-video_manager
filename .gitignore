@@ -10,3 +10,12 @@ _dop/
 *.exe
 *.dll
 *.pyd
+
+# ---- build / release artifacts ----
+build/
+dist/
+VideoManager-*.zip
+VideoManager_changes.zip
+release.log
+cloud_release.log
+.gh_token

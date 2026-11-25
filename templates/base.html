@@ -14,10 +14,19 @@
     .sidebar { background: var(--bg-surface); border-right: 1px solid var(--border); min-height: calc(100vh - 70px); }
     .sidebar h5 { color: #fff; font-size: 1rem; font-weight: 600; padding: 0 1rem; margin-bottom: 0.75rem; }
     .sidebar h5.sidebar-divider { border-top: 1px solid var(--border); padding-top: 1.25rem; margin-top: 1.5rem; }
-    .sidebar .nav-link { color: var(--text-secondary); padding: 0.5rem 1rem; border-radius: var(--radius); display: block; text-decoration: none; font-size: 0.9rem; transition: background var(--tr), color var(--tr); }
-    .sidebar .nav-link:hover { background: var(--bg-elevated); color: #fff; }
-    .sidebar .nav-link.active { background: var(--red); color: #fff; }
-    .sidebar .nav-link .badge { float: right; background: var(--bg-subtle); color: var(--text-primary); }
+    .sidebar .nav-link {
+        color: #e6e7ea; margin: 3px 8px; padding: 7px 10px;
+        background: transparent; border: 1px solid transparent;
+        border-radius: 8px; display: block; text-decoration: none;
+        font-size: 0.9rem; font-weight: 500; line-height: 1.25;
+        transition: background .18s ease, border-color .18s ease, color .18s ease, box-shadow .18s ease;
+    }
+    .sidebar .nav-link:hover { background: rgba(220, 53, 69, 0.10); border-color: rgba(220, 53, 69, 0.30); color: #fff; }
+    .sidebar .nav-link.active {
+        background: rgba(220, 53, 69, 0.26); border-color: rgba(220, 53, 69, 0.62);
+        color: #fff; box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.25);
+    }
+    .sidebar .nav-link .badge { float: right; background: rgba(255,255,255,0.12); color: #e6e7ea; }
     .sidebar .nav-link.active .badge { background: rgba(255,255,255,0.25); color: #fff; }
 
     .sidebar .profile-switch-wrap { padding: 8px 0.75rem 1rem 0.75rem; margin-bottom: 0.5rem; border-bottom: 1px solid var(--border); }
@@ -35,7 +44,7 @@
 </head>
 <body>
 {% set NO_SIDEBAR = (request.endpoint == 'editor_page') %}
-{% set ADMIN_PAGES = ('settings', 'tools_page', 'download_vr', 'duplicates_page') %}
+{% set ADMIN_PAGES = ('settings', 'tools_page', 'duplicates_page') %}
 {% set PHOTO_PAGES = ('photos_page', 'photo_view', 'photo_edit') %}
 {% set PHOTO_ACTIVE = (request.endpoint in PHOTO_PAGES) %}
 
@@ -96,12 +105,6 @@
                         <a class="nav-link {% if request.endpoint == 'photo_classifier.index' %}active{% endif %}"
                            href="{{ url_for('photo_classifier.index') }}">
                             PhotoClassifier
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link {% if request.endpoint == 'download_vr' %}active{% endif %}"
-                           href="{{ url_for('download_vr', profile=current_profile) }}">
-                            Download VR
                         </a>
                     </li>
                     <li class="nav-item">
@@ -206,98 +209,7 @@
         {% endif %}
 
         <div class="{% if NO_SIDEBAR %}col-12{% else %}col-md-9 col-lg-10{% endif %}">
-            <div class="top-bar">
-                <div class="left-section">
-                    <button type="button" class="hamburger-btn" id="hamburgerBtn" aria-label="Menu">
-                        <span></span><span></span><span></span>
-                    </button>
-
-                    <ul class="nav-tabs-custom">
-                        <li class="nav-item">
-                            <a class="nav-link {% if request.endpoint in ('index', 'watch', 'edit_video') and not PHOTO_ACTIVE %}active{% endif %}"
-                               href="{{ url_for('index', profile=current_profile) }}">Videos</a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link {% if PHOTO_ACTIVE %}active{% endif %}"
-                               href="{{ url_for('photos_page', profile=current_profile) }}">Photo</a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link {% if request.endpoint in ('artists_page', 'artist_view') %}active{% endif %}"
-                               href="{{ url_for('artists_page', profile=current_profile) }}">Artists</a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link {% if request.endpoint == 'folders' %}active{% endif %}"
-                               href="{{ url_for('folders', profile=current_profile) }}">Folders</a>
-                        </li>
-                    </ul>
-
-                    <form class="search-form" method="get"
-                          action="{% if request.endpoint == 'folders' %}{{ url_for('folders') }}{% elif PHOTO_ACTIVE %}{{ url_for('photos_page') }}{% else %}{{ url_for('index') }}{% endif %}">
-                        <input type="text" name="search" placeholder="Search..." value="{{ search or '' }}" aria-label="Search">
-                        <input type="hidden" name="profile" value="{{ current_profile }}">
-                        <button type="submit" class="btn-search">Go</button>
-                    </form>
-
-                    <button class="btn-red" data-bs-toggle="modal" data-bs-target="#filterModal">Filters</button>
-                    <div class="dropdown">
-                        <button class="btn-red dropdown-toggle" type="button" id="sortDropdown" data-bs-toggle="dropdown" aria-expanded="false">
-                            Sort
-                        </button>
-                        <ul class="dropdown-menu dropdown-menu-dark" aria-labelledby="sortDropdown">
-                            {% if PHOTO_ACTIVE %}
-                                <li><a class="dropdown-item {% if sort == 'date' %}active{% endif %}" href="#" data-sort="date">By Date</a></li>
-                                <li><a class="dropdown-item {% if sort == 'rating' %}active{% endif %}" href="#" data-sort="rating">By Rating</a></li>
-                                <li><hr class="dropdown-divider"></li>
-                                <li><a class="dropdown-item {% if sort == 'quality_desc' %}active{% endif %}" href="#" data-sort="quality_desc">Quality (high → low)</a></li>
-                                <li><a class="dropdown-item {% if sort == 'quality_asc' %}active{% endif %}" href="#" data-sort="quality_asc">Quality (low → high)</a></li>
-                                <li><hr class="dropdown-divider"></li>
-                                <li><a class="dropdown-item {% if sort == 'filename_asc' %}active{% endif %}" href="#" data-sort="filename_asc">Name (A→Z)</a></li>
-                                <li><a class="dropdown-item {% if sort == 'filename_desc' %}active{% endif %}" href="#" data-sort="filename_desc">Name (Z→A)</a></li>
-                            {% else %}
-                                <li><a class="dropdown-item {% if sort == 'date' %}active{% endif %}" href="#" data-sort="date">By Date</a></li>
-                                <li><a class="dropdown-item {% if sort == 'rating' %}active{% endif %}" href="#" data-sort="rating">By Rating</a></li>
-                                <li><hr class="dropdown-divider"></li>
-                                <li><a class="dropdown-item {% if sort == 'quality_desc' %}active{% endif %}" href="#" data-sort="quality_desc">Quality (high → low)</a></li>
-                                <li><a class="dropdown-item {% if sort == 'quality_asc' %}active{% endif %}" href="#" data-sort="quality_asc">Quality (low → high)</a></li>
-                                <li><hr class="dropdown-divider"></li>
-                                <li><a class="dropdown-item {% if sort == 'duration_asc' %}active{% endif %}" href="#" data-sort="duration_asc">Duration (short first)</a></li>
-                                <li><a class="dropdown-item {% if sort == 'duration_desc' %}active{% endif %}" href="#" data-sort="duration_desc">Duration (long first)</a></li>
-                                <li><hr class="dropdown-divider"></li>
-                                <li><a class="dropdown-item {% if sort == 'orientation_vertical_first' %}active{% endif %}" href="#" data-sort="orientation_vertical_first">Vertical First</a></li>
-                                <li><a class="dropdown-item {% if sort == 'orientation_horizontal_first' %}active{% endif %}" href="#" data-sort="orientation_horizontal_first">Horizontal First</a></li>
-                                <li><hr class="dropdown-divider"></li>
-                                <li><a class="dropdown-item {% if sort == 'top10' %}active{% endif %}" href="#" data-sort="top10">Top 10</a></li>
-                                <li><a class="dropdown-item {% if sort == 'top50' %}active{% endif %}" href="#" data-sort="top50">Top 50</a></li>
-                                <li><a class="dropdown-item {% if sort == 'top100' %}active{% endif %}" href="#" data-sort="top100">Top 100</a></li>
-                            {% endif %}
-                        </ul>
-                    </div>
-                </div>
-
-                <div class="right-section">
-                    {% if request.endpoint == 'watch' %}
-                        <a href="#" onclick="window.history.back(); return false;" class="btn-nav icon-only" title="Back">
-                            <svg class="vm-nav-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5m0 0 7-7m-7 7 7 7"/></svg>
-                        </a>
-                    {% elif request.endpoint == 'photo_view' %}
-                        <a href="{{ url_for('photos_page', profile=current_profile) }}" class="btn-nav icon-only" title="Back to photos">
-                            <svg class="vm-nav-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5m0 0 7-7m-7 7 7 7"/></svg>
-                        </a>
-                    {% elif request.endpoint == 'editor_page' %}
-                        <a href="{{ url_for('watch', video_id=(request.view_args or {}).get('video_id', 0), profile=current_profile) }}" class="btn-nav icon-only" title="Back to video">
-                            <svg class="vm-nav-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5m0 0 7-7m-7 7 7 7"/></svg>
-                        </a>
-                    {% elif request.endpoint in ('settings', 'edit_video', 'artist_view', 'tools_page', 'download_vr', 'duplicates_page') %}
-                        <a href="{{ url_for('index', profile=current_profile) }}" class="btn-nav icon-only" title="Back">
-                            <svg class="vm-nav-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5m0 0 7-7m-7 7 7 7"/></svg>
-                        </a>
-                    {% else %}
-                        <a href="{{ url_for('settings', profile=current_profile) }}" class="btn-nav icon-only hide-mobile" title="Settings">
-                            <svg class="vm-nav-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8.2a3.8 3.8 0 1 0 0 7.6 3.8 3.8 0 0 0 0-7.6Z"/><path d="m19.4 13.5 1.1.9-1.5 2.6-1.4-.5a7.8 7.8 0 0 1-1.5.9l-.2 1.5h-3l-.3-1.5a7.8 7.8 0 0 1-1.6-.9l-1.3.5-1.5-2.6 1.1-.9a7 7 0 0 1 0-1.8l-1.1-.9 1.5-2.6 1.3.5a7.8 7.8 0 0 1 1.6-.9l.3-1.5h3l.2 1.5a7.8 7.8 0 0 1 1.5.9l1.4-.5 1.5 2.6-1.1.9a7 7 0 0 1 0 1.8Z"/></svg>
-                        </a>
-                    {% endif %}
-                </div>
-            </div>
+            {% include "_topbar.html" %}
 
             <div class="main-content">
                 {% block content %}{% endblock %}
@@ -377,12 +289,6 @@
                 <li>
                     <a href="{{ url_for('photo_classifier.index') }}">
                         <span>PhotoClassifier</span>
-                    </a>
-                </li>
-                <li>
-                    <a href="{{ url_for('download_vr', profile=current_profile) }}"
-                       class="{% if request.endpoint == 'download_vr' %}active{% endif %}">
-                        <span>Download VR</span>
                     </a>
                 </li>
                 <li>
@@ -600,55 +506,7 @@
     </div>
 </aside>
 
-<div class="modal fade" id="filterModal" tabindex="-1" aria-labelledby="filterModalLabel" aria-hidden="true">
-    <div class="modal-dialog modal-lg">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title" id="filterModalLabel">
-                    {% if PHOTO_ACTIVE %}Select Photo Categories{% else %}Select Categories{% endif %}
-                </h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-            </div>
-            <form method="get"
-                  action="{% if request.endpoint == 'folders' %}{{ url_for('folders') }}{% elif PHOTO_ACTIVE %}{{ url_for('photos_page') }}{% else %}{{ url_for('index') }}{% endif %}"
-                  id="filterForm">
-                <input type="hidden" name="profile" value="{{ current_profile }}">
-                <div class="modal-body">
-                    <p class="text-muted">Only files with the highest number of matches will be shown.</p>
-                    <div class="filter-grid">
-                        {% if PHOTO_ACTIVE %}
-                            {% for cat in all_photo_categories %}
-                            <div class="form-check">
-                                <input class="form-check-input" type="checkbox" name="category" value="{{ cat.id }}"
-                                       id="cat_{{ cat.id }}"
-                                       {% if cat.id in selected_categories %}checked{% endif %}>
-                                <label class="form-check-label" for="cat_{{ cat.id }}">{{ cat.name }}</label>
-                            </div>
-                            {% else %}
-                            <p class="text-muted">No photo categories yet.</p>
-                            {% endfor %}
-                        {% else %}
-                            {% for cat in all_categories %}
-                            <div class="form-check">
-                                <input class="form-check-input" type="checkbox" name="category" value="{{ cat.id }}"
-                                       id="cat_{{ cat.id }}"
-                                       {% if cat.id in selected_categories %}checked{% endif %}>
-                                <label class="form-check-label" for="cat_{{ cat.id }}">{{ cat.name }}</label>
-                            </div>
-                            {% else %}
-                            <p class="text-muted">No categories yet.</p>
-                            {% endfor %}
-                        {% endif %}
-                    </div>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                    <button type="submit" class="btn btn-filter">Apply</button>
-                </div>
-            </form>
-        </div>
-    </div>
-</div>
+{% include "_filter_modal.html" %}
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script src="{{ url_for('static', filename='js/base.js') }}"></script>

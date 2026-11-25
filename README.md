@@ -103,6 +103,13 @@ video_manager/
 └── README.md
 ```
 
+## Сборка и релиз
+
+- `release.bat` — одна команда: пушит тег, **GitHub Actions собирает exe,
+  пакует zip и публикует релиз** (локально не нужны PyInstaller и gh).
+- `release-local.bat` / `build.bat` — запасной путь: сборка на этом ПК.
+- Подробная инструкция: [RELEASE.md](RELEASE.md).
+
 ## Roadmap
 
 - [ ] Экспорт метаданных в JSON

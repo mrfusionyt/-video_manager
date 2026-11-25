@@ -1,0 +1,107 @@
+name: Build & Release (onedir)
+
+# The cloud is the build machine: no Python, PyInstaller or gh auth needed locally.
+# Triggers:
+#   - pushing a v* tag (release.bat does this for you)
+#   - manual run in the Actions tab (version input is optional)
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g. 1.0.1). Empty = CURRENT_VERSION from launcher.py'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build exe, pack zip, publish release
+    runs-on: windows-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Resolve version
+        id: ver
+        shell: pwsh
+        run: |
+          $inputVersion = '${{ inputs.version }}'
+          if ($inputVersion) {
+            $version = $inputVersion.TrimStart('v')
+            python tools/release_cli.py --set-version $version
+          } elseif ('${{ github.ref_type }}' -eq 'tag') {
+            $version = '${{ github.ref_name }}'.TrimStart('v')
+          } else {
+            $version = python -c "import make_release; print(make_release.read_version())"
+          }
+          $current = python -c "import make_release; print(make_release.read_version())"
+          if ($version -ne $current) {
+            throw "Tag version '$version' does not match CURRENT_VERSION '$current' in launcher.py"
+          }
+          $tag = "v$version"
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          Write-Host "Target: $tag"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Download helper binaries (_dop)
+        run: python tools/fetch_dop.py
+
+      - name: 'Build onedir with PyInstaller (entry point: launcher.py)'
+        run: python -m PyInstaller --noconfirm --clean VideoManager.spec
+
+      - name: Verify exe and pack release zip
+        run: |
+          if (-not (Test-Path "dist/VideoManager/VideoManager.exe")) {
+            throw "dist/VideoManager/VideoManager.exe is missing"
+          }
+          python make_release.py --no-release
+
+      - name: Publish GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = '${{ steps.ver.outputs.tag }}'
+          $version = '${{ steps.ver.outputs.version }}'
+          $asset = "VideoManager-v$version-win64-onedir.zip"
+          if (-not (Test-Path $asset)) { throw "Release archive $asset not found" }
+          gh release view $tag 2>&1 | Out-Null
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "Release $tag already exists - replacing the asset"
+            gh release upload $tag $asset --clobber
+          } else {
+            gh release create $tag $asset --title "VideoManager $tag" --generate-notes
+          }
+          if ($LASTEXITCODE -ne 0) { throw "Publishing failed" }
+
+      - name: Summary
+        shell: pwsh
+        run: |
+          $tag = '${{ steps.ver.outputs.tag }}'
+          "Release published: https://github.com/${{ github.repository }}/releases/tag/$tag" >> $env:GITHUB_STEP_SUMMARY
+          "Archive: VideoManager-v${{ steps.ver.outputs.version }}-win64-onedir.zip" >> $env:GITHUB_STEP_SUMMARY

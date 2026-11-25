@@ -3,10 +3,10 @@
 :root{--vm-red:#dc3545;--vm-red-hover:#c82333;--vm-radius:7px}
 .top-bar .search-form{align-items:center;gap:0!important}
 .top-bar .search-form input{height:32px;min-height:32px;line-height:1.2}
-.top-bar .search-form .btn-search{height:32px;min-height:32px;line-height:1;padding:0 14px;border-radius:0 7px 7px 0;background:var(--vm-red);color:#fff;font-weight:600}
-.top-bar .search-form .btn-search:hover{background:var(--vm-red-hover)}
-.top-bar .btn-red,.btn-add,.btn-import,.btn-danger-custom,.btn-primary,.btn-success{border-radius:7px!important;transition:background .18s ease,border-color .18s ease,box-shadow .18s ease,transform .18s ease}
-.top-bar .btn-red:hover,.btn-add:hover,.btn-import:hover,.btn-danger-custom:hover,.btn-primary:hover{background:var(--vm-red-hover)!important;border-color:var(--vm-red-hover)!important;box-shadow:0 4px 14px rgba(220,53,69,.2)}
+.top-bar .search-form .btn-search{height:32px;min-height:32px;line-height:1;padding:0 14px;border-radius:0 7px 7px 0;background:rgba(220,53,69,.10)!important;border:1px solid rgba(220,53,69,.30)!important;color:#e6e7ea!important;font-weight:600}
+.top-bar .search-form .btn-search:hover{background:rgba(220,53,69,.26)!important;border-color:rgba(220,53,69,.62)!important;color:#fff!important}
+.top-bar .btn-red{border-radius:7px!important;transition:background .18s ease,border-color .18s ease,box-shadow .18s ease,transform .18s ease;background:rgba(220,53,69,.10)!important;border:1px solid rgba(220,53,69,.30)!important;color:#e6e7ea!important}
+.top-bar .btn-red:hover{background:rgba(220,53,69,.26)!important;border-color:rgba(220,53,69,.62)!important;color:#fff!important;box-shadow:0 4px 14px rgba(220,53,69,.18)!important}
 .vm-nav-svg{width:21px;height:21px;display:block;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 .top-bar .btn-nav{color:#b8bbc4;border:1px solid transparent;border-radius:8px!important;transition:all .18s ease}
 .top-bar .btn-nav:hover{color:#fff;background:rgba(220,53,69,.13);border-color:rgba(220,53,69,.35)}
@@ -25,14 +25,307 @@ textarea.form-control-dark::-webkit-scrollbar-thumb,.table-responsive::-webkit-s
 textarea.form-control-dark::-webkit-scrollbar-thumb:hover,.table-responsive::-webkit-scrollbar-thumb:hover{background:#dc3545}
 .cat-type-tab{border-radius:8px 8px 0 0!important;gap:9px!important}
 .cat-type-tab .cnt{min-width:23px;text-align:center}
-/* Blueprint pages use the same tokens and controls */
-.vm-sidebar{background:var(--bg-surface);border-right:1px solid var(--border)}
-.vm-sidebar .nav-link{border-radius:7px!important;padding:9px 13px!important;transition:all .18s ease}
-.vm-sidebar .nav-link:hover{background:rgba(220,53,69,.10)!important;color:#fff!important}
-.vm-sidebar .nav-link.active{background:var(--red)!important;color:#fff!important;box-shadow:0 4px 14px rgba(220,53,69,.16)}
+/* ============================================================
+   LEFT COLUMN — one design for the main app and the blueprints.
+   Normal  = faint red tint
+   Hover   = same look as a normal (not active) button
+   Active  = same look as a pressed button
+   All metrics are identical for .sidebar and .vm-sidebar so the
+   font/spacing does not jump when switching pages.
+   ============================================================ */
+.sidebar,
+.vm-sidebar {
+    background: var(--bg-surface);
+    border-right: 1px solid var(--border);
+    padding-top: 10px !important;
+}
+.sidebar h5,
+.vm-sidebar h5 {
+    color: #fff;
+    font-size: 1rem;
+    font-weight: 600;
+    line-height: 1.2;
+    padding: 0 1rem;
+    margin: 0 0 .75rem 0;
+}
+.sidebar h5.sidebar-divider,
+.vm-sidebar h5.sidebar-divider {
+    border-top: 1px solid var(--border);
+    padding-top: 1.25rem;
+    margin-top: 1.5rem;
+}
+.sidebar .nav-link,
+.vm-sidebar .nav-link {
+    display: block;
+    margin: 3px 8px;
+    padding: 7px 10px !important;
+    background: transparent !important;
+    border: 1px solid transparent !important;
+    border-radius: 8px !important;
+    color: #e6e7ea !important;
+    font-size: .9rem !important;
+    font-weight: 500 !important;
+    line-height: 1.25 !important;
+    text-decoration: none;
+    transition: background .18s ease, border-color .18s ease, color .18s ease, box-shadow .18s ease;
+}
+.sidebar .nav-link:hover,
+.vm-sidebar .nav-link:hover {
+    background: rgba(220, 53, 69, 0.10) !important;
+    border-color: rgba(220, 53, 69, 0.30) !important;
+    color: #fff !important;
+}
+.sidebar .nav-link.active,
+.vm-sidebar .nav-link.active {
+    background: rgba(220, 53, 69, 0.26) !important;
+    border-color: rgba(220, 53, 69, 0.62) !important;
+    color: #fff !important;
+    box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.25) !important;
+}
+.sidebar .nav-link .badge,
+.vm-sidebar .nav-link .badge {
+    float: right;
+    background: rgba(255, 255, 255, 0.12) !important;
+    color: #e6e7ea !important;
+}
+.sidebar .nav-link.active .badge,
+.vm-sidebar .nav-link.active .badge {
+    background: rgba(255, 255, 255, 0.25) !important;
+    color: #fff !important;
+}
 .vm-main-col .main-content{padding:1.5rem!important}
 body.vm-blueprint{background:var(--bg-app);color:var(--text-primary)}
 body.vm-blueprint .card,body.vm-blueprint .panel,body.vm-blueprint .task-card{background:var(--bg-surface);border:1px solid var(--border);border-radius:10px;color:var(--text-primary)}
 body.vm-blueprint .btn,body.vm-blueprint button{border-radius:7px;transition:all .18s ease}
-body.vm-blueprint .btn-primary,body.vm-blueprint .btn-danger,body.vm-blueprint .btn-success{background:var(--red);border-color:var(--red)}
-body.vm-blueprint .btn-primary:hover,body.vm-blueprint .btn-danger:hover,body.vm-blueprint .btn-success:hover{background:var(--red-hover);border-color:var(--red-hover)}
+/* ============================================================
+   UNIFIED CONTROLS — every button is highlighted by default
+   (soft red fill + soft red border, stronger red on hover)
+   ============================================================ */
+.btn-nav,
+.btn-add, .btn-import, .btn-paste, .btn-danger-custom, .btn-restart,
+.btn-outline-red, .btn-mini, .btn-action, .btn-select-cover, .btn-filter,
+.btn-more, .btn-not-dup, .btn-restore, .btn-move-all, .btn-load-more,
+.btn-create, .btn-primary, .btn-secondary, .btn-danger, .btn-success,
+.btn-outline-secondary,
+body.vm-blueprint .btn:not(.btn-close):not(.btn-nav):not(.btn-search):not(.btn-red):not(.btn-restart-confirm):not(.btn-restart-spin) {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 7px;
+    height: 40px !important;
+    min-height: 40px !important;
+    padding: 0 14px !important;
+    background: rgba(220, 53, 69, 0.10) !important;
+    background-image: none !important;
+    border: 1px solid rgba(220, 53, 69, 0.30) !important;
+    color: #e6e7ea !important;
+    border-radius: 8px !important;
+    font-size: .85rem !important;
+    font-weight: 550 !important;
+    line-height: 1 !important;
+    letter-spacing: .01em;
+    text-decoration: none !important;
+    white-space: nowrap;
+    cursor: pointer;
+    box-shadow: none !important;
+    transition: background .18s ease, border-color .18s ease, color .18s ease, transform .18s ease;
+}
+.btn-nav:hover,
+.btn-add:hover, .btn-import:hover, .btn-paste:hover, .btn-danger-custom:hover, .btn-restart:hover,
+.btn-outline-red:hover, .btn-mini:hover, .btn-action:hover, .btn-select-cover:hover, .btn-filter:hover,
+.btn-more:hover, .btn-not-dup:hover, .btn-restore:hover, .btn-move-all:hover, .btn-load-more:hover,
+.btn-create:hover, .btn-primary:hover, .btn-secondary:hover, .btn-danger:hover, .btn-success:hover,
+.btn-outline-secondary:hover,
+body.vm-blueprint .btn:not(.btn-close):not(.btn-nav):not(.btn-search):not(.btn-red):not(.btn-restart-confirm):not(.btn-restart-spin):hover {
+    background: rgba(220, 53, 69, 0.26) !important;
+    border-color: rgba(220, 53, 69, 0.62) !important;
+    color: #fff !important;
+    box-shadow: 0 4px 14px rgba(220, 53, 69, 0.18) !important;
+}
+.btn-nav:active,
+.btn-add:active, .btn-import:active, .btn-paste:active, .btn-danger-custom:active, .btn-restart:active,
+.btn-outline-red:active, .btn-mini:active, .btn-action:active, .btn-select-cover:active, .btn-filter:active,
+.btn-more:active, .btn-not-dup:active, .btn-restore:active, .btn-move-all:active, .btn-load-more:active,
+.btn-create:active, .btn-primary:active, .btn-secondary:active, .btn-danger:active, .btn-success:active,
+.btn-outline-secondary:active,
+body.vm-blueprint .btn:not(.btn-close):not(.btn-nav):not(.btn-search):not(.btn-red):not(.btn-restart-confirm):not(.btn-restart-spin):active {
+    transform: scale(.96);
+}
+.btn-nav:focus-visible,
+.btn-add:focus-visible, .btn-import:focus-visible, .btn-paste:focus-visible, .btn-danger-custom:focus-visible, .btn-restart:focus-visible,
+.btn-outline-red:focus-visible, .btn-mini:focus-visible, .btn-action:focus-visible, .btn-select-cover:focus-visible, .btn-filter:focus-visible,
+.btn-create:focus-visible, .btn-primary:focus-visible, .btn-secondary:focus-visible, .btn-danger:focus-visible, .btn-success:focus-visible {
+    outline: 2px solid var(--red);
+    outline-offset: 1px;
+}
+.btn-nav:disabled, .btn-add:disabled, .btn-import:disabled, .btn-paste:disabled, .btn-danger-custom:disabled,
+.btn-restart:disabled, .btn-outline-red:disabled, .btn-mini:disabled, .btn-action:disabled, .btn-filter:disabled,
+.btn-create:disabled, .btn-primary:disabled, .btn-secondary:disabled, .btn-danger:disabled, .btn-success:disabled,
+.btn-nav[disabled], .btn-add[disabled], .btn-import[disabled], .btn-primary[disabled], .btn-secondary[disabled] {
+    opacity: .45 !important;
+    cursor: not-allowed !important;
+    transform: none !important;
+}
+
+/* Compact variant keeps the same look, only smaller */
+.btn-sm,
+body.vm-blueprint .btn-sm {
+    height: 32px !important;
+    min-height: 32px !important;
+    padding: 0 11px !important;
+    font-size: .8rem !important;
+}
+
+/* Timeline / compare mini buttons stay compact but keep the tinted look */
+.btn-mini {
+    height: auto !important;
+    min-height: 0 !important;
+    padding: 4px 8px !important;
+    font-size: .72rem !important;
+    border-radius: 6px !important;
+}
+
+/* Video editor toolbar buttons (keep the green Undo and red primary) */
+.btn-editor:not(.undo):not(.primary) {
+    background: rgba(220, 53, 69, 0.10) !important;
+    border-color: rgba(220, 53, 69, 0.30) !important;
+    color: #e6e7ea !important;
+}
+.btn-editor:not(.undo):not(.primary):hover {
+    background: rgba(220, 53, 69, 0.26) !important;
+    border-color: rgba(220, 53, 69, 0.62) !important;
+    color: #fff !important;
+}
+
+/* Destructive confirm inside the restart modal stays a filled primary */
+.btn-restart.btn-restart-confirm {
+    background: var(--red) !important;
+    border-color: var(--red) !important;
+    color: #fff !important;
+}
+.btn-restart.btn-restart-confirm:hover {
+    background: var(--red-hover) !important;
+    border-color: var(--red-hover) !important;
+    color: #fff !important;
+}
+
+/* ------------------------------------------------------------
+   Player controls — highlighted like every other button
+   (sizes/paddings of the player stay untouched)
+   ------------------------------------------------------------ */
+.custom-controls .controls-row .btn-control {
+    background: rgba(220, 53, 69, 0.10) !important;
+    border: 1px solid rgba(220, 53, 69, 0.30) !important;
+    border-radius: 8px !important;
+    transition: background .18s ease, border-color .18s ease, transform .18s ease;
+}
+.custom-controls .controls-row .btn-control:hover {
+    background: rgba(220, 53, 69, 0.26) !important;
+    border-color: rgba(220, 53, 69, 0.62) !important;
+}
+
+.right-panel .btn-edit-small {
+    background: rgba(220, 53, 69, 0.10) !important;
+    border: 1px solid rgba(220, 53, 69, 0.30) !important;
+    color: #e6e7ea !important;
+    border-radius: 8px !important;
+    font-weight: 550;
+    padding: 0.35rem 0.7rem !important;
+    transition: background .18s ease, border-color .18s ease, color .18s ease;
+}
+.right-panel .btn-edit-small:hover {
+    background: rgba(220, 53, 69, 0.26) !important;
+    border-color: rgba(220, 53, 69, 0.62) !important;
+    color: #fff !important;
+}
+
+.btn-artist {
+    background: rgba(220, 53, 69, 0.10) !important;
+    border: 1px solid rgba(220, 53, 69, 0.30) !important;
+    color: #e6e7ea !important;
+    border-radius: 8px !important;
+}
+.btn-artist.secondary {
+    background: rgba(220, 53, 69, 0.10) !important;
+    border: 1px solid rgba(220, 53, 69, 0.30) !important;
+    color: #e6e7ea !important;
+}
+.btn-artist:hover,
+.btn-artist.secondary:hover {
+    background: rgba(220, 53, 69, 0.26) !important;
+    border-color: rgba(220, 53, 69, 0.62) !important;
+    color: #fff !important;
+}
+
+.carousel-btn {
+    background: rgba(220, 53, 69, 0.10) !important;
+    border: 1px solid rgba(220, 53, 69, 0.30) !important;
+    color: #e6e7ea !important;
+}
+.carousel-btn:hover {
+    background: rgba(220, 53, 69, 0.26) !important;
+    border-color: rgba(220, 53, 69, 0.62) !important;
+    color: #fff !important;
+}
+
+/* "Add to playlist" toggle in the player header */
+.video-header .playlist-dropdown .dropdown-toggle {
+    background: rgba(220, 53, 69, 0.10) !important;
+    border-color: rgba(220, 53, 69, 0.30) !important;
+    color: #e6e7ea !important;
+}
+.video-header .playlist-dropdown .dropdown-toggle:hover {
+    background: rgba(220, 53, 69, 0.26) !important;
+    border-color: rgba(220, 53, 69, 0.62) !important;
+    color: #fff !important;
+}
+
+/* Divider between "Settings" tabs and "Tools" is defined in the
+   LEFT COLUMN section above (shared by .sidebar and .vm-sidebar). */
+
+/* Mobile drawer — same states as the left column / buttons */
+.drawer-nav a {
+    display: flex !important;
+    align-items: center;
+    gap: .6rem;
+    margin: 3px 10px !important;
+    padding: 10px 12px !important;
+    background: transparent !important;
+    border: 1px solid transparent !important;
+    border-left: 1px solid transparent !important;
+    border-radius: 8px !important;
+    color: #e6e7ea !important;
+    text-decoration: none !important;
+    font-size: .92rem !important;
+    transition: background .18s ease, border-color .18s ease, color .18s ease, box-shadow .18s ease;
+}
+.drawer-nav a:hover {
+    background: rgba(220, 53, 69, 0.10) !important;
+    border-color: rgba(220, 53, 69, 0.30) !important;
+    color: #fff !important;
+}
+.drawer-nav a.active {
+    background: rgba(220, 53, 69, 0.26) !important;
+    border-color: rgba(220, 53, 69, 0.62) !important;
+    color: #fff !important;
+    box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.25) !important;
+}
+.drawer-btn {
+    background: rgba(220, 53, 69, 0.10) !important;
+    border: 1px solid rgba(220, 53, 69, 0.30) !important;
+    color: #e6e7ea !important;
+    border-radius: 8px !important;
+}
+.drawer-btn:hover {
+    background: rgba(220, 53, 69, 0.26) !important;
+    border-color: rgba(220, 53, 69, 0.62) !important;
+    color: #fff !important;
+}
+.drawer-btn.primary {
+    background: var(--red) !important;
+    border-color: var(--red) !important;
+    color: #fff !important;
+}
+
+
+

@@ -1,0 +1,49 @@
+{% set _photo_active = PHOTO_ACTIVE if PHOTO_ACTIVE is defined else (request.endpoint in ('photos_page', 'photo_view', 'photo_edit')) %}
+{% set _filter_action = url_for('folders') if request.endpoint == 'folders' else (url_for('photos_page', profile=current_profile) if _photo_active else url_for('index', profile=current_profile)) %}
+<div class="modal fade" id="filterModal" tabindex="-1" aria-labelledby="filterModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="filterModalLabel">
+                    {% if _photo_active %}Select Photo Categories{% else %}Select Categories{% endif %}
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form method="get" action="{{ _filter_action }}" id="filterForm">
+                <input type="hidden" name="profile" value="{{ current_profile }}">
+                <div class="modal-body">
+                    <p class="text-muted">Only files with the highest number of matches will be shown.</p>
+                    <div class="filter-grid">
+                        {% if _photo_active %}
+                            {% for cat in all_photo_categories|default([]) %}
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="category" value="{{ cat.id }}"
+                                       id="cat_{{ cat.id }}"
+                                       {% if cat.id in selected_categories|default([]) %}checked{% endif %}>
+                                <label class="form-check-label" for="cat_{{ cat.id }}">{{ cat.name }}</label>
+                            </div>
+                            {% else %}
+                            <p class="text-muted">No photo categories yet.</p>
+                            {% endfor %}
+                        {% else %}
+                            {% for cat in all_categories|default([]) %}
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="category" value="{{ cat.id }}"
+                                       id="cat_{{ cat.id }}"
+                                       {% if cat.id in selected_categories|default([]) %}checked{% endif %}>
+                                <label class="form-check-label" for="cat_{{ cat.id }}">{{ cat.name }}</label>
+                            </div>
+                            {% else %}
+                            <p class="text-muted">No categories yet.</p>
+                            {% endfor %}
+                        {% endif %}
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-filter">Apply</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>

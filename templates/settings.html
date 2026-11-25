@@ -65,12 +65,12 @@
         <div class="cat-type-tabs">
             <a href="{{ url_for('settings', tab='categories', media_type='video', profile=current_profile) }}"
                class="cat-type-tab {% if cat_media_type == 'video' %}active{% endif %}">
-                <svg class="settings-tab-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m10 9 5 3-5 3z"/></svg> Video categories
+                Video categories
                 <span class="cnt">{{ categories_video|length }}</span>
             </a>
             <a href="{{ url_for('settings', tab='categories', media_type='image', profile=current_profile) }}"
                class="cat-type-tab {% if cat_media_type == 'image' %}active{% endif %}">
-                <svg class="settings-tab-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9" r="1.5"/><path d="m21 15-5-5L5 19"/></svg> Photo categories
+                Photo categories
                 <span class="cnt">{{ categories_image|length }}</span>
             </a>
         </div>
@@ -166,7 +166,7 @@
         gap: 0.5rem;
         padding: 0.6rem 1.1rem;
         border-radius: var(--radius) var(--radius) 0 0;
-        background: var(--bg-elevated);
+        background: transparent;
         border: 1px solid var(--border-strong);
         border-bottom: none;
         color: var(--text-secondary);
@@ -175,10 +175,10 @@
         margin-bottom: -1px;
         transition: background var(--tr), color var(--tr), border-color var(--tr);
     }
-    .cat-type-tab:hover { background: var(--bg-subtle); color: #fff; }
+    .cat-type-tab:hover { background: rgba(220,53,69,0.10); border-color: rgba(220,53,69,0.30); color: #fff; }
     .cat-type-tab.active {
-        background: var(--red);
-        border-color: var(--red);
+        background: rgba(220,53,69,0.26);
+        border-color: rgba(220,53,69,0.62);
         color: #fff;
         font-weight: 600;
     }
@@ -213,43 +213,41 @@
         </div>
     </div>
 
-    <div class="settings-section" style="margin-top: 2rem; padding-top: 1.5rem; border-top: 1px solid var(--border);">
+    <div class="settings-section restart-card" style="margin-top: 2rem; padding-top: 1.5rem; border-top: 1px solid var(--border);">
         <h5>Server</h5>
         <p class="text-muted small mb-3">
-            Перезапустить Flask-сервер. Активные фоновые задачи (сканирование,
-            поиск дубликатов, загрузки) будут прерваны. После перезапуска
-            страница обновится автоматически.
+            Перезапуск сервера требуется, например, при смене статического IP или после обновления проекта.
+            Активные фоновые задачи (сканирование, поиск дубликатов, загрузки) будут прерваны, после чего страница обновится автоматически.
         </p>
-        <button type="button" class="btn-danger-custom" id="restartServerBtn">
-            <svg class="settings-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M5.5 9A7 7 0 0 1 18 6l2 2M4 16l2 2a7 7 0 0 0 12.5-3"/></svg> Restart Server
-        </button>
+        <div class="restart-card-actions">
+            <button type="button" class="btn-restart" id="restartServerBtn">
+                <span class="btn-restart-label">Restart server</span>
+            </button>
+        </div>
     </div>
 {% endif %}
 
 <!-- МОДАЛКА ПОДТВЕРЖДЕНИЯ ПЕРЕЗАПУСКА СЕРВЕРА -->
-<div class="modal fade" id="restartServerModal" tabindex="-1" aria-hidden="true">
-    <div class="modal-dialog modal-dialog-centered">
-        <div class="modal-content edit-modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title">Restart server</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+<div class="restart-modal fade" id="restartServerModal" tabindex="-1" aria-hidden="true">
+    <div class="restart-modal-dialog">
+        <div class="restart-modal-content">
+            <div class="restart-modal-header">
+                <h3 class="restart-modal-title">Перезапустить сервер?</h3>
+                <button type="button" class="restart-modal-close" id="restartModalClose" aria-label="Закрыть">✕</button>
             </div>
-            <div class="modal-body">
-                <div class="delete-warning">
-                    <div class="warn-icon">!</div>
-                    <div class="warn-text">
-                        <div>Перезапустить сервер?</div>
-                        <div class="small-muted">
-                            Активные загрузки, сканирование библиотек и поиск
-                            дубликатов будут прерваны. Страница обновится
-                            автоматически после перезапуска.
-                        </div>
+            <div class="restart-modal-body">
+                <div class="restart-warn">
+                    <div class="restart-warn-icon">⚠</div>
+                    <div class="restart-warn-text">
+                        <div class="restart-warn-line">Активные задачи будут остановлены</div>
+                        <div class="restart-warn-sub">Сканирование, поиск дубликатов и загрузки
+                            прервутся. После перезапуска страница обновится автоматически.</div>
                     </div>
                 </div>
             </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                <button type="button" class="btn btn-primary" id="confirmRestartBtn">Restart</button>
+            <div class="restart-modal-footer">
+                <button type="button" class="btn-outline-red" id="restartModalCancel">Отмена</button>
+                <button type="button" class="btn-restart btn-restart-confirm" id="confirmRestartBtn"><span class="btn-restart-label">Перезапустить</span><span class="btn-restart-spin"></span></button>
             </div>
         </div>
     </div>
@@ -258,23 +256,86 @@
 <!-- OVERLAY "SERVER IS RESTARTING" -->
 <div class="restart-overlay" id="restartOverlay" style="display:none;">
     <div class="restart-overlay-inner">
-        <div class="restart-spinner"></div>
+        <div class="restart-overlay-mark" id="restartOverlayMark"><span>…</span></div>
         <div class="restart-overlay-text" id="restartOverlayText">Перезапуск сервера…</div>
         <div class="restart-overlay-hint" id="restartOverlayHint">Ждём, пока сервер вернётся онлайн</div>
     </div>
 </div>
 
 <style>
-.restart-overlay { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.88); z-index: 10000; display: flex; align-items: center; justify-content: center; backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
-.restart-overlay-inner { text-align: center; color: var(--text-primary); padding: 2rem 2.5rem; background: var(--bg-surface); border: 1px solid var(--border-strong); border-radius: var(--radius-lg); box-shadow: var(--shadow-modal); max-width: 420px; }
-.restart-spinner { width: 48px; height: 48px; margin: 0 auto 1rem auto; border: 4px solid var(--bg-elevated); border-top-color: var(--red); border-radius: 50%; animation: restart-spin 0.9s linear infinite; }
-@keyframes restart-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-.restart-overlay-text { font-size: 1.05rem; font-weight: 500; margin-bottom: 0.4rem; }
-.restart-overlay-hint { font-size: 0.85rem; color: var(--text-muted); }
-.restart-overlay-inner.success .restart-spinner { border: none; background: transparent; animation: none; }
-.restart-overlay-inner.success .restart-spinner::after { content: '✓'; display: block; width: 48px; height: 48px; margin: 0 auto; font-size: 2.5rem; line-height: 48px; color: var(--green); }
-.restart-overlay-inner.error .restart-spinner { border: none; background: transparent; animation: none; }
-.restart-overlay-inner.error .restart-spinner::after { content: '!'; display: block; width: 48px; height: 48px; margin: 0 auto; font-size: 2.5rem; line-height: 48px; color: var(--red); font-weight: bold; }
+/* ---- Стили кнопки перезапуска (на токенах приложения) ---- */
+.restart-card-actions { display: flex; justify-content: flex-start; margin-top: 0; }
+.btn-restart {
+    display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+    height: 40px; padding: 0 14px; font-size: 0.85rem; font-weight: 550; line-height: 1;
+    background: rgba(220, 53, 69, 0.10); color: #e6e7ea;
+    border: 1px solid rgba(220, 53, 69, 0.30); border-radius: 8px;
+    cursor: pointer; transition: all .18s ease;
+}
+.btn-restart:hover { background: rgba(220, 53, 69, 0.26); border-color: rgba(220, 53, 69, 0.62); color: #fff; }
+.btn-restart:active { transform: scale(0.96); }
+.btn-restart:disabled { opacity: .45; cursor: wait; }
+
+/* Вариации используются в /pv (PhotoClassifier) и в модалке */
+.btn-restart.btn-restart-primary { background: rgba(220, 53, 69, 0.10); color: #e6e7ea; border-color: rgba(220, 53, 69, 0.30); }
+.btn-restart.btn-restart-primary:hover { background: rgba(220, 53, 69, 0.26); border-color: rgba(220, 53, 69, 0.62); color: #fff; }
+
+/* ---- Модалка перезапуска ---- */
+.restart-modal { position: fixed; inset: 0; z-index: 1050; display: none; align-items: center; justify-content: center; padding: 16px; }
+.restart-modal.fade.show { display: flex; }
+.restart-modal.fade .restart-modal-dialog { opacity: 0; transform: translateY(-6px); transition: opacity .15s ease, transform .15s ease; }
+.restart-modal.fade.show .restart-modal-dialog { opacity: 1; transform: none; }
+.restart-modal-dialog { background: var(--bg-surface); border: 1px solid var(--border-strong); border-radius: 12px;
+    box-shadow: var(--shadow-modal); width: 420px; max-width: 95vw; overflow: hidden; }
+.restart-modal-content { display: flex; flex-direction: column; }
+.restart-modal-header { display: flex; align-items: center; justify-content: space-between; padding: 16px 18px 12px; }
+.restart-modal-title { margin: 0; font-size: 1.02rem; color: var(--text-primary); }
+.restart-modal-close { background: none; border: none; color: var(--text-muted); font-size: 1.2rem; cursor: pointer; transition: color .15s; }
+.restart-modal-close:hover { color: #fff; }
+.restart-modal-body { padding: 4px 18px 12px; }
+.restart-warn { display: flex; gap: 12px; padding: 12px 14px; border-radius: 9px;
+    background: var(--red-soft-bg); border: 1px solid rgba(220,53,69,.18); align-items: flex-start; }
+.restart-warn-icon { color: var(--red); font-size: 1.1rem; line-height: 1; margin-top: 2px; }
+.restart-warn-text { display: flex; flex-direction: column; gap: 2px; }
+.restart-warn-line { font-size: .9rem; font-weight: 550; color: var(--text-primary); }
+.restart-warn-sub { font-size: .8rem; color: var(--text-muted); }
+.restart-modal-footer { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 18px 16px; }
+.btn-outline-red {
+    display: inline-flex; align-items: center; justify-content: center;
+    height: 40px; padding: 0 14px; font-size: .85rem; font-weight: 550; line-height: 1;
+    color: #e6e7ea;
+    background: rgba(220, 53, 69, 0.10); border: 1px solid rgba(220, 53, 69, 0.30); border-radius: 8px;
+    cursor: pointer; transition: all .15s;
+}
+.btn-outline-red:hover { color: #fff; border-color: rgba(220, 53, 69, 0.62); background: rgba(220, 53, 69, 0.26); }
+.btn-restart-confirm {
+    position: relative; padding: 9px 18px; font-size: .9rem; font-weight: 650;
+    background: var(--red); color: #fff; border: none; border-radius: 7px;
+    cursor: pointer; overflow: hidden; transition: background .15s;
+}
+.btn-restart-confirm:hover { background: var(--red-hover); }
+.btn-restart-spin {
+    position: absolute; width: 14px; height: 14px; border: 2px solid rgba(255,255,255,.35);
+    border-top-color: #fff; border-radius: 50%; animation: restart-spin1 .7s linear infinite;
+    display: none; top: 50%; left: 50%; transform: translate(-50%, -50%);
+}
+.btn-restart-confirm.btn-restart-spin .btn-restart-spin { display: block; }
+@keyframes restart-spin1 { to { transform: translate(-50%, -50%) rotate(360deg); } }
+
+/* ---- OVERLAY: перезапуск сервера ---- */
+.restart-overlay { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.9); z-index: 20000; display: flex; align-items: center; justify-content: center; backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
+.restart-overlay-inner { text-align: center; color: var(--text-primary); padding: 32px 40px;
+    background: var(--bg-surface); border: 1px solid var(--border-strong); border-radius: 12px; box-shadow: var(--shadow-modal); width: 320px; }
+.restart-overlay-mark { width: 64px; height: 64px; margin: 0 auto 16px; border: 3px solid var(--bg-elevated); border-top-color: var(--red); border-radius: 50%; animation: restart-pulse 1s ease-in-out infinite; }
+@keyframes restart-pulse { to { transform: rotate(360deg); } }
+.restart-overlay-text { font-size: 1.05rem; font-weight: 500; margin-bottom: 6px; }
+.restart-overlay-hint { font-size: .85rem; color: var(--text-muted); }
+.restart-overlay-inner.success .restart-overlay-mark { animation: none; border: none; background: transparent; }
+.restart-overlay-inner.success .restart-overlay-mark::before { content: '✓'; display: block; width: 64px; height: 64px; line-height: 64px; font-size: 3rem; color: var(--green); margin: 0 auto; font-family: system-ui; }
+.restart-overlay-inner.success .restart-overlay-mark::after { content: ''; display: none; }
+.restart-overlay-inner.error .restart-overlay-mark { animation: none; border: none; background: transparent; }
+.restart-overlay-inner.error .restart-overlay-mark::before { content: '!'; display: block; width: 64px; height: 64px; line-height: 64px; font-size: 3rem; color: var(--red); margin: 0 auto; font-family: system-ui; }
+.restart-overlay-inner.error .restart-overlay-mark::after { content: ''; display: none; }
 </style>
 
 <script>
@@ -368,20 +429,47 @@
         const restartBtn = document.getElementById('restartServerBtn');
         const restartModalEl = document.getElementById('restartServerModal');
         const confirmRestartBtn = document.getElementById('confirmRestartBtn');
+        const restartModalCloseBtn = document.getElementById('restartModalClose');
+        const restartModalCancelBtn = document.getElementById('restartModalCancel');
         const restartOverlay = document.getElementById('restartOverlay');
         const restartOverlayText = document.getElementById('restartOverlayText');
         const restartOverlayHint = document.getElementById('restartOverlayHint');
         const restartOverlayInner = restartOverlay ? restartOverlay.querySelector('.restart-overlay-inner') : null;
 
+        /* ---- Универсальный show/hide модалки (без зависимости от Bootstrap) ---- */
+        function showRestartModal() {
+            if (!restartModalEl) return;
+            restartModalEl.style.display = 'flex';
+            restartModalEl.classList.add('show');
+            const label = confirmRestartBtn.querySelector('.btn-restart-label');
+            if (label) label.textContent = 'Перезапустить';
+            confirmRestartBtn.classList.remove('btn-restart-spin');
+            confirmRestartBtn.disabled = false;
+        }
+        function hideRestartModal() {
+            if (!restartModalEl) return;
+            restartModalEl.classList.remove('show');
+            setTimeout(function() { restartModalEl.style.display = 'none'; }, 200);
+            if (restartModalCancelBtn) restartModalCancelBtn.focus && restartModalCancelBtn.focus();
+        }
+        document.addEventListener('keydown', function esc(e) {
+            if (e.key === 'Escape' && restartModalEl && restartModalEl.classList.contains('show')) {
+                hideRestartModal();
+            }
+        });
+
         if (restartBtn && restartModalEl) {
-            const restartModal = new bootstrap.Modal(restartModalEl);
-            restartBtn.addEventListener('click', function() { restartModal.show(); });
+            restartBtn.addEventListener('click', showRestartModal);
+            if (restartModalCloseBtn) restartModalCloseBtn.addEventListener('click', hideRestartModal);
+            if (restartModalCancelBtn) restartModalCancelBtn.addEventListener('click', hideRestartModal);
             confirmRestartBtn.addEventListener('click', function() {
+                if (confirmRestartBtn.disabled) return;
                 confirmRestartBtn.disabled = true;
-                confirmRestartBtn.textContent = 'Restarting…';
+                confirmRestartBtn.classList.add('btn-restart-spin');
+                if (confirmRestartBtn.querySelector('.btn-restart-label')) confirmRestartBtn.querySelector('.btn-restart-label').textContent = 'Перезапускаем…';
                 fetch('/restart_server', { method: 'POST', headers: { 'Content-Type': 'application/json' } })
                     .catch(function() {})
-                    .finally(function() { restartModal.hide(); startRestartOverlay(); });
+                    .finally(function() { hideRestartModal(); startRestartOverlay(); });
             });
         }
 

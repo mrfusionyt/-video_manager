@@ -1,0 +1,100 @@
+{% set _photo_active = PHOTO_ACTIVE if PHOTO_ACTIVE is defined else (request.endpoint in ('photos_page', 'photo_view', 'photo_edit')) %}
+{% set _search_action = url_for('folders') if request.endpoint == 'folders' else (url_for('photos_page', profile=current_profile) if _photo_active else url_for('index', profile=current_profile)) %}
+<div class="top-bar">
+    <div class="left-section">
+        <button type="button" class="hamburger-btn" id="hamburgerBtn" aria-label="Menu">
+            <span></span><span></span><span></span>
+        </button>
+
+        <ul class="nav-tabs-custom">
+            <li class="nav-item">
+                <a class="nav-link {% if request.endpoint in ('index', 'watch', 'edit_video') and not _photo_active %}active{% endif %}"
+                   href="{{ url_for('index', profile=current_profile) }}">Videos</a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link {% if _photo_active %}active{% endif %}"
+                   href="{{ url_for('photos_page', profile=current_profile) }}">Photo</a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link {% if request.endpoint in ('artists_page', 'artist_view') %}active{% endif %}"
+                   href="{{ url_for('artists_page', profile=current_profile) }}">Artists</a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link {% if request.endpoint == 'folders' %}active{% endif %}"
+                   href="{{ url_for('folders', profile=current_profile) }}">Folders</a>
+            </li>
+        </ul>
+
+        <form class="search-form" method="get" action="{{ _search_action }}">
+            <input type="text" name="search" placeholder="Search..." value="{{ search|default('') }}" aria-label="Search">
+            <input type="hidden" name="profile" value="{{ current_profile }}">
+            <button type="submit" class="btn-search">Go</button>
+        </form>
+
+        <button class="btn-red" data-bs-toggle="modal" data-bs-target="#filterModal">Filters</button>
+        <div class="dropdown">
+            <button class="btn-red dropdown-toggle" type="button" id="sortDropdown" data-bs-toggle="dropdown" aria-expanded="false">
+                Sort
+            </button>
+            <ul class="dropdown-menu dropdown-menu-dark" aria-labelledby="sortDropdown">
+                {% if _photo_active %}
+                    <li><a class="dropdown-item {% if sort|default('') == 'date' %}active{% endif %}" href="#" data-sort="date">By Date</a></li>
+                    <li><a class="dropdown-item {% if sort|default('') == 'rating' %}active{% endif %}" href="#" data-sort="rating">By Rating</a></li>
+                    <li><hr class="dropdown-divider"></li>
+                    <li><a class="dropdown-item {% if sort|default('') == 'quality_desc' %}active{% endif %}" href="#" data-sort="quality_desc">Quality (high → low)</a></li>
+                    <li><a class="dropdown-item {% if sort|default('') == 'quality_asc' %}active{% endif %}" href="#" data-sort="quality_asc">Quality (low → high)</a></li>
+                    <li><hr class="dropdown-divider"></li>
+                    <li><a class="dropdown-item {% if sort|default('') == 'filename_asc' %}active{% endif %}" href="#" data-sort="filename_asc">Name (A→Z)</a></li>
+                    <li><a class="dropdown-item {% if sort|default('') == 'filename_desc' %}active{% endif %}" href="#" data-sort="filename_desc">Name (Z→A)</a></li>
+                {% else %}
+                    <li><a class="dropdown-item {% if sort|default('') == 'date' %}active{% endif %}" href="#" data-sort="date">By Date</a></li>
+                    <li><a class="dropdown-item {% if sort|default('') == 'rating' %}active{% endif %}" href="#" data-sort="rating">By Rating</a></li>
+                    <li><hr class="dropdown-divider"></li>
+                    <li><a class="dropdown-item {% if sort|default('') == 'quality_desc' %}active{% endif %}" href="#" data-sort="quality_desc">Quality (high → low)</a></li>
+                    <li><a class="dropdown-item {% if sort|default('') == 'quality_asc' %}active{% endif %}" href="#" data-sort="quality_asc">Quality (low → high)</a></li>
+                    <li><hr class="dropdown-divider"></li>
+                    <li><a class="dropdown-item {% if sort|default('') == 'duration_asc' %}active{% endif %}" href="#" data-sort="duration_asc">Duration (short first)</a></li>
+                    <li><a class="dropdown-item {% if sort|default('') == 'duration_desc' %}active{% endif %}" href="#" data-sort="duration_desc">Duration (long first)</a></li>
+                    <li><hr class="dropdown-divider"></li>
+                    <li><a class="dropdown-item {% if sort|default('') == 'orientation_vertical_first' %}active{% endif %}" href="#" data-sort="orientation_vertical_first">Vertical First</a></li>
+                    <li><a class="dropdown-item {% if sort|default('') == 'orientation_horizontal_first' %}active{% endif %}" href="#" data-sort="orientation_horizontal_first">Horizontal First</a></li>
+                    <li><hr class="dropdown-divider"></li>
+                    <li><a class="dropdown-item {% if sort|default('') == 'top10' %}active{% endif %}" href="#" data-sort="top10">Top 10</a></li>
+                    <li><a class="dropdown-item {% if sort|default('') == 'top50' %}active{% endif %}" href="#" data-sort="top50">Top 50</a></li>
+                    <li><a class="dropdown-item {% if sort|default('') == 'top100' %}active{% endif %}" href="#" data-sort="top100">Top 100</a></li>
+                {% endif %}
+            </ul>
+        </div>
+    </div>
+
+    <div class="right-section">
+        {% if BACK_URL is defined and BACK_URL %}
+            <a href="{{ BACK_URL }}" class="btn-nav" title="Back">
+                <span class="btn-nav-label">Back</span>
+            </a>
+            <a href="{{ url_for('settings', profile=current_profile) }}" class="btn-nav hide-mobile" title="Settings">
+                <span class="btn-nav-label">Settings</span>
+            </a>
+        {% elif request.endpoint == 'watch' %}
+            <a href="#" onclick="window.history.back(); return false;" class="btn-nav" title="Back">
+                <span class="btn-nav-label">Back</span>
+            </a>
+        {% elif request.endpoint == 'photo_view' %}
+            <a href="{{ url_for('photos_page', profile=current_profile) }}" class="btn-nav" title="Back">
+                <span class="btn-nav-label">Back</span>
+            </a>
+        {% elif request.endpoint == 'editor_page' %}
+            <a href="{{ url_for('watch', video_id=(request.view_args or {}).get('video_id', 0), profile=current_profile) }}" class="btn-nav" title="Back">
+                <span class="btn-nav-label">Back</span>
+            </a>
+        {% elif request.endpoint in ('settings', 'edit_video', 'artist_view', 'tools_page', 'duplicates_page') %}
+            <a href="{{ url_for('index', profile=current_profile) }}" class="btn-nav" title="Back">
+                <span class="btn-nav-label">Back</span>
+            </a>
+        {% else %}
+            <a href="{{ url_for('settings', profile=current_profile) }}" class="btn-nav hide-mobile" title="Settings">
+                <span class="btn-nav-label">Settings</span>
+            </a>
+        {% endif %}
+    </div>
+</div>

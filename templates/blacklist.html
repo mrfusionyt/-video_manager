@@ -5,7 +5,7 @@
 
 {% block content %}
 <div class="mb-3 d-flex align-items-center gap-2 flex-wrap">
-    <a href="{{ url_for('settings', tab='duplicates', profile=current_profile) }}" class="btn-add">← Back to Duplicates</a>
+    <a href="{{ url_for('settings', tab='duplicates', profile=current_profile) }}" class="btn-nav"><span class="btn-nav-label">Back to Duplicates</span></a>
     <button id="clearAllBtn" class="btn-add" style="background:#7a1f29;">Clear all</button>
 </div>
 
