@@ -65,12 +65,12 @@
         <div class="cat-type-tabs">
             <a href="{{ url_for('settings', tab='categories', media_type='video', profile=current_profile) }}"
                class="cat-type-tab {% if cat_media_type == 'video' %}active{% endif %}">
-                🎬 Video categories
+                <svg class="settings-tab-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m10 9 5 3-5 3z"/></svg> Video categories
                 <span class="cnt">{{ categories_video|length }}</span>
             </a>
             <a href="{{ url_for('settings', tab='categories', media_type='image', profile=current_profile) }}"
                class="cat-type-tab {% if cat_media_type == 'image' %}active{% endif %}">
-                🖼 Photo categories
+                <svg class="settings-tab-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9" r="1.5"/><path d="m21 15-5-5L5 19"/></svg> Photo categories
                 <span class="cnt">{{ categories_image|length }}</span>
             </a>
         </div>
@@ -221,7 +221,7 @@
             страница обновится автоматически.
         </p>
         <button type="button" class="btn-danger-custom" id="restartServerBtn">
-            ⟳ Restart Server
+            <svg class="settings-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M5.5 9A7 7 0 0 1 18 6l2 2M4 16l2 2a7 7 0 0 0 12.5-3"/></svg> Restart Server
         </button>
     </div>
 {% endif %}

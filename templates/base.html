@@ -7,6 +7,7 @@
     <link rel="icon" type="image/png" href="{{ url_for('serve_image', filename='video.png') }}">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/vm_unified.css') }}">
     {% block styles %}{% endblock %}
 
     <style>
@@ -276,23 +277,23 @@
                 <div class="right-section">
                     {% if request.endpoint == 'watch' %}
                         <a href="#" onclick="window.history.back(); return false;" class="btn-nav icon-only" title="Back">
-                            <img src="{{ url_for('serve_image', filename='back.png') }}" alt="Back">
+                            <svg class="vm-nav-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5m0 0 7-7m-7 7 7 7"/></svg>
                         </a>
                     {% elif request.endpoint == 'photo_view' %}
                         <a href="{{ url_for('photos_page', profile=current_profile) }}" class="btn-nav icon-only" title="Back to photos">
-                            <img src="{{ url_for('serve_image', filename='back.png') }}" alt="Back">
+                            <svg class="vm-nav-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5m0 0 7-7m-7 7 7 7"/></svg>
                         </a>
                     {% elif request.endpoint == 'editor_page' %}
                         <a href="{{ url_for('watch', video_id=(request.view_args or {}).get('video_id', 0), profile=current_profile) }}" class="btn-nav icon-only" title="Back to video">
-                            <img src="{{ url_for('serve_image', filename='back.png') }}" alt="Back">
+                            <svg class="vm-nav-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5m0 0 7-7m-7 7 7 7"/></svg>
                         </a>
                     {% elif request.endpoint in ('settings', 'edit_video', 'artist_view', 'tools_page', 'download_vr', 'duplicates_page') %}
                         <a href="{{ url_for('index', profile=current_profile) }}" class="btn-nav icon-only" title="Back">
-                            <img src="{{ url_for('serve_image', filename='back.png') }}" alt="Back">
+                            <svg class="vm-nav-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5m0 0 7-7m-7 7 7 7"/></svg>
                         </a>
                     {% else %}
                         <a href="{{ url_for('settings', profile=current_profile) }}" class="btn-nav icon-only hide-mobile" title="Settings">
-                            <img src="{{ url_for('serve_image', filename='settings.png') }}" alt="Settings">
+                            <svg class="vm-nav-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8.2a3.8 3.8 0 1 0 0 7.6 3.8 3.8 0 0 0 0-7.6Z"/><path d="m19.4 13.5 1.1.9-1.5 2.6-1.4-.5a7.8 7.8 0 0 1-1.5.9l-.2 1.5h-3l-.3-1.5a7.8 7.8 0 0 1-1.6-.9l-1.3.5-1.5-2.6 1.1-.9a7 7 0 0 1 0-1.8l-1.1-.9 1.5-2.6 1.3.5a7.8 7.8 0 0 1 1.6-.9l.3-1.5h3l.2 1.5a7.8 7.8 0 0 1 1.5.9l1.4-.5 1.5 2.6-1.1.9a7 7 0 0 1 0 1.8Z"/></svg>
                         </a>
                     {% endif %}
                 </div>
@@ -425,7 +426,7 @@
                 <li class="drawer-divider"></li>
                 <li>
                     <a href="{{ url_for('settings', profile=current_profile) }}">
-                        <img src="{{ url_for('serve_image', filename='settings.png') }}" alt="" class="drawer-icon">
+                        <svg class="drawer-icon vm-nav-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8.2a3.8 3.8 0 1 0 0 7.6 3.8 3.8 0 0 0 0-7.6Z"/><path d="M19 13.5 20.5 15l-1.5 2.5-2-.5-1.5.9-.3 1.6h-3l-.3-1.6-1.5-.9-2 .5L7 15l1.5-1.5v-2L7 10l1.5-2.5 2 .5 1.5-.9.3-1.6h3l.3 1.6 1.5.9 2-.5 1.5 2.5L19 11.5z"/></svg>
                         <span>Settings</span>
                     </a>
                 </li>

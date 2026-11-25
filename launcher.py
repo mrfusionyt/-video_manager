@@ -129,7 +129,7 @@ def create_tray():
         menu = pystray.Menu(
             pystray.MenuItem('Show App', show_window, default=True),
             pystray.MenuItem('Open in Browser', lambda: webbrowser.open(local_url_global)),
-            pystray.MenuItem('PhotoClassifier', open_photo_classifier),
+            pystray.MenuItem('Restart Server', restart_from_tray),
             pystray.MenuItem('Exit', tray_quit),
         )
         tray_icon = pystray.Icon('VideoManager', image, 'VideoManager', menu)
@@ -325,6 +325,42 @@ def make_url_row(parent, label_text: str, url: str):
     entry.bind('<Control-c>', on_copy)
 
 
+class RoundedButton(tk.Canvas):
+    """Canvas button with web-matching red hover and rounded corners."""
+    def __init__(self,parent,text,command,primary=False,width=130,height=34):
+        super().__init__(parent,width=width,height=height,bg=parent.cget('bg'),highlightthickness=0,bd=0,cursor='hand2')
+        self.text=text; self.command=command; self.primary=primary; self.w=width; self.h=height
+        self.normal='#dc3545' if primary else '#292a30'; self.hover='#c82333'
+        self.fg='#ffffff'; self.bind('<Configure>',lambda e:self.draw(self.normal)); self.bind('<Enter>',lambda e:self.draw(self.hover)); self.bind('<Leave>',lambda e:self.draw(self.normal)); self.bind('<Button-1>',lambda e:self.command())
+        self.draw(self.normal)
+    def draw(self,color):
+        self.delete('all'); r=7; w=self.w; h=self.h
+        self.create_rectangle(r,0,w-r,h,fill=color,outline=color); self.create_rectangle(0,r,w,h-r,fill=color,outline=color)
+        for x,y in [(r,r),(w-r,r),(r,h-r),(w-r,h-r)]: self.create_oval(x-r,y-r,x+r,y+r,fill=color,outline=color)
+        self.create_text(w/2,h/2,text=self.text,fill=self.fg,font=('Segoe UI',9,'bold' if self.primary else 'normal'))
+
+def show_restart_dialog():
+    dialog=tk.Toplevel(tk_root); dialog.title('Restart VideoManager'); dialog.configure(bg='#191a1f'); dialog.resizable(False,False); dialog.transient(tk_root); dialog.grab_set()
+    dialog.geometry('360x178'); dialog.update_idletasks()
+    x=tk_root.winfo_rootx()+(tk_root.winfo_width()-360)//2; y=tk_root.winfo_rooty()+(tk_root.winfo_height()-178)//2; dialog.geometry(f'+{x}+{y}')
+    tk.Label(dialog,text='Restart VideoManager?',bg='#191a1f',fg='#f4f4f5',font=('Segoe UI',13,'bold')).pack(anchor='w',padx=20,pady=(18,6))
+    tk.Label(dialog,text='The server will briefly go offline and then start again.',bg='#191a1f',fg='#aeb0b8',font=('Segoe UI',9),wraplength=315,justify='left').pack(anchor='w',padx=20)
+    bar=tk.Frame(dialog,bg='#191a1f'); bar.pack(fill='x',side='bottom',padx=18,pady=16)
+    RoundedButton(bar,'Cancel',dialog.destroy,False,92,34).pack(side='right',padx=(8,0))
+    def confirm():
+        dialog.destroy()
+        if status_label: status_label.config(text='Restarting...',fg='#ff596b')
+        def request_restart():
+            try: requests.post(local_url_global+'/restart_server',timeout=3)
+            except Exception as exc: print('[restart] request failed:',exc)
+        threading.Thread(target=request_restart,daemon=True).start()
+    RoundedButton(bar,'Restart Server',confirm,True,126,34).pack(side='right')
+    dialog.bind('<Escape>',lambda e:dialog.destroy()); dialog.bind('<Return>',lambda e:confirm())
+
+def restart_from_tray(icon=None,item=None):
+    if tk_root: tk_root.after(0,show_restart_dialog)
+
+
 def main():
     global tk_root, status_label, update_btn, local_url_global, tray_icon
 
@@ -391,20 +427,12 @@ def main():
     btn_bar = tk.Frame(root_frame, bg='#18181b')
     btn_bar.pack(fill=tk.X, pady=(6, 0))
 
-    def mk_btn(text, cmd, primary=False):
-        bg = '#dc3545' if primary else '#27272a'
-        active = '#b02a37' if primary else '#3f3f46'
-        b = tk.Button(btn_bar, text=text, command=cmd, bg=bg, fg='#fff',
-                      activebackground=active, activeforeground='#fff',
-                      relief='flat', bd=0, font=('Segoe UI', 9),
-                      cursor='hand2', padx=8, pady=5)
-        b.bind('<Enter>', lambda e: b.config(bg=active))
-        b.bind('<Leave>', lambda e: b.config(bg=bg))
-        return b
+    def mk_btn(text, cmd, primary=False, width=130):
+        return RoundedButton(btn_bar, text, cmd, primary=primary, width=width, height=34)
 
-    mk_btn('Check Updates', force_check_update).pack(side=tk.LEFT, padx=(0, 5))
-    mk_btn('PhotoClassifier', open_photo_classifier).pack(side=tk.LEFT, padx=(0, 5))
-    mk_btn('Open Browser', lambda: webbrowser.open(local_url_global), primary=True).pack(side=tk.RIGHT)
+    mk_btn('Check Updates', force_check_update, width=118).pack(side=tk.LEFT, padx=(0, 7))
+    mk_btn('Restart Server', show_restart_dialog, width=122).pack(side=tk.LEFT, padx=(0, 7))
+    mk_btn('Open Browser', lambda: webbrowser.open(local_url_global), primary=True, width=118).pack(side=tk.RIGHT)
 
     tk_root.protocol('WM_DELETE_WINDOW', hide_window)
 

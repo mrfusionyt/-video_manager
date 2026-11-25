@@ -1,0 +1,49 @@
+/* VideoManager settings cleanup — consistent red/graphite controls */
+.settings-section { min-width: 0; max-width: 100%; }
+.settings-section .form-label { display:block; margin-bottom:.55rem; color:#c8cbd2; font-weight:500; }
+.settings-section .form-control-dark,
+.settings-section input.form-control,
+.settings-section textarea.form-control {
+  width:100%; max-width:100%; box-sizing:border-box; color:#e8e9ed;
+  background:linear-gradient(145deg,#202127,#17181d); border:1px solid #393b45;
+  border-radius:8px; box-shadow:inset 0 1px 2px rgba(0,0,0,.22);
+}
+.settings-section .form-control-dark:focus,
+.settings-section input.form-control:focus,
+.settings-section textarea.form-control:focus {
+  color:#fff; background:#1b1c22; border-color:#dc3545;
+  box-shadow:0 0 0 3px rgba(220,53,69,.14); outline:0;
+}
+.settings-section textarea.form-control-dark,
+.settings-section textarea.form-control {
+  display:block; min-height:116px; height:116px; resize:vertical; padding:11px 13px;
+  line-height:1.55; overflow-y:auto; scrollbar-width:thin; scrollbar-color:#555861 #1a1b20;
+}
+.settings-section textarea::-webkit-scrollbar { width:8px; }
+.settings-section textarea::-webkit-scrollbar-track { background:#191a20; border-radius:8px; }
+.settings-section textarea::-webkit-scrollbar-thumb { background:#555861; border:2px solid #191a20; border-radius:8px; }
+.settings-section textarea::-webkit-scrollbar-thumb:hover { background:#dc3545; }
+.cat-type-tabs { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin:0 0 20px; padding:0 0 12px; border-bottom:1px solid #30323a; }
+.cat-type-tab { display:inline-flex; align-items:center; justify-content:center; gap:9px; min-height:42px; padding:9px 15px; margin:0; border:1px solid #353741; border-radius:8px; background:#202127; color:#c4c6ce; text-decoration:none; font-size:.9rem; font-weight:550; transition:background .18s ease,border-color .18s ease,color .18s ease,box-shadow .18s ease; }
+.cat-type-tab:hover { background:#2a2025; border-color:#a92c3b; color:#fff; }
+.cat-type-tab.active { color:#fff; background:linear-gradient(135deg,#e13b50,#b92236); border-color:#e13b50; box-shadow:0 4px 14px rgba(220,53,69,.18); }
+.settings-tab-icon { width:17px; height:17px; flex:0 0 17px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
+.cat-type-tab .cnt { display:inline-flex; align-items:center; justify-content:center; min-width:23px; height:22px; padding:0 7px; border-radius:20px; background:rgba(255,255,255,.12); color:inherit; font-size:.72rem; font-weight:700; }
+.cat-type-tab.active .cnt { background:rgba(0,0,0,.2); }
+.settings-section .mb-3 { min-width:0; }
+.settings-section .table-responsive { border:1px solid #30323a; border-radius:9px; overflow-x:auto; }
+.settings-section .table { margin-bottom:0; }
+.settings-section .btn-import,
+.settings-section .btn-add,
+.settings-section .btn-paste,
+.settings-section .btn-danger-custom { border-radius:8px; }
+.settings-inline-icon { width:17px; height:17px; vertical-align:-3px; margin-right:5px; fill:none; stroke:currentColor; stroke-width:1.9; stroke-linecap:round; stroke-linejoin:round; }
+/* Keep the header search usable with Enter; the displaced Go label/button is intentionally removed. */
+.top-bar .search-form { gap:0; }
+.top-bar .search-form input { border-radius:8px; }
+.drawer-search-form { display:flex; gap:0; }
+.drawer-search-form input { min-width:0; flex:1; }
+@media (max-width: 767.98px) {
+  .cat-type-tabs { gap:6px; }
+  .cat-type-tab { flex:1 1 145px; padding:9px 10px; }
+}

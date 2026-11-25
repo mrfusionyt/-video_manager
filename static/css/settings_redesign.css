@@ -1,0 +1,34 @@
+/* VideoManager Settings — red/black visual refresh (safe, presentation-only) */
+:root{--vm-accent:#e53945;--vm-accent-hover:#ff4b55;--vm-panel:#191a1e;--vm-panel-2:#202126;--vm-line:#303137;--vm-text:#f3f3f5;--vm-muted:#a2a3aa}
+.main-content:has(.settings-section){max-width:1500px;margin-inline:auto;padding:26px 30px 48px}
+.main-content:has(.settings-section) .settings-section{background:linear-gradient(145deg,rgba(35,36,42,.96),rgba(23,24,28,.98));border:1px solid var(--vm-line);border-radius:16px;padding:24px;margin:0 0 22px;box-shadow:0 12px 34px rgba(0,0,0,.22)}
+.main-content:has(.settings-section) h1,.main-content:has(.settings-section) h2,.main-content:has(.settings-section) h3,.main-content:has(.settings-section) h4,.main-content:has(.settings-section) h5{color:var(--vm-text);font-weight:650;letter-spacing:-.02em}
+.main-content:has(.settings-section) h5{font-size:1.05rem;margin:0 0 18px;padding-bottom:13px;border-bottom:1px solid var(--vm-line)}
+.main-content:has(.settings-section) label,.main-content:has(.settings-section) .form-label{color:#d4d4d8;font-weight:550;margin-bottom:8px}
+.main-content:has(.settings-section) .form-control,.main-content:has(.settings-section) .form-select,.main-content:has(.settings-section) textarea{background:#141519!important;border:1px solid #383940!important;color:#f4f4f5!important;border-radius:10px!important;min-height:42px;box-shadow:none!important;transition:border-color .18s,box-shadow .18s}
+.main-content:has(.settings-section) .form-control:focus,.main-content:has(.settings-section) .form-select:focus,.main-content:has(.settings-section) textarea:focus{border-color:var(--vm-accent)!important;box-shadow:0 0 0 3px rgba(229,57,69,.15)!important}
+.main-content:has(.settings-section) input::placeholder,.main-content:has(.settings-section) textarea::placeholder{color:#777982}
+.main-content:has(.settings-section) .btn,.main-content:has(.settings-section) button,.main-content:has(.settings-section) .btn-add,.main-content:has(.settings-section) .btn-import,.main-content:has(.settings-section) .btn-paste{border-radius:9px;transition:transform .16s,background .16s,border-color .16s; font-weight:600}
+.main-content:has(.settings-section) .btn-primary,.main-content:has(.settings-section) .btn-add,.main-content:has(.settings-section) .btn-import{background:linear-gradient(135deg,#f04450,#bd202e)!important;border:1px solid #f04450!important;color:#fff!important;box-shadow:0 5px 16px rgba(220,40,55,.18)}
+.main-content:has(.settings-section) .btn-primary:hover,.main-content:has(.settings-section) .btn-add:hover,.main-content:has(.settings-section) .btn-import:hover{background:linear-gradient(135deg,#ff5962,#d92737)!important;transform:translateY(-1px)}
+.main-content:has(.settings-section) .btn-secondary,.main-content:has(.settings-section) .btn-paste,.main-content:has(.settings-section) .btn-outline-secondary{background:#292a30!important;border:1px solid #41424a!important;color:#e5e5e8!important}
+.main-content:has(.settings-section) .btn-secondary:hover,.main-content:has(.settings-section) .btn-paste:hover,.main-content:has(.settings-section) .btn-outline-secondary:hover{border-color:#777!important;background:#33343b!important}
+.main-content:has(.settings-section) .btn-danger,.main-content:has(.settings-section) .btn-danger-custom,.main-content:has(.settings-section) .btn-delete{background:rgba(229,57,69,.12)!important;border:1px solid rgba(229,57,69,.48)!important;color:#ff737b!important}
+.main-content:has(.settings-section) .table-responsive{border:1px solid var(--vm-line);border-radius:12px;overflow:auto;background:rgba(12,13,16,.25)}
+.main-content:has(.settings-section) .table{margin:0;color:#dedee2;vertical-align:middle}
+.main-content:has(.settings-section) .table thead th{background:#25262c;color:#f4f4f5;border-bottom:1px solid #3a3b43;font-size:.78rem;text-transform:uppercase;letter-spacing:.06em;padding:13px 15px;white-space:nowrap}
+.main-content:has(.settings-section) .table tbody td{background:transparent;border-color:#303137;padding:12px 15px}
+.main-content:has(.settings-section) .table tbody tr:hover td{background:rgba(229,57,69,.055)}
+.main-content:has(.settings-section) code{color:#ff9298;background:rgba(229,57,69,.09);padding:4px 7px;border-radius:6px;overflow-wrap:anywhere}
+.main-content:has(.settings-section) .action-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:18px}
+.main-content:has(.settings-section) .flex-form{display:flex;align-items:center;gap:9px;flex:1;min-width:min(100%,420px)}
+.main-content:has(.settings-section) .flex-form input{flex:1;min-width:160px}
+.main-content:has(.settings-section) .scan-form{margin:0}
+.main-content:has(.settings-section) .cat-type-tabs{gap:8px;border-bottom:1px solid var(--vm-line);margin-bottom:22px}
+.main-content:has(.settings-section) .cat-type-tab{border:1px solid var(--vm-line);border-bottom:0;border-radius:10px 10px 0 0;background:#202127;color:#bfc0c6;padding:11px 16px}
+.main-content:has(.settings-section) .cat-type-tab.active{background:linear-gradient(135deg,#e9434e,#b91f2d);border-color:#e9434e;color:white}
+.main-content:has(.settings-section) .dup-progress{background:#15161a;border:1px solid var(--vm-line);border-radius:10px;padding:12px;margin:14px 0}
+.main-content:has(.settings-section) .dup-progress-bar{height:8px;background:#303137;border-radius:20px;overflow:hidden}
+.main-content:has(.settings-section) .dup-progress-fill{background:linear-gradient(90deg,#b91f2d,#ff5962);border-radius:20px}
+.main-content:has(.settings-section) .text-muted{color:var(--vm-muted)!important}
+@media(max-width:768px){.main-content:has(.settings-section){padding:16px 12px 30px}.main-content:has(.settings-section) .settings-section{padding:16px;border-radius:13px}.main-content:has(.settings-section) .flex-form{flex-wrap:wrap}.main-content:has(.settings-section) .flex-form input{flex-basis:100%}.main-content:has(.settings-section) .action-row{align-items:stretch}.main-content:has(.settings-section) .scan-form{width:100%}.main-content:has(.settings-section) .scan-form button{width:100%}}

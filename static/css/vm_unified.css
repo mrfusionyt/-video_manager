@@ -1,0 +1,38 @@
+
+/* VideoManager unified finishing layer */
+:root{--vm-red:#dc3545;--vm-red-hover:#c82333;--vm-radius:7px}
+.top-bar .search-form{align-items:center;gap:0!important}
+.top-bar .search-form input{height:32px;min-height:32px;line-height:1.2}
+.top-bar .search-form .btn-search{height:32px;min-height:32px;line-height:1;padding:0 14px;border-radius:0 7px 7px 0;background:var(--vm-red);color:#fff;font-weight:600}
+.top-bar .search-form .btn-search:hover{background:var(--vm-red-hover)}
+.top-bar .btn-red,.btn-add,.btn-import,.btn-danger-custom,.btn-primary,.btn-success{border-radius:7px!important;transition:background .18s ease,border-color .18s ease,box-shadow .18s ease,transform .18s ease}
+.top-bar .btn-red:hover,.btn-add:hover,.btn-import:hover,.btn-danger-custom:hover,.btn-primary:hover{background:var(--vm-red-hover)!important;border-color:var(--vm-red-hover)!important;box-shadow:0 4px 14px rgba(220,53,69,.2)}
+.vm-nav-svg{width:21px;height:21px;display:block;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.top-bar .btn-nav{color:#b8bbc4;border:1px solid transparent;border-radius:8px!important;transition:all .18s ease}
+.top-bar .btn-nav:hover{color:#fff;background:rgba(220,53,69,.13);border-color:rgba(220,53,69,.35)}
+.top-bar .btn-nav:hover .vm-nav-svg{color:#ff596b}
+.top-bar .btn-nav.icon-only img{display:none}
+.top-bar .btn-nav.icon-only .vm-nav-svg{width:20px;height:20px}
+.drawer-nav .vm-nav-svg{width:20px;height:20px;color:#aeb2bd;flex-shrink:0}
+.drawer-nav a:hover .vm-nav-svg,.drawer-nav a.active .vm-nav-svg{color:#ff596b}
+/* Form controls / category editor */
+.form-control-dark,textarea.form-control-dark{background:#191a20!important;color:#e8e9ed!important;border:1px solid #383b45!important;border-radius:9px!important;box-shadow:inset 0 1px 2px rgba(0,0,0,.22);scrollbar-width:thin;scrollbar-color:#555b68 #191a20}
+.form-control-dark:focus,textarea.form-control-dark:focus{border-color:#dc3545!important;box-shadow:0 0 0 3px rgba(220,53,69,.12)!important}
+textarea.form-control-dark{min-height:120px;resize:vertical;line-height:1.55;padding:12px 14px}
+textarea.form-control-dark::-webkit-scrollbar,.table-responsive::-webkit-scrollbar{width:8px;height:8px}
+textarea.form-control-dark::-webkit-scrollbar-track,.table-responsive::-webkit-scrollbar-track{background:#191a20;border-radius:8px}
+textarea.form-control-dark::-webkit-scrollbar-thumb,.table-responsive::-webkit-scrollbar-thumb{background:#454954;border:2px solid #191a20;border-radius:8px}
+textarea.form-control-dark::-webkit-scrollbar-thumb:hover,.table-responsive::-webkit-scrollbar-thumb:hover{background:#dc3545}
+.cat-type-tab{border-radius:8px 8px 0 0!important;gap:9px!important}
+.cat-type-tab .cnt{min-width:23px;text-align:center}
+/* Blueprint pages use the same tokens and controls */
+.vm-sidebar{background:var(--bg-surface);border-right:1px solid var(--border)}
+.vm-sidebar .nav-link{border-radius:7px!important;padding:9px 13px!important;transition:all .18s ease}
+.vm-sidebar .nav-link:hover{background:rgba(220,53,69,.10)!important;color:#fff!important}
+.vm-sidebar .nav-link.active{background:var(--red)!important;color:#fff!important;box-shadow:0 4px 14px rgba(220,53,69,.16)}
+.vm-main-col .main-content{padding:1.5rem!important}
+body.vm-blueprint{background:var(--bg-app);color:var(--text-primary)}
+body.vm-blueprint .card,body.vm-blueprint .panel,body.vm-blueprint .task-card{background:var(--bg-surface);border:1px solid var(--border);border-radius:10px;color:var(--text-primary)}
+body.vm-blueprint .btn,body.vm-blueprint button{border-radius:7px;transition:all .18s ease}
+body.vm-blueprint .btn-primary,body.vm-blueprint .btn-danger,body.vm-blueprint .btn-success{background:var(--red);border-color:var(--red)}
+body.vm-blueprint .btn-primary:hover,body.vm-blueprint .btn-danger:hover,body.vm-blueprint .btn-success:hover{background:var(--red-hover);border-color:var(--red-hover)}
