@@ -8,8 +8,8 @@ import android.content.ClipData;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.content.res.ColorStateList;
 import android.graphics.Color;
-import android.graphics.ColorStateList;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -150,7 +150,7 @@ public class MainActivity extends Activity {
     private LinearLayout errorOverlay;
     private TextView errorDetail;
     private EditText errorInput;
-    private View errorIcon;
+    private TextView errorIcon;
     private boolean errorVisible = false;
     private int pageLoadingCount = 0;
     private boolean videoLoading = false;
@@ -555,12 +555,7 @@ public class MainActivity extends Activity {
 
                 Intent intent;
                 try {
-                    if (params != null && params.isDirMode()) {
-                        intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
-                        intent.addCategory(Intent.CATEGORY_OPENABLE);
-                        intent.setType("*/*");
-                        intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
-                    } else if (params != null) {
+                    if (params != null) {
                         intent = params.createIntent();
                         intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
                     } else {
