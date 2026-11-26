@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="AppTheme" parent="android:style/Theme.Material.Dark">
+    <style name="AppTheme" parent="android:style/Theme.Material">
         <item name="android:colorAccent">#DC3545</item>
         <item name="android:statusBarColor">#18181B</item>
         <item name="android:navigationBarColor">#18181B</item>
