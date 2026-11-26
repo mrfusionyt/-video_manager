@@ -11,6 +11,8 @@
 
     let chosenFiles = [];
     let activeJob = null;
+    let lastDetectedFolder = '';
+    let folderEdited = false;
     let runToken = 0;
     let lastSample = { bytes: 0, time: 0, speed: 0 };
 
@@ -179,6 +181,21 @@
 
     /* --- File selection --- */
 
+    function detectFolderName() {
+        const input = $('folderInput');
+        if (!input.files || !input.files.length) return '';
+        const relative = String(input.files[0].webkitRelativePath || '').replace(/\\/g, '/');
+        const parts = relative.split('/').filter(Boolean);
+        if (parts.length > 1) return parts[0];
+        try {
+            const entries = input.webkitEntries || [];
+            if (entries.length && entries[0].name) return entries[0].name;
+        } catch (_) {
+            /* some mobile browsers expose neither path nor entries */
+        }
+        return '';
+    }
+
     function selectionUpdate() {
         const seen = new Map();
         [...$('fileInput').files, ...$('folderInput').files].forEach(file => {
@@ -187,11 +204,24 @@
         chosenFiles = [...seen.values()];
         const total = chosenFiles.reduce((sum, file) => sum + file.size, 0);
 
+        if ($('folderInput').files.length) {
+            const detected = detectFolderName();
+            if (!folderEdited && detected && detected !== lastDetectedFolder) {
+                $('folderName').value = detected;
+            }
+            lastDetectedFolder = detected;
+        } else {
+            lastDetectedFolder = '';
+        }
+        const folder = $('folderName').value.trim();
+
         $('selectedTitle').textContent = chosenFiles.length
             ? `${chosenFiles.length} file(s) selected`
             : 'Nothing selected';
+        const details = [`Total size · ${fmtBytes(total)}`];
+        if (folder) details.unshift(`Folder on server · ${folder}`);
         $('selectedDetail').textContent = chosenFiles.length
-            ? `Total size · ${fmtBytes(total)}`
+            ? details.join(' · ')
             : 'Add files or a folder above';
         $('uploadBtn').disabled = !chosenFiles.length || Boolean(activeJob);
     }
@@ -199,6 +229,9 @@
     function clearSelection() {
         $('fileInput').value = '';
         $('folderInput').value = '';
+        $('folderName').value = '';
+        lastDetectedFolder = '';
+        folderEdited = false;
         chosenFiles = [];
         selectionUpdate();
         setStatus($('uploadStatus'), '');
@@ -297,6 +330,9 @@
         hideProgress();
         $('fileInput').value = '';
         $('folderInput').value = '';
+        $('folderName').value = '';
+        lastDetectedFolder = '';
+        folderEdited = false;
         chosenFiles = [];
         selectionUpdate();
 
@@ -410,17 +446,26 @@
         $('uploadBtn').disabled = true;
         setStatus($('uploadStatus'), 'Starting upload…');
 
-        const files = chosenFiles.map(file => ({
-            name: file.name,
-            path: file.webkitRelativePath || file.name,
-            size: file.size,
-        }));
+        const fromFolder = Boolean($('folderInput').files && $('folderInput').files.length);
+        const folder = $('folderName').value.trim() || (fromFolder ? detectFolderName() : '');
+        const files = chosenFiles.map(file => {
+            let parts = String(file.webkitRelativePath || file.name)
+                .replace(/\\/g, '/').split('/').filter(Boolean);
+            if (folder && parts.length > 1 && parts[0].toLowerCase() === folder.toLowerCase()) {
+                parts = parts.slice(1);
+            }
+            return {
+                name: file.name,
+                path: parts.join('/') || file.name,
+                size: file.size,
+            };
+        });
 
         try {
             const start = await api(FT_API.uploadStart, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ files: files }),
+                body: JSON.stringify({ files: files, folder: folder }),
             });
             const job = { id: start.job_id, chunk_size: start.chunk_size, files: files };
             activeJob = job;
@@ -548,7 +593,14 @@
     $('cancelBtn').addEventListener('click', cancelUpload);
     $('clearBtn').addEventListener('click', clearSelection);
     $('fileInput').addEventListener('change', selectionUpdate);
-    $('folderInput').addEventListener('change', selectionUpdate);
+    $('folderInput').addEventListener('change', () => {
+        folderEdited = false;
+        selectionUpdate();
+    });
+    $('folderName').addEventListener('input', () => {
+        folderEdited = true;
+        selectionUpdate();
+    });
 
     loadConfig();
     refreshHistory();

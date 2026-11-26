@@ -134,6 +134,27 @@ def safe_target(relative, root):
     return target
 
 
+def upload_relative(item, folder, preserve):
+    """Build a destination-relative path, optionally wrapping it in a folder.
+
+    Browsers on phones often report no webkitRelativePath, so the selected
+    folder name can be supplied separately by the page.
+    """
+    name = str(item.get('name') or 'uploaded_file')
+    raw = str(item.get('path') or name).replace('\\', '/')
+    parts = [p for p in (safe_part(x) for x in raw.split('/')) if p]
+    if not parts:
+        parts = [safe_part(name) or 'uploaded_file']
+    # webkitRelativePath already starts with the selected folder name.
+    if folder and '/' not in folder and parts and parts[0].lower() == folder.lower():
+        parts = parts[1:]
+    if not preserve:
+        parts = parts[-1:]
+    if folder:
+        parts = [folder] + parts
+    return '/'.join(parts)
+
+
 def collision_target(path, mode=None):
     mode = mode or config.get('collision', 'rename')
     if mode != 'rename' or not path.exists():
@@ -225,6 +246,7 @@ def job_payload(job):
     return {
         'job_id': job['id'],
         'status': job['status'],
+        'folder': job.get('folder') or '',
         'total_bytes': total,
         'received_bytes': received,
         'percent': min(100, round(received * 100 / total)) if total else 100,
@@ -344,6 +366,7 @@ def update_config():
 def start_upload():
     data = request.get_json(silent=True) or {}
     items = data.get('files') or []
+    folder = safe_part(data.get('folder') or '') or ''
     if not isinstance(items, list) or not items:
         return jsonify({'error': 'No files selected'}), 400
     if len(items) > MAX_FILES_PER_JOB:
@@ -377,17 +400,20 @@ def start_upload():
         'skipped': [],
         'errors': [],
         'destination': snap['destination'],
+        'folder': folder,
         'collision': snap['collision'],
         'preserve_structure': snap['preserve_structure'],
         'max_file_size': snap['max_file_size'],
     }
 
+    preserve = bool(snap['preserve_structure'])
     for i, item in enumerate(items):
         if not isinstance(item, dict):
             continue
         name = str(item.get('name') or 'uploaded_file')
         try:
-            rel = safe_target(item.get('path') or name, root).relative_to(root).as_posix()
+            rel_path = upload_relative(item, folder, preserve)
+            rel = safe_target(rel_path, root).relative_to(root).as_posix()
             size = max(0, int(item.get('size') or 0))
         except (ValueError, TypeError):
             job['errors'].append({'file': name, 'error': 'Invalid file path or size'})

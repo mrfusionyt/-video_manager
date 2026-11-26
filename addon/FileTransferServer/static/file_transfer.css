@@ -169,6 +169,10 @@
     font-size: 1rem;
 }
 
+.ft-folder-wrap {
+    margin-top: 13px;
+}
+
 .ft-selection {
     display: flex;
     align-items: center;
