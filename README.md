@@ -31,6 +31,17 @@
 
 > Не запускай `.exe` прямо из архива: рядом должны остаться `VideoManager.exe` и `_internal\`, включая `_internal\_dop\`.
 
+### Телефон на Android
+
+APK `VideoManager-Phone-vX.Y.Z.apk` — это WebView-клиент: он открывает веб-интерфейс VideoManager, запущенный на ПК в той же Wi‑Fi-сети. База и видео остаются на компьютере; на телефоне ничего не сканируется и не конвертируется.
+
+1. Запусти VideoManager на ПК.
+2. В окне лаунчера или на странице Status скопируй сетевой адрес вида `http://192.168.1.10:5000/`.
+3. Установи APK на телефон (sideload, «Установить из неизвестных источников»).
+4. При первом запуске введи этот адрес в диалоге **Connect to VideoManager**. Он сохранится; изменить его можно через меню ⋮ → **Server address**.
+
+Сборка APK: GitHub Actions → **Build Android phone client APK** → `Run workflow`. APK и `.sha256` будут в артефактах job’а и, если указать `release_tag`, прикрепятся к соответствующему релизу.
+
 ### Запуск из исходников
 
 Проект ориентирован на Windows: в зависимостях есть `pywin32`, а вспомогательные бинарники в `_dop\` — `.exe`.
@@ -87,6 +98,8 @@ python tools\fetch_dop.py
 ```text
 video_manager/
 ├─ .github/workflows/release.yml   # облачная сборка и публикация релиза
+├─ .github/workflows/apk.yml       # сборка подписанного APK для телефона
+├─ android/                        # Android WebView-клиент (Gradle, Java)
 ├─ addon/
 │  ├─ instagram_downloader/        # Flask blueprint, логин, cookies, загрузки
 │  ├─ photo_classifier/            # страница категорий фото (/pv)

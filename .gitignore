@@ -16,10 +16,17 @@ build/
 dist/
 _internal/
 VideoManager-*.zip
+VideoManager-*.apk
+VideoManager-*.apk.sha256
 VideoManager_changes.zip
 release.log
 cloud_release.log
 .gh_token
+
+# ---- Android phone client ----
+android/.gradle/
+android/local.properties
+android/app/release.jks
 
 # ---- generated runtime data (kept locally, not in git) ----
 *.db-shm
