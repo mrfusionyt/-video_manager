@@ -8,7 +8,7 @@
     <h4>Artists <span class="text-muted" style="font-size:0.9rem;">({{ artists|length }})</span></h4>
     <form class="add-artist-form" method="post" action="{{ url_for('artists_add', profile=current_profile) }}">
         <input type="text" name="name" placeholder="New artist name" required autocomplete="off">
-        <button type="submit">Add artist</button>
+        <button type="submit" class="btn-add">Add artist</button>
     </form>
 </div>
 

@@ -10,10 +10,10 @@
 <div class="ft-page">
     <section class="ft-hero">
         <div class="ft-kicker">FILE TRANSFER</div>
-        <h1>Отправить <span>на сервер</span></h1>
+        <h1>Send files <span>to the server</span></h1>
         <p class="ft-hero-note">
-            Выбери файлы или целую папку — они появятся на компьютере, где запущен VideoManager.
-            Всё остаётся в локальной сети, без внешнего аккаунта.
+            Choose files or a whole folder — they will appear on the computer running VideoManager.
+            Everything stays local, with no external account.
         </p>
         <div class="ft-pill"><span class="ft-pulse"></span> Local transfer</div>
     </section>
@@ -21,8 +21,8 @@
     <section class="ft-panel">
         <div class="ft-panel-head">
             <div>
-                <span class="ft-section-kicker">01 / ДОБАВИТЬ</span>
-                <h2>Что отправляем?</h2>
+                <span class="ft-section-kicker">01 / ADD</span>
+                <h2>What are we sending?</h2>
             </div>
             <div class="ft-round-icon">＋</div>
         </div>
@@ -30,15 +30,15 @@
         <div class="ft-pick-grid">
             <label class="ft-pick-card" for="fileInput">
                 <span class="ft-pick-icon">▤</span>
-                <span class="ft-pick-title">Файлы</span>
-                <span class="ft-pick-sub">Фото, видео, документы</span>
+                <span class="ft-pick-title">Files</span>
+                <span class="ft-pick-sub">Photos, videos, documents</span>
                 <span class="ft-pick-arrow">↗</span>
                 <input id="fileInput" class="ft-hidden-input" type="file" multiple>
             </label>
             <label class="ft-pick-card" for="folderInput">
                 <span class="ft-pick-icon">▱</span>
-                <span class="ft-pick-title">Папка</span>
-                <span class="ft-pick-sub">Отправить содержимое</span>
+                <span class="ft-pick-title">Folder</span>
+                <span class="ft-pick-sub">Send its contents</span>
                 <span class="ft-pick-arrow">↗</span>
                 <input id="folderInput" class="ft-hidden-input" type="file" multiple webkitdirectory>
             </label>
@@ -47,52 +47,71 @@
         <div class="ft-selection" id="selectionCard">
             <div class="ft-selection-icon">▧</div>
             <div class="ft-selection-info">
-                <strong id="selectedTitle">Ничего не выбрано</strong>
-                <span id="selectedDetail">Добавь файлы или папку выше</span>
+                <strong id="selectedTitle">Nothing selected</strong>
+                <span id="selectedDetail">Add files or a folder above</span>
             </div>
-            <button id="clearBtn" class="ft-icon-btn" type="button" title="Очистить выбор" aria-label="Очистить">×</button>
+            <button id="clearBtn" class="ft-icon-btn" type="button" title="Clear selection" aria-label="Clear selection">×</button>
         </div>
 
         <button id="uploadBtn" class="btn-add ft-upload-btn" disabled>
-            <span>Отправить файлы</span><span class="ft-btn-arrow">↗</span>
+            <span>Send files</span><span class="ft-btn-arrow">↗</span>
         </button>
+
+        <div id="progressPanel" class="ft-progress" hidden>
+            <div class="ft-progress-head">
+                <div class="ft-progress-title-wrap">
+                    <strong id="progressTitle">Uploading…</strong>
+                    <span id="progressFile">Preparing files</span>
+                </div>
+                <div class="ft-progress-numbers">
+                    <span id="progressPercent">0%</span>
+                    <span id="progressSpeed">0 MB/s</span>
+                </div>
+            </div>
+            <div class="ft-progress-track"><div id="progressBar" class="ft-progress-bar"></div></div>
+            <div class="ft-progress-foot">
+                <span id="progressBytes">0 B / 0 B</span>
+                <button id="cancelBtn" class="btn-add ft-cancel-btn" type="button">Cancel</button>
+            </div>
+        </div>
+
         <div id="uploadStatus" class="ft-status"></div>
     </section>
 
     <section class="ft-panel">
         <div class="ft-panel-head">
             <div>
-                <span class="ft-section-kicker">02 / МЕСТО</span>
-                <h2>Куда сохранять</h2>
+                <span class="ft-section-kicker">02 / DESTINATION</span>
+                <h2>Where to save</h2>
             </div>
             <div class="ft-round-icon">⌁</div>
         </div>
 
-        <label class="ft-field-label" for="destination">Путь на компьютере-сервере</label>
+        <label class="ft-field-label" for="destination">Path on the server computer</label>
         <div class="ft-path-field">
             <span class="ft-path-symbol">⌂</span>
             <input id="destination" type="text" class="form-control-dark" value="{{ transfer_config.destination }}" placeholder="C:\FileDrop">
-            <button id="saveConfig" type="button" class="btn-add">Сохранить</button>
+            <button id="saveConfig" type="button" class="btn-add">Save</button>
         </div>
-        <div class="ft-hint"><span class="ft-hint-dot"></span><span>Путь относится к дискам компьютера, на котором запущен VideoManager.</span></div>
+        <div class="ft-hint"><span class="ft-hint-dot"></span><span>This path refers to disks on the computer where VideoManager is running.</span></div>
 
         <div class="ft-options">
             <div>
-                <label class="ft-field-label" for="collision">Если файл уже есть</label>
+                <label class="ft-field-label" for="collision">If a file already exists</label>
                 <select id="collision" class="form-control-dark form-select">
-                    <option value="rename" {% if transfer_config.collision == 'rename' %}selected{% endif %}>Переименовать</option>
-                    <option value="overwrite" {% if transfer_config.collision == 'overwrite' %}selected{% endif %}>Перезаписать</option>
-                    <option value="skip" {% if transfer_config.collision == 'skip' %}selected{% endif %}>Пропустить</option>
+                    <option value="rename" {% if transfer_config.collision == 'rename' %}selected{% endif %}>Rename</option>
+                    <option value="overwrite" {% if transfer_config.collision == 'overwrite' %}selected{% endif %}>Overwrite</option>
+                    <option value="skip" {% if transfer_config.collision == 'skip' %}selected{% endif %}>Skip</option>
                 </select>
             </div>
             <div>
-                <label class="ft-field-label" for="maxFileSize">Лимит файла, МБ (0 — без лимита)</label>
+                <label class="ft-field-label" for="maxFileSize">File size limit, MB (0 = no limit)</label>
                 <input id="maxFileSize" type="number" min="0" step="1" class="form-control-dark"
                        value="{{ (transfer_config.max_file_size / 1048576)|round(0)|int }}">
             </div>
             <label class="ft-check">
                 <input id="preserveStructure" type="checkbox" {% if transfer_config.preserve_structure %}checked{% endif %}>
-                <span>Сохранять структуру папок</span>
+                <span>Keep folder structure</span>
             </label>
         </div>
         <div id="configStatus" class="ft-status"></div>
@@ -101,12 +120,12 @@
     <section class="ft-panel">
         <div class="ft-panel-head">
             <div>
-                <span class="ft-section-kicker">03 / ИСТОРИЯ</span>
-                <h2>Последние файлы</h2>
+                <span class="ft-section-kicker">03 / HISTORY</span>
+                <h2>Recent files</h2>
             </div>
-            <button id="refreshBtn" class="btn-add ft-refresh-btn" type="button"><span>↻</span> Обновить</button>
+            <button id="refreshBtn" class="btn-add ft-refresh-btn" type="button"><span>↻</span> Refresh</button>
         </div>
-        <div id="historyStatus" class="ft-history-status">Загрузка списка…</div>
+        <div id="historyStatus" class="ft-history-status">Loading list…</div>
         <div id="historyBody" class="ft-history-list"></div>
     </section>
 </div>
@@ -117,7 +136,10 @@
 const FT_API = {
     config: {{ url_for('file_transfer.get_config')|tojson }},
     saveConfig: {{ url_for('file_transfer.update_config')|tojson }},
-    upload: {{ url_for('file_transfer.upload_files')|tojson }},
+    uploadStart: {{ url_for('file_transfer.start_upload')|tojson }},
+    jobStatus: {{ url_for('file_transfer.upload_status', job_id='__job__')|tojson }},
+    jobChunk: {{ url_for('file_transfer.upload_chunk', job_id='__job__')|tojson }},
+    jobCancel: {{ url_for('file_transfer.cancel_upload', job_id='__job__')|tojson }},
     history: {{ url_for('file_transfer.history')|tojson }},
 };
 </script>

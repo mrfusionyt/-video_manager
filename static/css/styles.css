@@ -1024,7 +1024,7 @@ textarea.form-control-dark::placeholder { color: #aaa !important; }
 .artists-header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem; margin-bottom: 1.25rem; }
 .artists-header h4 { color: var(--text-primary); margin: 0; }
 .add-artist-form { display: flex; gap: 0.5rem; align-items: center; }
-.add-artist-form input { background: var(--bg-input); border: 1px solid var(--border-strong); color: var(--text-primary); padding: 0.4rem 0.75rem; border-radius: var(--radius); font-size: 0.9rem; min-width: 200px; }
+.add-artist-form input { background: var(--bg-input); border: 1px solid var(--border-strong); color: var(--text-primary); padding: 0.4rem 0.75rem; border-radius: var(--radius); font-size: 0.9rem; min-width: 200px; height: 40px; }
 .add-artist-form input:focus { border-color: var(--red); outline: none; }
 .add-artist-form button { background: var(--red); border: none; color: #fff; padding: 0.4rem 1rem; border-radius: var(--radius); font-size: 0.9rem; cursor: pointer; transition: background var(--tr); }
 .add-artist-form button:hover { background: var(--red-hover); }
