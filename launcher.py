@@ -33,7 +33,7 @@ from addon.photo_classifier import state as pv_state
 # =====================================================================
 # UPDATE SETTINGS
 # =====================================================================
-CURRENT_VERSION = '1.0.2'
+CURRENT_VERSION = '1.0.3'
 GITHUB_USER = 'mrfusionyt'
 GITHUB_REPO = '-video_manager'
 # =====================================================================
