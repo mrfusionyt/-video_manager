@@ -84,10 +84,11 @@ def ensure_auth():
 
 
 def push_args(extra, token):
-    """Add an Authorization header when gh can supply a token."""
+    """Build a complete git command, with an auth header when possible."""
+    cmd = ['git', '-C', str(ROOT)]
     if token:
-        return ['-c', 'http.extraHeader=AUTHORIZATION: bearer ' + token] + extra
-    return extra
+        cmd += ['-c', 'http.extraHeader=AUTHORIZATION: bearer ' + token]
+    return cmd + list(extra)
 
 
 def run_streamed(cmd, env=None):
@@ -178,7 +179,28 @@ def main():
 
     local_tag = git(['rev-parse', '-q', '--verify', f'refs/tags/{tag}']).returncode == 0
     remote_tag = git(['ls-remote', '--tags', 'origin', f'refs/tags/{tag}']).stdout.strip()
-    if local_tag or remote_tag:
+    head = git(['rev-parse', 'HEAD']).stdout.strip()
+    tag_commit = ''
+    if local_tag:
+        tag_commit = git(['rev-parse', f'{tag}^{{commit}}']).stdout.strip()
+
+    # A tag that exists only locally was created by a previous failed run.
+    # It is safe to move it to the new HEAD so a plain release.bat just works.
+    local_only = bool(local_tag and not remote_tag)
+    reuse_tag = False
+    if local_only:
+        if tag_commit != head:
+            log(f'[*] moving unpublished local tag {tag} to HEAD')
+            moved = git(['tag', '-f', '-a', tag, '-m', f'VideoManager {tag}'])
+            if moved.returncode != 0:
+                log('[!] could not move the local tag:')
+                log((moved.stderr or moved.stdout or '').strip())
+                return 2
+        reuse_tag = True
+
+    if reuse_tag:
+        log(f'[*] reusing unpublished local tag {tag}')
+    elif local_tag or remote_tag:
         if not args.force_tag:
             log(f'[!] tag {tag} already exists (local={local_tag}, remote={bool(remote_tag)})')
             log('    use --force-tag to replace it, or pass a new version')
@@ -192,10 +214,11 @@ def main():
                 log('[!] could not delete the remote tag')
                 return 2
 
-    tag_result = git(['tag', '-a', tag, '-m', f'VideoManager {tag}'])
-    if tag_result.returncode != 0:
-        log((tag_result.stderr or '').strip())
-        return 2
+    if not reuse_tag:
+        tag_result = git(['tag', '-a', tag, '-m', f'VideoManager {tag}'])
+        if tag_result.returncode != 0:
+            log((tag_result.stderr or '').strip())
+            return 2
 
     env = os.environ.copy()
     if token:

@@ -24,7 +24,7 @@
 Версия хранится в одном месте — `launcher.py`:
 
 ```python
-CURRENT_VERSION = '1.0.0'
+CURRENT_VERSION = '1.0.2'
 GITHUB_USER = 'mrfusionyt'
 GITHUB_REPO = '-video_manager'
 ```
@@ -146,8 +146,8 @@ python make_release.py
 `set GH_TOKEN=ghp_...` и `python make_release.py`. Либо файл `.gh_token` в корне
 проекта (уже в `.gitignore`).
 
-Ручная загрузка: https://github.com/mrfusionyt/-video_manager/releases/new?tag=v1.0.0
-→ прикрепить `VideoManager-v1.0.0-win64-onedir.zip` → Publish release. Имя ассета
+Ручная загрузка: https://github.com/mrfusionyt/-video_manager/releases/new?tag=v1.0.2
+→ прикрепить `VideoManager-v1.0.2-win64-onedir.zip` → Publish release. Имя ассета
 должно содержать `onedir` и заканчиваться на `.zip` — лаунчер ищет именно такой
 файл.
 
@@ -187,7 +187,7 @@ python make_release.py
 | Ошибка | Причина / решение |
 |--------|-------------------|
 | `git push failed` | авторизуйтесь: `gh auth login` или Credential Manager; проверьте `git push -u origin HEAD` |
-| `tag v1.0.1 already exists` | `release.bat 1.0.1 --force-tag` или новая версия |
+| `tag v1.0.1 already exists` | если тег есть только локально, `release.bat` сам передвинет его на новый коммит; если он уже на GitHub — `--force-tag` или новая версия |
 | `Tag version ... does not match CURRENT_VERSION` | батник должен менять версию; при ручном теге обновите `launcher.py` |
 | Actions: `ffmpeg.exe not found` | упал `tools/fetch_dop.py`; проверьте лог шага и доступ к URL (или задайте `DOP_*_URL`) |
 | `pyinstaller : Имя не распознано` | используйте `python -m PyInstaller ...`, `build.bat` или облачную сборку |
