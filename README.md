@@ -1,127 +1,188 @@
-# Video Manager
+# VideoManager
 
-Локальное веб-приложение для управления коллекцией видео: сканирование папок, категоризация, скачивание с внешних источников, поиск дубликатов и статистика.
+Локальное приложение для управления коллекцией видео и фотографий: сканирование папок, каталог в SQLite, категории, артисты, плейлисты, поиск дубликатов, скачивание с YouTube/Instagram и автообновление с GitHub.
+
+Готовая сборка — **Windows x64, onedir**: `VideoManager.exe` и папка `_internal` рядом с ним. Внешний сервер и аккаунт не нужны.
+
+> **Точка входа готового приложения — `launcher.py`.**<br>
+> `app.py` — только Flask-приложение без окна, трея и проверки обновлений.
 
 ## Возможности
 
-- 📁 Сканирование локальных папок и построение библиотеки
-- 🎬 Скачивание видео с YouTube и Instagram
-- 🏷️ Категоризация по артистам и тегам
-- 🔍 Поиск дубликатов по превью (перцептивный хеш)
-- 📊 Статистика по коллекции
-- 🌙 Тёмная тема интерфейса
-- 💾 Локальная SQLite-база — никаких внешних серверов
+- Окно-лаунчер, иконка в системном трее и веб-интерфейс в браузере; доступ по `127.0.0.1` и по локальной сети.
+- Сканирование библиотек, карточки видео и фото, превью, поиск, сортировка и пагинация.
+- Категории разделены на `video` и `image`; артисты, плейлисты, рейтинг и теги.
+- Скачивание с YouTube и Instagram с прогрессом, историей задач и логами.
+- Поиск дубликатов: быстрый по видео и глубокий с анализом аудио (`fpcalc`) + персистентный кэш хешей.
+- Страница Tools: диагностика «битых» файлов, восстановление, повторное сканирование.
+- Единый стиль интерфейса: шапка, сайдбар, кнопки и категории фото оформлены одинаково.
+- **Живой лог в лаунчере**: запуск сервера, адреса, скачивания и обновления видны без консоли.
+- **Автообновление** из GitHub Releases: проверка при старте и по кнопке `Check Updates`.
 
-## Скриншоты
+## Быстрый старт
 
-<!-- Добавь 2–3 скриншота главной страницы, карточки видео и настроек -->
-![Главная](docs/screenshot-main.png)
-![Карточка видео](docs/screenshot-video.png)
+### Готовый релиз (рекомендуется)
 
-## Стек
+1. На странице [Releases](https://github.com/mrfusionyt/-video_manager/releases) скачай `VideoManager-vX.Y.Z-win64-onedir.zip`.
+2. Распакуй архив в отдельную папку, например `C:\VideoManager`.
+3. Запусти `VideoManager.exe`.
+4. В окне лаунчера нажми **Open Browser** или открой показанный адрес вида `http://127.0.0.1:5000`.
+5. Закрытие окна сворачивает приложение в трей; выход — через иконку в трее.
 
-- **Backend**: Python 3.10+, Flask 2.3
-- **База данных**: SQLite
-- **Скачивание**: yt-dlp, instagrapi, Playwright
-- **Обработка медиа**: OpenCV, Pillow, imagehash
-- **Frontend**: Jinja2, vanilla JS, CSS
+> Не запускай `.exe` прямо из архива: рядом должны остаться `VideoManager.exe` и `_internal\`, включая `_internal\_dop\`.
 
-## Требования
+### Запуск из исходников
 
-- Python 3.10 или выше
-- FFmpeg и FFprobe в `PATH` (или в папке `_dop/`)
-- Windows / Linux / macOS
+Проект ориентирован на Windows: в зависимостях есть `pywin32`, а вспомогательные бинарники в `_dop\` — `.exe`.
 
-## Установка
+Самый простой путь — `run.bat`: он создаст `venv\`, установит зависимости и Playwright Chromium, затем поднимет сервер на `http://127.0.0.1:5000`.
 
-```bash
-# 1. Клонировать репозиторий
-git clone https://github.com/mrfusionyt/-video_manager.git
-cd -video_manager
+Если нужен полноценный лаунчер (окно, трей, логи, обновления):
 
-# 2. Создать виртуальное окружение
+```bat
 python -m venv venv
-source venv/bin/activate      # Linux/macOS
-venv\Scripts\activate         # Windows
-
-# 3. Установить зависимости
-pip install -r requirements.txt
-
-# 4. Установить браузеры Playwright (одноразово)
-playwright install chromium
+venv\Scripts\activate
+python -m pip install -r requirements.txt
+python -m playwright install chromium
+python launcher.py
 ```
 
-### FFmpeg и FFprobe
+Для работы скачивания и дубликатов положи в `_dop\` бинарники `ffmpeg.exe`, `ffprobe.exe`, `yt-dlp.exe`, `deno.exe` и `fpcalc.exe`. Папка не хранится в git; на чистой машине её можно создать командой:
 
-Приложи бинарники в папку `_dop/`:
-
-```
-_dop/
-├── ffmpeg.exe
-├── ffprobe.exe
-└── deno.exe      # опционально, для yt-dlp
+```bat
+python tools\fetch_dop.py
 ```
 
-Либо установи их глобально и добавь в `PATH`.
+Скрипт пропускает файлы, которые уже есть. Первый запуск приложения: добавь папку с видео в **Settings → Folders** и запусти сканирование.
 
-> ⚠️ Сами бинарники **не хранятся в репозитории** — они слишком большие для GitHub. Скачай их с [ffmpeg.org](https://ffmpeg.org/download.html) и [deno.land](https://deno.land/).
+## Где лежат данные
 
-## Запуск
+| Что | Где |
+|---|---|
+| База `videos.db`, `config.json`, `folder_covers.json` | `%APPDATA%\VideoManager\` |
+| Кэши сканирования и дубликатов (`scan_cache.json`, `probe_cache.json`, `duplicates_cache.json`, `hash_cache.db`) | рядом с исходниками или рядом с `VideoManager.exe` |
+| Загрузки, cookies и профили Instagram | `addon\instagram_downloader\downloads\`, `cookies\`, `sessions\`, `browser_profile\` |
+| Загрузки YouTube | `addon\youtube_downloader\downloads\` |
+| Логи лаунчера и обновления | окно лаунчера, `%TEMP%\vm_launcher_error.log`, `%TEMP%\vm_update.log` |
+| Логи релиза | `cloud_release.log`, `release.log` в корне проекта |
 
-```bash
-python app.py
-```
+Эти файлы — рабочие данные пользователя. Они не должны попадать в репозиторий или в архив обновления.
 
-Открой в браузере: http://127.0.0.1:5000
+## Настройки
 
-## Конфигурация
+Основные пользовательские настройки хранятся в `%APPDATA%\VideoManager\config.json` и редактируются на странице **Settings**:
 
-Основные настройки — в `config.py`:
-
-| Параметр | Описание | По умолчанию |
+| Ключ | Назначение | По умолчанию |
 |---|---|---|
-| `THEME` | Тема интерфейса (`dark` / `light`) | `dark` |
-| `HOST` | Адрес прослушивания | `127.0.0.1` |
-| `PORT` | Порт | `5000` |
-| `DUPLICATE_THRESHOLD` | Порог схожести для поиска дублей | `5` |
+| `last_folder` | последняя открытая папка | `''` |
+| `dark_mode` | тёмная тема | `true` |
+| `threshold` | порог фильтрации/совпадения | `0` |
+| `static_ip` | фиксированный IP для показа сетевой ссылки | `''` |
+
+Константы в `config.py`: `ITEMS_PER_PAGE = 15`, режимы `MODE_LABELS`, пороги качества `QUALITY_LOW_HEIGHT = 720` и `QUALITY_4K_HEIGHT = 2160`.
+
+Порт выбирается автоматически из диапазона `5000–5100` при запуске через `launcher.py`. При прямом `python app.py` используется `0.0.0.0:5000`.
 
 ## Структура проекта
 
-```
+```text
 video_manager/
-├── app.py              # точка входа Flask
-├── config.py           # настройки
-├── models.py           # модели и работа с БД
-├── scanner.py          # сканирование папок
-├── artists.py          # логика артистов
-├── addon/              # скачивание (youtube, instagram)
-├── views/              # маршруты (blueprints)
-├── templates/          # Jinja2-шаблоны
-├── static/             # CSS, JS, изображения
-├── _dop/               # ffmpeg, ffprobe, deno (не в git)
-├── requirements.txt
-└── README.md
+├─ .github/workflows/release.yml   # облачная сборка и публикация релиза
+├─ addon/
+│  ├─ instagram_downloader/        # Flask blueprint, логин, cookies, загрузки
+│  ├─ photo_classifier/            # страница категорий фото (/pv)
+│  └─ youtube_downloader/          # Flask blueprint, загрузки и задачи
+├─ db/                             # SQLite: connection, migrations, videos,
+│                                  # categories, libraries, playlists, stats, thumbnails
+├─ helpers/                        # pagination, profiles, video_filter
+├─ image/                          # иконки интерфейса и video.ico
+├─ static/css/ , static/js/        # оформление и клиентская логика
+├─ templates/                      # Jinja2-шаблоны страниц
+├─ tools/
+│  ├─ cloud_release.py             # логика release.bat
+│  ├─ fetch_dop.py                 # загрузка _dop на чистой машине/CI
+│  └─ release_cli.py               # локальный pipeline и --set-version
+├─ views/                          # маршруты Flask (main, settings, tools, …)
+├─ app.py                          # Flask app factory
+├─ launcher.py                     # десктоп-точка входа: окно, трей, логи, обновления
+├─ launcher_log.py                 # перехват stdout/stderr/logging в лог-панель
+├─ models.py                       # совместимый фасад над пакетом db/
+├─ scanner.py                      # сканирование библиотек и кэш
+├─ duplicate_finder.py             # поиск дубликатов и кэш хешей
+├─ converter.py, artists.py, tools_service.py
+├─ config.py                       # конфиг и пороги качества
+├─ make_release.py                 # упаковка onedir zip и публикация
+├─ VideoManager.spec               # конфиг PyInstaller, entry point — launcher.py
+├─ run.bat                         # запуск из исходников
+├─ build.bat                       # локальная сборка onedir
+├─ release.bat                     # один курс: тег → GitHub Actions
+├─ release-local.bat               # запасной локальный путь публикации
+├─ requirements.txt
+├─ RELEASE.md                      # подробная инструкция по релизу
+└─ _dop/                           # бинарники ffmpeg/ffprobe/... (не в git)
 ```
+
+Создаётся во время работы или сборки и не является исходниками: `venv/`, `__pycache__/`, `build/`, `dist/`, `*.zip`, `*.log`, `.gh_token`, кэши `*.json` / `hash_cache.db`, профили и загрузки внутри `addon/`.
 
 ## Сборка и релиз
 
-- `release.bat` — одна команда: пушит тег, **GitHub Actions собирает exe,
-  пакует zip и публикует релиз** (локально не нужны PyInstaller и gh).
-- `release-local.bat` / `build.bat` — запасной путь: сборка на этом ПК.
-- Подробная инструкция: [RELEASE.md](RELEASE.md).
+### Облачно (рекомендуется)
 
-## Roadmap
+В терминале VS Code из папки проекта:
 
-- [ ] Экспорт метаданных в JSON
-- [ ] Пакетная обработка видео (нарезка, конвертация)
-- [ ] Авторизация для удалённого доступа
-- [ ] Docker-образ
+```bat
+.\release.bat
+.\release.bat 1.0.2
+.\release.bat --watch
+.\release.bat --dry-run
+.\release.bat 1.0.2 --force-tag
+```
 
-## Лицензия
+Скрипт меняет `CURRENT_VERSION` в `launcher.py`, коммитит изменения, создаёт и пушит тег `v<версия>`. Далее [GitHub Actions](https://github.com/mrfusionyt/-video_manager/actions/workflows/release.yml) на `windows-latest`:
 
-<!-- Укажи лицензию, например MIT -->
-MIT
+1. ставит Python 3.12 и зависимости;
+2. запускает `tools\fetch_dop.py`;
+3. собирает onedir из `VideoManager.spec` (точка входа — `launcher.py`, `console=False`, иконка `image\video.ico`);
+4. пакует `VideoManager-v<версия>-win64-onedir.zip`;
+5. публикует релиз через встроенный `GITHUB_TOKEN`.
+
+Локально не нужны ни PyInstaller, ни `gh`, ни токен — нужен только работающий `git push`. Релиз можно запустить и вручную: **Actions → Build & Release (onedir) → Run workflow** или просто запушить тег `v*`.
+
+### Локально (запасной путь)
+
+```bat
+.\build.bat
+python make_release.py --no-release
+.\release-local.bat
+.\release-local.bat --zip-only
+```
+
+`pyinstaller` не добавляется в `PATH`, поэтому используй `python -m PyInstaller` или `build.bat`. Для локальной публикации нужен [GitHub CLI](https://cli.github.com/) (`winget install --id GitHub.cli -e`, затем `gh auth login`) либо `GH_TOKEN` / файл `.gh_token`.
+
+Подробности, чек-лист и разбор ошибок — в [RELEASE.md](RELEASE.md).
+
+## Как работает автообновление
+
+1. Лаунчер через ~3 секунды после старта и далее раз в час спрашивает `releases/latest` репозитория `mrfusionyt/-video_manager`.
+2. Версии сравниваются по числам: `1.0.10 > 1.0.9`. При наличии новой версии появляется кнопка `Update to vX.Y.Z`.
+3. По нажатию скачивается zip с прогрессом, проверяется наличие `VideoManager.exe`, архив распаковывается во временную папку.
+4. Скрипт обновления ждёт завершения лаунчера, копирует файлы поверх текущей папки через `robocopy` и перезапускает `.exe`.
+5. База, конфиг и кэши не удаляются — обновляются только файлы из архива.
+
+Чтобы обновление работало, у релиза должен быть тег `v<версия>` больше `CURRENT_VERSION` и zip-ассет, в имени которого есть `onedir`.
+
+## Диагностика
+
+| Симптом | Что сделать |
+|---|---|
+| Окно не появилось | проверь иконку в трее и `%TEMP%\vm_launcher_error.log` |
+| Нет ffmpeg / yt-dlp / fpcalc | запусти `python tools\fetch_dop.py` или положи бинарники в `_dop\` |
+| `pyinstaller : Имя не распознано` | используй `python -m PyInstaller ...` или `build.bat` |
+| `gh : Имя не распознано` | перезапусти терминал; для облачного пути `gh` не нужен вообще |
+| `No package found matching input criteria` | id пакета — `GitHub.cli`, не `GitHub.cli.GitHubCLI` |
+| Релиз есть, но обновление не видно | проверь тег, `CURRENT_VERSION` и имя zip-ассета (`onedir`) |
+| Обновление не установилось | смотри `%TEMP%\vm_update.log` |
 
 ## Автор
 
-**mrfusionyt** — https://github.com/mrfusionyt
+[mrfusionyt](https://github.com/mrfusionyt)
