@@ -59,7 +59,20 @@ def _safe_next(target):
 def register(app):
     @app.before_request
     def _require_auth():
-        if request.method == 'OPTIONS' or _is_loopback():
+        if request.method == 'OPTIONS':
+            return None
+
+        loopback = _is_loopback()
+        # CSRF guard for cookie-authenticated state changes. It must also run
+        # for already authenticated clients, not just for unauthenticated ones.
+        if (not loopback and request.method in ('POST', 'PUT', 'PATCH', 'DELETE')):
+            origin = request.headers.get('Origin')
+            if origin:
+                host = urlsplit(origin).netloc.lower()
+                if host and host != request.host.lower():
+                    abort(403)
+
+        if loopback:
             return None
 
         path = request.path
@@ -73,14 +86,6 @@ def register(app):
         if (session.get('auth_ok') is True
                 and session.get('auth_marker') == auth_marker()):
             return None
-
-        # Lightweight CSRF guard for cookie-authenticated state changes.
-        if request.method in ('POST', 'PUT', 'PATCH', 'DELETE'):
-            origin = request.headers.get('Origin')
-            if origin:
-                host = urlsplit(origin).netloc.lower()
-                if host and host != request.host.lower():
-                    abort(403)
 
         if path.startswith('/api/') or path.startswith('/transfer/api/'):
             return jsonify({'error': 'Authentication required'}), 401
