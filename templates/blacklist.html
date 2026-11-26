@@ -52,9 +52,11 @@
     });
 
     document.getElementById('clearAllBtn').addEventListener('click', function () {
-        if (!confirm('Clear ALL ignored pairs? Files may become duplicates again.')) return;
-        fetch('/clear_ignored', {method: 'POST', headers: {'Content-Type': 'application/json'}})
-            .then(function () { location.reload(); });
+        VMDialog.confirm('Clear ALL ignored pairs? Files may become duplicates again.', 'Confirm', 'warning').then(function (ok) {
+            if (!ok) return;
+            fetch('/clear_ignored', {method: 'POST', headers: {'Content-Type': 'application/json'}})
+                .then(function () { location.reload(); });
+        });
     });
 })();
 </script>

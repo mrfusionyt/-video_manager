@@ -736,10 +736,10 @@
                     updateCategoryTags(checked);
                     closeCategorySheet();
                 } else {
-                    alert('Error: ' + (data.error || 'Unknown'));
+                    VMDialog.alert('Error: ' + (data.error || 'Unknown'), 'Error', 'error');
                 }
             })
-            .catch(function (err) { console.error('saveCategories', err); alert('Network error'); })
+            .catch(function (err) { console.error('saveCategories', err); VMDialog.alert('Network error', 'Error', 'error'); })
             .finally(function () {
                 categorySaveBtn.disabled = false;
                 categorySaveBtn.textContent = origText;
@@ -1739,22 +1739,24 @@
                             loadPlaylistDropdown();
                         });
                 } else {
-                    alert('Error: ' + (data.error || 'Unknown'));
+                    VMDialog.alert('Error: ' + (data.error || 'Unknown'), 'Error', 'error');
                 }
             })
             .catch(function (err) { console.error('createPlaylistMobile', err); });
     }
 
     function deletePlaylistMobile(playlistId, name) {
-        if (!confirm('Delete playlist "' + name + '"?')) return;
-        fetch('/playlist/' + playlistId + '/delete', { method: 'POST' })
-            .then(function () {
-                loadMobilePlaylistsForModal();
-                updateMobilePlaylistButtonState();
-                loadPlaylists(1);
-                loadPlaylistDropdown();
-            })
-            .catch(function (err) { console.error('deletePlaylistMobile', err); });
+        VMDialog.confirm('Delete playlist "' + name + '"?', 'Confirm', 'warning').then(function (ok) {
+            if (!ok) return;
+            fetch('/playlist/' + playlistId + '/delete', { method: 'POST' })
+                .then(function () {
+                    loadMobilePlaylistsForModal();
+                    updateMobilePlaylistButtonState();
+                    loadPlaylists(1);
+                    loadPlaylistDropdown();
+                })
+                .catch(function (err) { console.error('deletePlaylistMobile', err); });
+        });
     }
 
     if (mobilePlaylistBtn) {
@@ -2033,10 +2035,10 @@
                     playlistPage = 1;
                     loadPlaylists(1);
                 } else {
-                    alert('Error: ' + (data.error || 'Unknown error'));
+                    VMDialog.alert('Error: ' + (data.error || 'Unknown error'), 'Error', 'error');
                 }
             })
-            .catch(function (err) { alert('Error: ' + err); });
+            .catch(function (err) { VMDialog.alert('Error: ' + err, 'Error', 'error'); });
     });
 
     function confirmDeletePlaylist() {
@@ -2055,7 +2057,7 @@
                     loadPlaylists(1);
                     updateMobilePlaylistButtonState();
                 } else {
-                    alert('Error deleting playlist');
+                    VMDialog.alert('Error deleting playlist', 'Error', 'error');
                 }
             })
             .catch(function (err) { console.error('Error:', err); });
@@ -2117,7 +2119,7 @@
                     loadPlaylists(1);
                     updateMobilePlaylistButtonState();
                 } else {
-                    alert('Error: ' + (data.error || 'Unknown error'));
+                    VMDialog.alert('Error: ' + (data.error || 'Unknown error'), 'Error', 'error');
                 }
             })
             .catch(function (err) { console.error('Error:', err); });
@@ -2126,7 +2128,7 @@
     document.getElementById('savePlaylistBtn').addEventListener('click', function () {
         var nameInput = document.getElementById('playlistNameInput');
         var name = nameInput.value.trim();
-        if (!name) { alert('Please enter a name'); return; }
+        if (!name) { VMDialog.alert('Please enter a name', 'Notice', 'info'); return; }
         fetch('/playlist/create?profile=' + CURRENT_PROFILE, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -2140,7 +2142,7 @@
                     nameInput.value = '';
                     addVideoToPlaylist(data.playlist_id, currentVideoId);
                 } else {
-                    alert('Error: ' + (data.error || 'Unknown error'));
+                    VMDialog.alert('Error: ' + (data.error || 'Unknown error'), 'Error', 'error');
                 }
             })
             .catch(function (err) { console.error('Error:', err); });
@@ -2159,7 +2161,7 @@
     document.getElementById('renamePlaylistBtn').addEventListener('click', function () {
         var playlistId = parseInt(document.getElementById('renamePlaylistId').value, 10);
         var newName = document.getElementById('renamePlaylistInput').value.trim();
-        if (!newName) { alert('Please enter a name'); return; }
+        if (!newName) { VMDialog.alert('Please enter a name', 'Notice', 'info'); return; }
         fetch('/playlist/' + playlistId + '/rename', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -2173,7 +2175,7 @@
                     playlistPage = 1;
                     loadPlaylists(1);
                 } else {
-                    alert('Error: ' + (data.error || 'Unknown error'));
+                    VMDialog.alert('Error: ' + (data.error || 'Unknown error'), 'Error', 'error');
                 }
             })
             .catch(function (err) { console.error('Error:', err); });

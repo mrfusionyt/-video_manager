@@ -12,9 +12,6 @@
                 <input type="hidden" name="profile" value="{{ current_profile }}">
                 <input type="text" name="path" id="libraryPath" class="form-control form-control-dark" placeholder="Enter full path to video folder (e.g., C:\Users\...)" value="">
                 <button type="button" class="btn-paste" id="pasteBtn">Paste</button>
-                <label class="vm-inline-check" style="display:inline-flex;align-items:center;gap:4px;white-space:nowrap;" title="Analyze video intros and skip studio splashes in duplicates and previews">
-                    <input type="checkbox" name="deep_scan" value="1"> Deep scan
-                </label>
                 <button type="submit" class="btn-add" id="addLibraryBtn">Add</button>
             </form>
             <div id="libraryMessage" class="vm-inline-message" style="display:none;"></div>
@@ -100,7 +97,7 @@
         </div>
 
         <div class="mb-3">
-            <form method="post" onsubmit="return confirm('Delete ALL {{ cat_media_type }} categories for selected profile? This cannot be undone.');">
+            <form method="post" id="deleteAllCategoriesForm">
                 <input type="hidden" name="action" value="delete_all_categories">
                 <input type="hidden" name="profile" value="{{ current_profile }}">
                 <input type="hidden" name="media_type" value="{{ cat_media_type }}">
@@ -412,6 +409,17 @@
             });
         }
 
+        const deleteAllCategoriesForm = document.getElementById('deleteAllCategoriesForm');
+        if (deleteAllCategoriesForm) {
+            const msg = 'Delete ALL {{ cat_media_type }} categories for selected profile? This cannot be undone.';
+            deleteAllCategoriesForm.addEventListener('submit', function(e) {
+                e.preventDefault();
+                VMDialog.confirm(msg, 'Confirm', 'warning').then(function(ok) {
+                    if (ok) deleteAllCategoriesForm.submit();
+                });
+            });
+        }
+
         const toggleBtn = document.getElementById('toggleCategoriesSettingsBtn');
         if (toggleBtn) {
             toggleBtn.addEventListener('click', function(e) {
@@ -457,6 +465,8 @@
         if (taskId && window.VMProgress) {
             VMProgress.monitor(progressContainer, {
                 url: '/scan_progress/' + taskId,
+                taskId: taskId,
+                abortUrl: '/scan_progress/__task__/abort',
                 onComplete: function() {
                     setTimeout(function() {
                         const url = new URL(window.location.href);
@@ -466,6 +476,12 @@
                 },
                 onError: function(data) {
                     enableScanButtons();
+                },
+                onCancelled: function() {
+                    enableScanButtons();
+                    const url = new URL(window.location.href);
+                    url.searchParams.delete('task_id');
+                    window.history.replaceState({}, '', url.toString());
                 },
                 onNotFound: function() {
                     const text = document.getElementById('scanProgressText');

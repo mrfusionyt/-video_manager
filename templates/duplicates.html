@@ -243,7 +243,7 @@
     if (addLibsBtn && scanPathsEl) {
         addLibsBtn.addEventListener('click', function () {
             if (!allLibraries.length) {
-                alert('There are no libraries for this profile.');
+                VMDialog.alert('There are no libraries for this profile.', 'Notice', 'info');
                 return;
             }
             var existing = scanPathsEl.value.split('\n')
@@ -330,7 +330,7 @@
         var urlParams = new URLSearchParams(window.location.search);
         var taskId = urlParams.get('task_id');
         var pageError = urlParams.get('error');
-        if (pageError) alert(pageError);
+        if (pageError) VMDialog.alert(pageError, 'Error', 'error');
 
         try {
             var saved = JSON.parse(localStorage.getItem('vm_duplicate_filters') || 'null');
@@ -350,6 +350,8 @@
         if (taskId && window.VMProgress) {
             VMProgress.monitor(document.getElementById('progressContainer'), {
                 url: '/progress/' + taskId,
+                taskId: taskId,
+                abortUrl: '/progress/__task__/abort',
                 onComplete: function () {
                     setTimeout(function () {
                         var url = new URL(window.location.href);
@@ -361,6 +363,12 @@
                     var text = document.getElementById('progressText');
                     if (text) text.textContent = 'Error: ' + (data.message || 'Unknown error');
                     enableSearchButtons();
+                },
+                onCancelled: function () {
+                    enableSearchButtons();
+                    var url = new URL(window.location.href);
+                    url.searchParams.delete('task_id');
+                    window.history.replaceState({}, '', url.toString());
                 },
                 onNotFound: function () {
                     var text = document.getElementById('progressText');
@@ -396,18 +404,20 @@
                     document.getElementById('status-all').textContent = 'Nothing selected';
                     return;
                 }
-                if (!confirm('Move ' + ids.length + ' selected file(s) to !Duplicates?')) return;
-                document.getElementById('status-all').textContent = 'Moving...';
-                fetch('/move_selected_duplicates', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({video_ids: ids})
-                }).then(function (r) { return r.json(); })
-                .then(function (data) {
-                    document.getElementById('status-all').textContent = data.message || 'Done';
-                    if (data.success) setTimeout(function () { location.reload(); }, 1200);
-                }).catch(function (err) {
-                    document.getElementById('status-all').textContent = 'Error: ' + err;
+                VMDialog.confirm('Move ' + ids.length + ' selected file(s) to !Duplicates?', 'Confirm', 'warning').then(function (ok) {
+                    if (!ok) return;
+                    document.getElementById('status-all').textContent = 'Moving...';
+                    fetch('/move_selected_duplicates', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({video_ids: ids})
+                    }).then(function (r) { return r.json(); })
+                    .then(function (data) {
+                        document.getElementById('status-all').textContent = data.message || 'Done';
+                        if (data.success) setTimeout(function () { location.reload(); }, 1200);
+                    }).catch(function (err) {
+                        document.getElementById('status-all').textContent = 'Error: ' + err;
+                    });
                 });
             });
         }
@@ -438,39 +448,43 @@
                 var gi = this.dataset.groupIndex;
                 var ids = getGroupIds(gi);
                 if (ids.length < 2) return;
-                if (!confirm('Mark all ' + (ids.length * (ids.length - 1) / 2) +
+                VMDialog.confirm('Mark all ' + (ids.length * (ids.length - 1) / 2) +
                              ' pair(s) in this group as NOT duplicates?\n\n' +
-                             'These files will never be compared with each other again.')) return;
-                var sp = document.getElementById('status-' + gi);
-                sp.textContent = 'Marking...';
-                fetch('/ignore_group', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({video_ids: ids})
-                }).then(function (r) { return r.json(); })
-                .then(function (data) {
-                    sp.textContent = data.message || 'Done';
-                    if (data.success) {
-                        var gd = document.getElementById('group-' + gi);
-                        if (gd) gd.style.display = 'none';
-                        setTimeout(function () { location.reload(); }, 1200);
-                    }
-                }).catch(function (err) { sp.textContent = 'Error: ' + err; });
+                             'These files will never be compared with each other again.', 'Confirm', 'warning').then(function (ok) {
+                    if (!ok) return;
+                    var sp = document.getElementById('status-' + gi);
+                    sp.textContent = 'Marking...';
+                    fetch('/ignore_group', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({video_ids: ids})
+                    }).then(function (r) { return r.json(); })
+                    .then(function (data) {
+                        sp.textContent = data.message || 'Done';
+                        if (data.success) {
+                            var gd = document.getElementById('group-' + gi);
+                            if (gd) gd.style.display = 'none';
+                            setTimeout(function () { location.reload(); }, 1200);
+                        }
+                    }).catch(function (err) { sp.textContent = 'Error: ' + err; });
+                });
             });
         });
 
         var moveAllBtn = document.getElementById('moveAllBtn');
         if (moveAllBtn) {
             moveAllBtn.addEventListener('click', function () {
-                if (!confirm('Move ALL duplicates (keep best of each group)?')) return;
-                document.getElementById('status-all').textContent = 'Moving all...';
-                fetch('/move_all_duplicates', {method: 'POST', headers: {'Content-Type': 'application/json'}})
-                .then(function (r) { return r.json(); })
-                .then(function (data) {
-                    document.getElementById('status-all').textContent = data.message;
-                    if (data.success) setTimeout(function () { location.reload(); }, 1200);
-                }).catch(function (err) {
-                    document.getElementById('status-all').textContent = 'Error: ' + err;
+                VMDialog.confirm('Move ALL duplicates (keep best of each group)?', 'Confirm', 'warning').then(function (ok) {
+                    if (!ok) return;
+                    document.getElementById('status-all').textContent = 'Moving all...';
+                    fetch('/move_all_duplicates', {method: 'POST', headers: {'Content-Type': 'application/json'}})
+                    .then(function (r) { return r.json(); })
+                    .then(function (data) {
+                        document.getElementById('status-all').textContent = data.message;
+                        if (data.success) setTimeout(function () { location.reload(); }, 1200);
+                    }).catch(function (err) {
+                        document.getElementById('status-all').textContent = 'Error: ' + err;
+                    });
                 });
             });
         }

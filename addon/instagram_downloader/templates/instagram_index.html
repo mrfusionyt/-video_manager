@@ -127,10 +127,12 @@
     }
 
     function clearTasks() {
-        if (!confirm('Delete all tasks?')) return;
-        fetch('/instagram/tasks/clear', { method: 'POST' })
-            .then(r => r.json())
-            .then(d => { if (d.success) location.reload(); });
+        VMDialog.confirm('Delete all tasks?', 'Confirm', 'warning').then(function (ok) {
+            if (!ok) return;
+            fetch('/instagram/tasks/clear', { method: 'POST' })
+                .then(r => r.json())
+                .then(d => { if (d.success) location.reload(); });
+        });
     }
 
     checkCookies();

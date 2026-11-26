@@ -100,11 +100,11 @@
                         if (tile) tile.remove();
                         if (removeModalInstance) removeModalInstance.hide();
                     } else {
-                        alert('Error: ' + (d.error || 'Unknown'));
+                        VMDialog.alert('Error: ' + (d.error || 'Unknown'), 'Error', 'error');
                     }
                 } catch (e) {
                     console.error(e);
-                    alert('Network error');
+                    VMDialog.alert('Network error', 'Error', 'error');
                 } finally {
                     confirmRemoveBtn.disabled = false;
                     confirmRemoveBtn.textContent = 'Remove';

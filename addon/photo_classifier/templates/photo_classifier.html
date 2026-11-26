@@ -167,6 +167,7 @@
   .modal .primary:hover { background: var(--red-hover); }
   .modal .actions { display: flex; justify-content: flex-end; align-items: center; gap: 8px; margin-top: 18px; }
   .modal .actions button:first-child { margin-right: auto; }
+  .modal .confirm-message { color: var(--text-primary); font-size: 14px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
 
   /* ---- Toast ---- */
   #toast {
@@ -246,6 +247,17 @@
         <button onclick="restartServer()" title="Reload settings and rescan source">🔄 Restart Server</button>
         <button onclick="closeSettings()">Cancel</button>
         <button class="primary" onclick="saveSettings()">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-bg" id="confirm-modal">
+    <div class="modal">
+      <h2>Confirm</h2>
+      <div class="confirm-message" id="confirm-message"></div>
+      <div class="actions">
+        <button type="button" id="confirm-cancel">Cancel</button>
+        <button type="button" class="primary" id="confirm-ok">OK</button>
       </div>
     </div>
   </div>
@@ -449,9 +461,22 @@ async function undoLast() {
   brightness = 1.0; render();
 }
 
+let confirmResolve = null;
+function showConfirm(message) {
+  return new Promise((resolve) => {
+    confirmResolve = resolve;
+    $('confirm-message').textContent = message;
+    $('confirm-modal').classList.add('open');
+  });
+}
+function closeConfirm(result) {
+  $('confirm-modal').classList.remove('open');
+  if (confirmResolve) { const resolve = confirmResolve; confirmResolve = null; resolve(result); }
+}
+
 async function deleteImage() {
   if (images.length === 0) return;
-  if (!confirm('Move the file to the Recycle Bin?\n\n' + images[currentIndex])) return;
+  if (!(await showConfirm('Move the file to the Recycle Bin?\n\n' + images[currentIndex]))) return;
   const name = images[currentIndex];
   const r = await fetch(BP + '/api/delete', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ name }) });
   const data = await r.json();
@@ -518,6 +543,9 @@ function toast(msg, isError) {
   toastTimer = setTimeout(() => el.classList.remove('show'), 2200);
 }
 
+$('confirm-ok').onclick = () => closeConfirm(true);
+$('confirm-cancel').onclick = () => closeConfirm(false);
+$('confirm-modal').onclick = (e) => { if (e.target === $('confirm-modal')) closeConfirm(false); };
 $('btn-fullscreen').onclick = toggleFullscreen;
 $('btn-settings').onclick = openSettings;
 $('btn-undo').onclick = undoLast;
@@ -540,7 +568,7 @@ document.addEventListener('keydown', (e) => {
   else if (e.key === '2') { classify('nude'); }
   else if (e.key === 'r' || e.key === 'R') { resetBrightness(); }
   else if (e.key === 'f' || e.key === 'F') { toggleFullscreen(); }
-  else if (e.key === 'Escape') { closeSettings(); }
+  else if (e.key === 'Escape') { closeSettings(); closeConfirm(false); }
 });
 
 loadState();

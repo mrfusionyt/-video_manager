@@ -397,6 +397,33 @@ scan_progress = {}
 _lock = threading.Lock()
 
 
+class DuplicateScanCancelled(Exception):
+    """Внутренний сигнал остановки поиска дубликатов пользователем."""
+
+
+def request_duplicate_cancel(task_id):
+    """Запросить остановку поиска дубликатов. Идемпотентно."""
+    with _lock:
+        t = scan_progress.get(task_id)
+        if not t:
+            return 'not_found'
+        status = t.get('status')
+        if status in ('complete', 'error', 'cancelled'):
+            return 'already_done'
+        if status == 'cancelling':
+            return 'ok'
+        t['cancel_requested'] = True
+        t['status'] = 'cancelling'
+        t['message'] = 'Cancelling...'
+        return 'ok'
+
+
+def _duplicate_cancel_requested(task_id):
+    with _lock:
+        t = scan_progress.get(task_id)
+        return bool(t and t.get('cancel_requested'))
+
+
 def _set_progress(task_id, progress, processed, total, message):
     t = scan_progress.get(task_id)
     if t is None:
@@ -404,7 +431,8 @@ def _set_progress(task_id, progress, processed, total, message):
     t['progress'] = max(0, min(100, int(progress)))
     t['processed'] = int(processed)
     t['total'] = int(total)
-    t['message'] = message
+    if t.get('status') != 'cancelling':
+        t['message'] = message
 
 
 # ===================================================================
@@ -1410,7 +1438,12 @@ def _audio_lsh_candidates(paths, audio_by_path, image_path_set,
 #                     Группировка
 # ===================================================================
 def _group_all(task_id, frames_by_path, audio_by_path,
-               item_by_path, mode='deep'):
+               item_by_path, mode='deep', cancel_check=None):
+    def check_cancel():
+        if cancel_check and cancel_check():
+            raise DuplicateScanCancelled()
+
+    check_cancel()
     paths = list(frames_by_path.keys())
     n = len(paths)
     parent = list(range(n))
@@ -1473,6 +1506,7 @@ def _group_all(task_id, frames_by_path, audio_by_path,
                 for (i, j) in pairs_list
             ]
             for fut, (i, j) in zip(futures, pairs_list):
+                check_cancel()
                 res = fut.result()
                 if res:
                     union(i, j)
@@ -1527,6 +1561,7 @@ def _group_all(task_id, frames_by_path, audio_by_path,
                     for (i, j) in pairs_list
                 ]
                 for fut, (i, j) in zip(futures, pairs_list):
+                    check_cancel()
                     res = fut.result()
                     if res:
                         union(i, j)
@@ -1568,6 +1603,7 @@ def _group_all(task_id, frames_by_path, audio_by_path,
     done_g = 0
     total_g = len(by_root)
     for root, idxs in by_root.items():
+        check_cancel()
         done_g += 1
         if done_g % 500 == 0 or done_g == total_g:
             print(f"[dup] grouping: {done_g}/{total_g}")
@@ -1697,7 +1733,13 @@ def find_duplicates_async(task_id, filters=None, scan_paths=None, mode='deep'):
 
 def _find_duplicates_worker(task_id, filters, scan_paths=None, mode='deep'):
     global DUPLICATE_GROUPS, scan_in_progress
+
+    def check_cancel():
+        if _duplicate_cancel_requested(task_id):
+            raise DuplicateScanCancelled()
+
     try:
+        check_cancel()
         _init_db()
 
         all_items = get_all_videos()
@@ -1726,6 +1768,7 @@ def _find_duplicates_worker(task_id, filters, scan_paths=None, mode='deep'):
         valid_items = []
         missing_count = 0
         for v in all_items:
+            check_cancel()
             if not os.path.exists(v.get('filepath', '')):
                 missing_count += 1
                 delete_video(v['id'])
@@ -1735,6 +1778,7 @@ def _find_duplicates_worker(task_id, filters, scan_paths=None, mode='deep'):
             print(f"[dup] removed {missing_count} missing files from DB")
         all_items = valid_items
 
+        check_cancel()
         total = len(all_items)
         _set_progress(task_id, 0, 0, total, f'Scanning {total} files...')
 
@@ -1760,6 +1804,7 @@ def _find_duplicates_worker(task_id, filters, scan_paths=None, mode='deep'):
             futures = {ex.submit(_process_media, it, include_audio): it
                        for it in all_items}
             for fut in as_completed(futures):
+                check_cancel()
                 item = futures[fut]
                 entry = None
                 try:
@@ -1798,8 +1843,11 @@ def _find_duplicates_worker(task_id, filters, scan_paths=None, mode='deep'):
             print(f"[dup] files with audio fingerprint: "
                   f"{with_audio}/{len(audio_by_path)}")
 
+        check_cancel()
         groups = _group_all(task_id, frames_by_path, audio_by_path,
-                            item_by_path, mode=mode)
+                            item_by_path, mode=mode,
+                            cancel_check=lambda: _duplicate_cancel_requested(task_id))
+        check_cancel()
         print(f"[dup] found {len(groups)} groups")
 
         DUPLICATE_GROUPS = groups
@@ -1816,6 +1864,13 @@ def _find_duplicates_worker(task_id, filters, scan_paths=None, mode='deep'):
                   f"reason={g['reason']}, kind={g['kind']}")
         print(f"{'=' * 70}\n")
 
+    except DuplicateScanCancelled:
+        print("[dup] aborted by user", flush=True)
+        t = scan_progress.get(task_id)
+        if t:
+            t['status'] = 'cancelled'
+            t['message'] = (f"Aborted. {t.get('processed', 0)} "
+                            f"of {t.get('total', 0)} files processed.")
     except Exception as e:
         import traceback
         traceback.print_exc()

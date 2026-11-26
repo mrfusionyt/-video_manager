@@ -1807,7 +1807,7 @@
         fetch('/editor/' + pickerSelectedId + '/info')
             .then(function (r) { return r.json(); })
             .then(function (meta) {
-                if (meta.error) { alert('Error: ' + meta.error); return; }
+                if (meta.error) { VMDialog.alert('Error: ' + meta.error, 'Error', 'error'); return; }
 
                 snapshot();
 
@@ -1857,7 +1857,7 @@
                 setActiveClip(state.clips.length - 1);
                 updateTotalInfo();
             })
-            .catch(function (err) { alert('Network error: ' + err); });
+            .catch(function (err) { VMDialog.alert('Network error: ' + err, 'Error', 'error'); });
     });
 
     /* ============================================================
@@ -2005,7 +2005,12 @@
         }
 
         if (overwrite) {
-            if (!confirm('Overwrite the FIRST clip\'s original file? This cannot be undone.')) return;
+            VMDialog.confirm('Overwrite the FIRST clip\'s original file? This cannot be undone.',
+                'Confirm', 'warning').then(function (ok) {
+                    if (!ok) return;
+                    performSave(quality, overwrite);
+                });
+            return;
         }
         performSave(quality, overwrite);
     });

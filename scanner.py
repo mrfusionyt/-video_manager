@@ -42,6 +42,10 @@ SCAN_IN_PROGRESS = False
 _RUN_LOCK = threading.Lock()
 
 
+class ScanCancelled(Exception):
+    """Внутренний сигнал остановки сканирования пользователем."""
+
+
 # ===================================================================
 #                     Persistent scan cache
 # ===================================================================
@@ -122,6 +126,29 @@ def get_scan_progress(task_id):
     with SCAN_LOCK:
         t = SCAN_TASKS.get(task_id)
         return dict(t) if t else None
+
+
+def request_scan_cancel(task_id):
+    """Запросить остановку фонового скана. Идемпотентно."""
+    with SCAN_LOCK:
+        t = SCAN_TASKS.get(task_id)
+        if not t:
+            return 'not_found'
+        status = t.get('status')
+        if status in ('complete', 'error', 'cancelled'):
+            return 'already_done'
+        if status == 'cancelling':
+            return 'ok'
+        t['cancel_requested'] = True
+        t['status'] = 'cancelling'
+        t['message'] = 'Cancelling...'
+        return 'ok'
+
+
+def _cancel_requested(task_id):
+    with SCAN_LOCK:
+        t = SCAN_TASKS.get(task_id)
+        return bool(t and t.get('cancel_requested'))
 
 
 def get_media_info(filepath):
@@ -266,7 +293,7 @@ def _analyze_intro(video_id, filepath, duration=0):
     return True
 
 
-def _scan_impl(progress_cb=None, deep=False):
+def _scan_impl(progress_cb=None, deep=False, cancel_check=None):
     _load_scan_cache()
     _load_probe_cache()
 
@@ -277,12 +304,17 @@ def _scan_impl(progress_cb=None, deep=False):
             progress_cb(0, 0, 'Another scan is running')
         return
     try:
-        _scan_impl_locked(progress_cb, deep=deep)
+        _scan_impl_locked(progress_cb, deep=deep, cancel_check=cancel_check)
     finally:
         _RUN_LOCK.release()
 
 
-def _scan_impl_locked(progress_cb=None, deep=False):
+def _scan_impl_locked(progress_cb=None, deep=False, cancel_check=None):
+    def check_cancel():
+        if cancel_check and cancel_check():
+            raise ScanCancelled()
+
+    check_cancel()
     libraries = get_libraries()
     if not libraries:
         print("No libraries to scan.")
@@ -299,9 +331,11 @@ def _scan_impl_locked(progress_cb=None, deep=False):
             print(f"[scan] skip non-existent library: {lib_path}")
             continue
         for root, dirs, files in os.walk(lib_path):
+            check_cancel()
             dirs[:] = [d for d in dirs
                        if d not in ('!Duplicates', '!Broken', '!Good')]
             for file in files:
+                check_cancel()
                 if _is_temp_file(file):
                     continue
                 ext = os.path.splitext(file)[1].lower()
@@ -333,6 +367,7 @@ def _scan_impl_locked(progress_cb=None, deep=False):
     attempted = set()
 
     for i, (lib_id, lib_mode, full_path, filename) in enumerate(all_files, start=1):
+        check_cancel()
         found_paths.add(full_path)
         folder = os.path.dirname(full_path)
         existing_row = existing_map.get(full_path)
@@ -466,6 +501,7 @@ def _scan_impl_locked(progress_cb=None, deep=False):
         except Exception as e:
             print(f"[scan] Error processing {filename}: {e}")
 
+        check_cancel()
         if deep and video_id and os.path.splitext(full_path)[1].lower() in VIDEO_EXTENSIONS:
             try:
                 row = get_video_by_id(video_id)
@@ -479,6 +515,8 @@ def _scan_impl_locked(progress_cb=None, deep=False):
             if deep:
                 message = f'Analyzing intros: {filename}'
             progress_cb(i, total, message)
+
+    check_cancel()
 
     for filepath, row in existing_map.items():
         if os.path.normpath(filepath) not in found_paths:
@@ -532,18 +570,30 @@ def scan_libraries_async(task_id, deep=False):
             t['processed'] = processed
             t['total'] = total
             t['progress'] = int((processed / total) * 100) if total > 0 else 0
-            t['message'] = message
+            if t.get('status') != 'cancelling':
+                t['message'] = message
 
     def _worker():
         global SCAN_IN_PROGRESS
         try:
-            _scan_impl(progress_cb=_cb, deep=deep)
+            _scan_impl(progress_cb=_cb, deep=deep,
+                       cancel_check=lambda: _cancel_requested(task_id))
+            if _cancel_requested(task_id):
+                raise ScanCancelled()
             with SCAN_LOCK:
                 t = SCAN_TASKS.get(task_id)
                 if t:
                     t['status'] = 'complete'
                     t['progress'] = 100
                     t['message'] = f"Done. {t.get('processed', 0)} files processed."
+        except ScanCancelled:
+            print("[scan] aborted by user")
+            with SCAN_LOCK:
+                t = SCAN_TASKS.get(task_id)
+                if t:
+                    t['status'] = 'cancelled'
+                    t['message'] = (f"Aborted. {t.get('processed', 0)} "
+                                    f"of {t.get('total', 0)} files processed.")
         except Exception as e:
             print(f"[scan] worker error: {e}")
             with SCAN_LOCK:

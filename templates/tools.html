@@ -133,7 +133,7 @@
             .then(r => r.json())
             .then(data => {
                 if (data.error) {
-                    alert('Error: ' + data.error);
+                    VMDialog.alert('Error: ' + data.error, 'Error', 'error');
                     return;
                 }
                 var progressUrl = (url === '/tools/scan')
@@ -141,13 +141,13 @@
                     : '/tools/progress/';
                 monitorProgress(data.task_id, progressUrl);
             })
-            .catch(err => alert('Error: ' + err));
+            .catch(err => VMDialog.alert('Error: ' + err, 'Error', 'error'));
     }
 
     function restoreToLibrary() {
         const sel = document.getElementById('restoreLibrary');
         if (!sel || !sel.value) {
-            alert('Select a library');
+            VMDialog.alert('Select a library', 'Notice', 'info');
             return;
         }
         runTask('/tools/restore', {library_id: sel.value});
@@ -162,6 +162,8 @@
         if (!window.VMProgress) return;
         VMProgress.monitor(c, {
             url: (progressUrl || '/tools/progress/') + taskId,
+            taskId: (progressUrl === '/scan_progress/') ? taskId : null,
+            abortUrl: (progressUrl === '/scan_progress/') ? '/scan_progress/__task__/abort' : null,
             onComplete: function (d) {
                 if (d.result) {
                     resBody.innerHTML = formatResult(d.result);
@@ -172,6 +174,9 @@
             onError: function (d) {
                 const text = document.getElementById('progressText');
                 if (text) text.textContent = 'Error: ' + (d.message || 'Unknown error');
+            },
+            onCancelled: function () {
+                setTimeout(function () { location.reload(); }, 1500);
             },
             onNotFound: function () {
                 const text = document.getElementById('progressText');

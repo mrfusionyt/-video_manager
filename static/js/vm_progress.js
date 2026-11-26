@@ -13,14 +13,26 @@
         var s = String(status || '').toLowerCase();
         if (s === 'complete' || s === 'done' || s === 'finished') return 'done';
         if (s === 'error' || s === 'failed') return 'error';
+        if (s === 'cancelled' || s === 'canceled' || s === 'aborted') return 'cancelled';
         if (s === 'not_found' || s === 'notfound') return 'notfound';
         return 'active';
+    }
+
+    function abortButton(container) {
+        return container ? container.querySelector('[data-vm-abort]') : null;
+    }
+
+    function resetAbort(container) {
+        var btn = abortButton(container);
+        if (!btn) return;
+        btn.disabled = false;
+        btn.textContent = btn.dataset.vmAbortLabel || 'Abort';
     }
 
     function reset(container) {
         if (!container) return;
         container.style.display = 'block';
-        container.classList.remove('is-done', 'is-error', 'is-active');
+        container.classList.remove('is-done', 'is-error', 'is-cancelled', 'is-active');
         container.classList.add('is-active');
         container.dataset.vmMax = '0';
         var fill = container.querySelector('[data-vm-fill]');
@@ -33,6 +45,7 @@
         if (track) track.setAttribute('aria-valuenow', '0');
         if (detail) detail.textContent = 'Initializing...';
         if (extra) extra.textContent = '';
+        resetAbort(container);
     }
 
     function apply(container, state) {
@@ -43,12 +56,13 @@
         var previous = Number(container.dataset.vmMax || 0);
 
         if (kind === 'done') pct = 100;
-        if (kind === 'active') pct = Math.max(previous, pct);
+        if (kind === 'active' || kind === 'cancelled') pct = Math.max(previous, pct);
         container.dataset.vmMax = String(pct);
 
-        container.classList.remove('is-done', 'is-error', 'is-active');
+        container.classList.remove('is-done', 'is-error', 'is-cancelled', 'is-active');
         container.classList.add(kind === 'done' ? 'is-done' :
-                                 kind === 'error' ? 'is-error' : 'is-active');
+                                 kind === 'error' ? 'is-error' :
+                                 kind === 'cancelled' ? 'is-cancelled' : 'is-active');
 
         var fill = container.querySelector('[data-vm-fill]');
         var pctEl = container.querySelector('[data-vm-percent]');
@@ -72,20 +86,50 @@
         return kind;
     }
 
+    function bindAbort(container, options) {
+        var btn = abortButton(container);
+        if (!btn || !options.abortUrl || !options.taskId) return;
+        btn.style.display = '';
+        btn.onclick = function () {
+            btn.disabled = true;
+            btn.textContent = 'Cancelling…';
+            fetch(options.abortUrl.replace('__task__', encodeURIComponent(options.taskId)), {
+                method: 'POST'
+            }).then(function (response) {
+                if (!response.ok) throw new Error('HTTP ' + response.status);
+                return response.json();
+            }).then(function (data) {
+                if (!data || !data.success) throw new Error('abort rejected');
+                var detail = container.querySelector('[data-vm-detail]');
+                if (detail) detail.textContent = 'Cancelling...';
+            }).catch(function (err) {
+                btn.disabled = false;
+                btn.textContent = btn.dataset.vmAbortLabel || 'Abort';
+                var detail = container.querySelector('[data-vm-detail]');
+                if (detail) detail.textContent = 'Abort failed: ' + err.message;
+            });
+        };
+    }
+
     function monitor(container, options) {
         options = options || {};
         if (!container || !options.url) return null;
         reset(container);
+        bindAbort(container, options);
         var es = new EventSource(options.url);
         es.onmessage = function (event) {
             var data;
             try { data = JSON.parse(event.data); } catch (e) { return; }
             var kind = apply(container, data);
             if (options.onMessage) options.onMessage(data, kind);
-            if (kind === 'done' || kind === 'error' || kind === 'notfound') {
+            if (kind === 'done' || kind === 'error' ||
+                kind === 'cancelled' || kind === 'notfound') {
+                var btn = abortButton(container);
+                if (btn) btn.style.display = 'none';
                 es.close();
                 if (kind === 'done' && options.onComplete) options.onComplete(data);
                 if (kind === 'error' && options.onError) options.onError(data);
+                if (kind === 'cancelled' && options.onCancelled) options.onCancelled(data);
                 if (kind === 'notfound' && options.onNotFound) options.onNotFound(data);
             }
         };

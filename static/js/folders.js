@@ -3,7 +3,7 @@
    • Клик по карточке — переход в папку
    • Модалка установки обложки папки
    • Модалка назначения артиста для всей папки
-   • Универсальная Bootstrap-модалка уведомлений (вместо alert)
+   • Уведомления через общий VMDialog
    Конфиг: window.FOLDERS_CONFIG
    ============================================================ */
 (function () {
@@ -22,43 +22,12 @@
     var assignFolderPath     = null;
     var assignFolderName     = null;
 
-    var notifyModalInstance  = null;
-    var notifyOkCallback     = null;
-
     /* ============================================================
        УВЕДОМЛЕНИЯ (замена alert)
        ============================================================ */
     function showNotify(title, message, type, onOk) {
         // type: 'success' | 'error' | 'info'
-        type = type || 'info';
-
-        document.getElementById('notifyTitle').textContent = title;
-
-        var msgEl = document.getElementById('notifyMessage');
-        if (msgEl) msgEl.textContent = message || '';
-
-        var iconEl = document.getElementById('notifyIcon');
-        if (iconEl) {
-            iconEl.className = 'notify-icon ' + type;
-            if (type === 'success')      iconEl.textContent = '✓';
-            else if (type === 'error')   iconEl.textContent = '!';
-            else                          iconEl.textContent = 'i';
-        }
-
-        notifyOkCallback = (typeof onOk === 'function') ? onOk : null;
-
-        var el = document.getElementById('notifyModal');
-        if (!el) {
-            // fallback, если модалки нет в шаблоне
-            window.alert(title + '\n\n' + (message || ''));
-            if (notifyOkCallback) notifyOkCallback();
-            return;
-        }
-
-        if (!notifyModalInstance) {
-            notifyModalInstance = new bootstrap.Modal(el);
-        }
-        notifyModalInstance.show();
+        return VMDialog.alert(message, title, type || 'info', onOk);
     }
 
     /* ============================================================
@@ -418,18 +387,6 @@
                 if (e.key === 'Enter') {
                     e.preventDefault();
                     createArtistAndSelect();
-                }
-            });
-        }
-
-        // Возможность передать callback при закрытии notifyModal
-        var notifyEl = document.getElementById('notifyModal');
-        if (notifyEl) {
-            notifyEl.addEventListener('hidden.bs.modal', function () {
-                if (typeof notifyOkCallback === 'function') {
-                    var cb = notifyOkCallback;
-                    notifyOkCallback = null;
-                    cb();
                 }
             });
         }

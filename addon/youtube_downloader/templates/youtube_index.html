@@ -130,7 +130,7 @@
             const text = await navigator.clipboard.readText();
             if (text) document.getElementById('url').value = text;
         } catch (e) {
-            alert('Clipboard access denied. Paste manually (Ctrl+V).');
+            VMDialog.alert('Clipboard access denied. Paste manually (Ctrl+V).', 'Notice', 'info');
         }
     }
 

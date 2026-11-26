@@ -54,17 +54,21 @@
 {% block scripts %}
 <script>
     function deleteTask(taskId) {
-        if (!confirm('Delete this task?')) return;
-        fetch('/instagram/task/delete/' + taskId, { method: 'POST' })
-            .then(r => r.json())
-            .then(d => { if (d.success) location.reload(); });
+        VMDialog.confirm('Delete this task?', 'Confirm', 'warning').then(function (ok) {
+            if (!ok) return;
+            fetch('/instagram/task/delete/' + taskId, { method: 'POST' })
+                .then(r => r.json())
+                .then(d => { if (d.success) location.reload(); });
+        });
     }
 
     function clearAllTasks() {
-        if (!confirm('Delete all tasks? This cannot be undone.')) return;
-        fetch('/instagram/tasks/clear', { method: 'POST' })
-            .then(r => r.json())
-            .then(d => { if (d.success) location.reload(); });
+        VMDialog.confirm('Delete all tasks? This cannot be undone.', 'Confirm', 'warning').then(function (ok) {
+            if (!ok) return;
+            fetch('/instagram/tasks/clear', { method: 'POST' })
+                .then(r => r.json())
+                .then(d => { if (d.success) location.reload(); });
+        });
     }
 </script>
 {% endblock %}

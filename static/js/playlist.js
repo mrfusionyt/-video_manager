@@ -97,10 +97,10 @@
                         if (playlistCoverModal) playlistCoverModal.hide();
                         location.reload();
                     } else {
-                        alert('Error: ' + (data.error || 'Unknown error'));
+                        VMDialog.alert('Error: ' + (data.error || 'Unknown error'), 'Error', 'error');
                     }
                 })
-                .catch(function (err) { alert('Error: ' + err); });
+                .catch(function (err) { VMDialog.alert('Error: ' + err, 'Error', 'error'); });
         };
     }
 

@@ -34,6 +34,7 @@ from scanner import (
     scan_libraries_async,
     get_scan_progress,
     is_scan_in_progress,
+    request_scan_cancel,
 )
 from config import app_config, save_config
 from helpers.profiles import get_current_profile, profile_to_mode
@@ -42,6 +43,7 @@ from duplicate_finder import (
     find_duplicates_async,
     get_duplicate_groups,
     get_progress,
+    request_duplicate_cancel,
 )
 
 
@@ -219,9 +221,7 @@ def register(app):
                 # Do not block the POST with a full scan: start it in the
                 # background so the same progress bar used by Scan shows up.
                 new_task_id = str(uuid.uuid4())
-                deep_scan = (request.form.get('deep_scan') == '1'
-                             or request.form.get('action') == 'deep_scan')
-                started = scan_libraries_async(new_task_id, deep=deep_scan)
+                started = scan_libraries_async(new_task_id)
                 if started:
                     return redirect(url_for('settings', tab='libraries',
                                             task_id=new_task_id,
@@ -393,10 +393,24 @@ def register(app):
                     yield f"data: {json.dumps({'status': 'not_found'})}\n\n"
                     break
                 yield f"data: {json.dumps(progress)}\n\n"
-                if progress.get('status') in ('complete', 'error'):
+                if progress.get('status') in ('complete', 'error', 'cancelled'):
                     break
                 time.sleep(0.5)
         return Response(generate(), mimetype="text/event-stream")
+
+    @app.route('/scan_progress/<task_id>/abort', methods=['POST'])
+    def scan_progress_abort(task_id):
+        result = request_scan_cancel(task_id)
+        if result == 'not_found':
+            return jsonify({'success': False, 'error': 'Task not found'}), 404
+        return jsonify({'success': True, 'status': 'cancelling'})
+
+    @app.route('/progress/<task_id>/abort', methods=['POST'])
+    def progress_abort(task_id):
+        result = request_duplicate_cancel(task_id)
+        if result == 'not_found':
+            return jsonify({'success': False, 'error': 'Task not found'}), 404
+        return jsonify({'success': True, 'status': 'cancelling'})
 
     @app.route('/progress/<task_id>')
     def progress_stream(task_id):
@@ -407,7 +421,7 @@ def register(app):
                     yield f"data: {json.dumps({'status': 'not_found'})}\n\n"
                     break
                 yield f"data: {json.dumps(progress)}\n\n"
-                if progress.get('status') in ('complete', 'error'):
+                if progress.get('status') in ('complete', 'error', 'cancelled'):
                     break
                 time.sleep(0.5)
         return Response(generate(), mimetype="text/event-stream")

@@ -106,12 +106,14 @@
         setTimeout(poll, 1000);
     }
 
-    cancelBtn.addEventListener('click', async function() {
-        if (!confirm('Cancel download?')) return;
-        cancelBtn.disabled = true;
-        try {
-            await fetch('/instagram/cancel/' + taskId, { method: 'POST' });
-        } catch (e) { console.error(e); }
+    cancelBtn.addEventListener('click', function() {
+        VMDialog.confirm('Cancel download?', 'Confirm', 'warning').then(async function (ok) {
+            if (!ok) return;
+            cancelBtn.disabled = true;
+            try {
+                await fetch('/instagram/cancel/' + taskId, { method: 'POST' });
+            } catch (e) { console.error(e); }
+        });
     });
 
     poll();

@@ -205,27 +205,29 @@
             var aId = parseInt(this.dataset.aId, 10);
             var bId = parseInt(this.dataset.bId, 10);
             if (!aId || !bId) return;
-            if (!confirm('Mark this pair as NOT duplicates?')) return;
             var self = this;
-            self.disabled = true;
-            self.textContent = 'Marking...';
-            fetch('/ignore_pair', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({a_id: aId, b_id: bId})
-            }).then(function (r) { return r.json(); })
-            .then(function (data) {
-                if (data.success) {
-                    self.textContent = '🚫 Ignored';
-                } else {
+            VMDialog.confirm('Mark this pair as NOT duplicates?', 'Confirm', 'warning').then(function (ok) {
+                if (!ok) return;
+                self.disabled = true;
+                self.textContent = 'Marking...';
+                fetch('/ignore_pair', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({a_id: aId, b_id: bId})
+                }).then(function (r) { return r.json(); })
+                .then(function (data) {
+                    if (data.success) {
+                        self.textContent = '🚫 Ignored';
+                    } else {
+                        self.disabled = false;
+                        self.textContent = '🚫 Not a pair';
+                        VMDialog.alert('Error: ' + data.message, 'Error', 'error');
+                    }
+                }).catch(function (err) {
                     self.disabled = false;
                     self.textContent = '🚫 Not a pair';
-                    alert('Error: ' + data.message);
-                }
-            }).catch(function (err) {
-                self.disabled = false;
-                self.textContent = '🚫 Not a pair';
-                alert('Error: ' + err);
+                    VMDialog.alert('Error: ' + err, 'Error', 'error');
+                });
             });
         });
     });

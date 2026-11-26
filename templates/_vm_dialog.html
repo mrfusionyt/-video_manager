@@ -1,0 +1,63 @@
+<!-- Единые программные диалоги приложения (alert / confirm) -->
+<style>
+    .vm-dialog-icon {
+        width: 44px;
+        height: 44px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 24px;
+        font-weight: 700;
+        flex-shrink: 0;
+        line-height: 1;
+    }
+    .vm-dialog-icon.success { background: #d1fae5; color: #065f46; }
+    .vm-dialog-icon.error   { background: #fee2e2; color: #991b1b; }
+    .vm-dialog-icon.warning { background: #fef3c7; color: #92400e; }
+    .vm-dialog-icon.info    { background: #dbeafe; color: #1e40af; }
+    .vm-dialog-message { white-space: pre-wrap; word-break: break-word; }
+    /* Одинаковый тёмный вид на всех страницах, включая аддоны. */
+    #vmDialog .modal-content {
+        background: #1b1c22;
+        color: #e6e7ea;
+        border: 1px solid #303137;
+        border-radius: 12px;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, .5);
+    }
+    #vmDialog .modal-header,
+    #vmDialog .modal-footer { border-color: #303137; }
+    #vmDialog .modal-title { color: #f1f2f5; }
+    #vmDialog .btn-close { filter: invert(1) grayscale(1); }
+    #vmDialog #vmDialogCancelBtn {
+        background: #2b2d34;
+        border-color: #3a3c44;
+        color: #e6e7ea;
+    }
+    #vmDialog #vmDialogOkBtn {
+        background: #dc3545;
+        border-color: #dc3545;
+        color: #fff;
+    }
+</style>
+
+<div class="modal fade" id="vmDialog" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="vmDialogTitle">Notification</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="d-flex align-items-start gap-3">
+                    <div class="vm-dialog-icon info" id="vmDialogIcon">i</div>
+                    <div class="vm-dialog-message flex-grow-1" id="vmDialogMessage"></div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" id="vmDialogCancelBtn" style="display:none;">Cancel</button>
+                <button type="button" class="btn btn-primary" id="vmDialogOkBtn">OK</button>
+            </div>
+        </div>
+    </div>
+</div>

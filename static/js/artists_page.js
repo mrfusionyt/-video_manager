@@ -140,7 +140,7 @@
 
                 var newName = document.getElementById('editArtistName').value.trim();
                 if (!newName) {
-                    alert('Name cannot be empty');
+                    VMDialog.alert('Name cannot be empty', 'Notice', 'info');
                     return;
                 }
 
@@ -162,13 +162,13 @@
                     if (d.success) {
                         location.reload();
                     } else {
-                        alert('Error: ' + (d.error || 'Unknown'));
+                        VMDialog.alert('Error: ' + (d.error || 'Unknown'), 'Error', 'error');
                         saveBtn.disabled = false;
                         saveBtn.textContent = 'Save';
                     }
                 } catch (e) {
                     console.error(e);
-                    alert('Network error');
+                    VMDialog.alert('Network error', 'Error', 'error');
                     saveBtn.disabled = false;
                     saveBtn.textContent = 'Save';
                 }
@@ -191,13 +191,13 @@
                     if (r.ok) {
                         location.reload();
                     } else {
-                        alert('Error deleting artist');
+                        VMDialog.alert('Error deleting artist', 'Error', 'error');
                         confirmDeleteBtn.disabled = false;
                         confirmDeleteBtn.textContent = 'Delete';
                     }
                 } catch (e) {
                     console.error(e);
-                    alert('Network error');
+                    VMDialog.alert('Network error', 'Error', 'error');
                     confirmDeleteBtn.disabled = false;
                     confirmDeleteBtn.textContent = 'Delete';
                 }

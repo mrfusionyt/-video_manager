@@ -4,6 +4,7 @@
     <div class="vm-progress-head">
         <span class="vm-progress-title">{{ title }}</span>
         <span class="vm-progress-percent" data-vm-percent>0%</span>
+        <button type="button" class="vm-progress-abort" data-vm-abort data-vm-abort-label="Abort" style="display:none;">Abort</button>
     </div>
     <div class="vm-progress-track" data-vm-track role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
         <div id="{{ container_id }}Fill" class="vm-progress-fill" data-vm-fill></div>
