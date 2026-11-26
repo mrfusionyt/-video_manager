@@ -127,7 +127,7 @@ def inject_globals():
         {'id': 'categories', 'label': 'Categories'},
         {'id': 'network', 'label': 'Network'},
         {'id': 'security', 'label': 'Security'},
-        {'id': 'stats', 'label': 'Stats'},
+        {'id': 'stats', 'label': 'Status'},
     ]
 
     return dict(

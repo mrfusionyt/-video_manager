@@ -36,7 +36,7 @@ from addon.photo_classifier import state as pv_state
 # =====================================================================
 # UPDATE SETTINGS
 # =====================================================================
-CURRENT_VERSION = '1.0.17'
+CURRENT_VERSION = '1.0.18'
 GITHUB_USER = 'mrfusionyt'
 GITHUB_REPO = '-video_manager'
 AUTO_UPDATE_INTERVAL = 3600       # seconds between automatic checks
@@ -403,76 +403,169 @@ def create_tray():
         print('[tray] failed:', e)
 
 
-def check_for_updates(manual=False):
-    """Check GitHub once; a newer release is installed automatically."""
-    global ignored_version, update_in_progress, pending_update_deferred
+def fetch_update_info():
+    """Query GitHub once and return a JSON-safe description of the release."""
+    info = {
+        'available': False,
+        'current': CURRENT_VERSION,
+        'latest': '',
+        'download_url': None,
+        'checksum_url': None,
+        'release_url': None,
+        'frozen': bool(getattr(sys, 'frozen', False)),
+        'error': None,
+    }
     if GITHUB_USER == 'YOUR_NICKNAME' or GITHUB_REPO == 'YOUR_REPO':
-        return False
+        info['error'] = 'Update source is not configured.'
+        return info
     try:
         url = f'https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/releases/latest'
         r = requests.get(url, timeout=(5, 15),
                          headers={'Accept': 'application/vnd.github+json'})
         if r.status_code == 404:
-            append_log('[update] no releases found yet')
-            return False
+            info['error'] = 'No releases found yet.'
+            return info
         r.raise_for_status()
         data = r.json()
         latest_version = str(data.get('tag_name', '')).lstrip('v')
-
+        info['latest'] = latest_version
+        info['release_url'] = data.get('html_url')
         if not latest_version:
-            return False
-
-        is_newer = _version_key(latest_version) > _version_key(CURRENT_VERSION)
-        append_log(f'[update] latest v{latest_version} / current v{CURRENT_VERSION}')
-
-        if is_newer and (manual or latest_version != ignored_version):
-            download_url = None
-            # Prefer the onedir archive asset (contains the .exe + libs) for auto-update.
+            info['error'] = 'The latest release has no version tag.'
+            return info
+        if _version_key(latest_version) <= _version_key(CURRENT_VERSION):
+            return info
+        download_url = None
+        # Prefer the onedir archive asset (contains the .exe + libs).
+        for asset in data.get('assets', []):
+            name = (asset.get('name') or '').lower()
+            if name.endswith('.zip') and 'onedir' in name:
+                download_url = asset.get('browser_download_url')
+                break
+        if not download_url:
             for asset in data.get('assets', []):
-                name = (asset.get('name') or '').lower()
-                if name.endswith('.zip') and 'onedir' in name:
-                    download_url = asset['browser_download_url']
+                if (asset.get('name') or '').lower().endswith('.zip'):
+                    download_url = asset.get('browser_download_url')
                     break
-            if not download_url:
-                for asset in data.get('assets', []):
-                    if (asset.get('name') or '').lower().endswith('.zip'):
-                        download_url = asset['browser_download_url']
-                        break
-            checksum_url = _checksum_url_for(data.get('assets', []), download_url or '')
-            if not download_url:
-                append_log('[update] release has no .zip asset')
-                return False
-            if update_in_progress:
-                append_log('[update] newer version is already being installed')
-                return True
-            if tk_root:
-                tk_root.after(0, lambda: show_update_indicator(
-                    latest_version, download_url, checksum_url))
-            else:
-                show_update_indicator(latest_version, download_url, checksum_url)
-            if getattr(sys, 'frozen', False):
-                active, blockers = _active_update_blockers()
-                if active:
-                    pending_update_deferred = True
-                    append_log(
-                        f'[update] update to v{latest_version} deferred: '
-                        f'{len(blockers)} active task(s): '
-                        + ', '.join(str(t.get("kind")) for t in blockers[:5]))
-                    set_update_ui(status=f'Update v{latest_version} ready - '
-                                  'waiting for tasks', color='#ffc107',
-                                  btn_text=f'Update to v{latest_version}',
-                                  btn_state=tk.NORMAL, show_btn=True)
-                else:
-                    append_log(f'[update] auto-installing v{latest_version}')
-                    start_update(download_url, latest_version, auto=True,
-                                 checksum_url=checksum_url)
-            else:
-                append_log('[update] source run: auto-install needs the compiled .exe')
-            return True
-        return False
+        if not download_url:
+            info['error'] = 'The release has no .zip asset.'
+            return info
+        info['available'] = True
+        info['download_url'] = download_url
+        info['checksum_url'] = _checksum_url_for(data.get('assets', []),
+                                                 download_url)
+        return info
     except Exception as e:
-        append_log(f'[update] check error: {e}')
+        info['error'] = str(e)
+        return info
+
+
+def check_for_updates(manual=False):
+    """Check GitHub once; a newer release is installed automatically."""
+    global ignored_version, update_in_progress, pending_update_deferred
+    info = fetch_update_info()
+    if info.get('error'):
+        append_log(f'[update] check error: {info["error"]}')
         return False
+    latest_version = info.get('latest') or ''
+    if not latest_version:
+        return False
+    append_log(f'[update] latest v{latest_version} / current v{CURRENT_VERSION}')
+    if not info.get('available'):
+        return False
+    if not (manual or latest_version != ignored_version):
+        return False
+
+    download_url = info['download_url']
+    checksum_url = info.get('checksum_url')
+    if update_in_progress:
+        append_log('[update] newer version is already being installed')
+        return True
+    if tk_root:
+        tk_root.after(0, lambda: show_update_indicator(
+            latest_version, download_url, checksum_url))
+    else:
+        show_update_indicator(latest_version, download_url, checksum_url)
+    if getattr(sys, 'frozen', False):
+        active, blockers = _active_update_blockers()
+        if active:
+            pending_update_deferred = True
+            append_log(
+                f'[update] update to v{latest_version} deferred: '
+                f'{len(blockers)} active task(s): '
+                + ', '.join(str(t.get("kind")) for t in blockers[:5]))
+            set_update_ui(status=f'Update v{latest_version} ready - '
+                          'waiting for tasks', color='#ffc107',
+                          btn_text=f'Update to v{latest_version}',
+                          btn_state=tk.NORMAL, show_btn=True)
+        else:
+            append_log(f'[update] auto-installing v{latest_version}')
+            start_update(download_url, latest_version, auto=True,
+                         checksum_url=checksum_url)
+    else:
+        append_log('[update] source run: auto-install needs the compiled .exe')
+    return True
+
+
+def web_update_status():
+    """Read-only status used to render the web Status/Stats page."""
+    return {
+        'current': CURRENT_VERSION,
+        'frozen': bool(getattr(sys, 'frozen', False)),
+        'available': False,
+        'latest': '',
+        'error': None,
+    }
+
+
+def web_check_updates():
+    """Called by the web UI: check without auto-installing anything."""
+    info = fetch_update_info()
+    if info.get('available'):
+        append_log(f'[update] web check found v{info["latest"]}')
+        if tk_root:
+            tk_root.after(
+                0, lambda: show_update_indicator(
+                    info['latest'], info['download_url'],
+                    info.get('checksum_url')))
+        else:
+            show_update_indicator(info['latest'], info['download_url'],
+                                  info.get('checksum_url'))
+    return info
+
+
+def web_install_update(version=None):
+    """Install the version shown in the web modal, never from a stale click."""
+    global pending_update_url, pending_checksum_url, pending_version
+    if not getattr(sys, 'frozen', False):
+        return {'success': False,
+                'error': 'Auto-update works only in the compiled .exe.'}
+    if update_in_progress:
+        return {'success': False, 'error': 'An update is already installing.'}
+    info = fetch_update_info()
+    if info.get('error'):
+        return {'success': False, 'error': info['error']}
+    if not info.get('available'):
+        return {'success': False, 'error': 'No newer version is available.'}
+    if version and str(version).lstrip('v') != str(info['latest']).lstrip('v'):
+        return {'success': False,
+                'error': 'That version is no longer the latest release.'}
+    active, blockers = _active_update_blockers()
+    if active:
+        names = ', '.join(str(t.get('kind')) for t in blockers[:5])
+        return {'success': False,
+                'error': f'Wait for {len(blockers)} active task(s): {names}'}
+    pending_update_url = info['download_url']
+    pending_checksum_url = info.get('checksum_url')
+    pending_version = info['latest']
+    start_update(pending_update_url, pending_version, auto=False,
+                 checksum_url=pending_checksum_url, force=True)
+    return {'success': True, 'version': pending_version}
+
+
+flask_app.config['VM_UPDATE_STATUS'] = web_update_status
+flask_app.config['VM_CHECK_UPDATES'] = web_check_updates
+flask_app.config['VM_INSTALL_UPDATE'] = web_install_update
 
 
 def force_check_update():
@@ -911,6 +1004,29 @@ class RoundedButton(tk.Canvas):
         for x,y in [(r,r),(w-r,r),(r,h-r),(w-r,h-r)]: self.create_oval(x-r,y-r,x+r,y+r,fill=color,outline=color)
         self.create_text(w/2,h/2,text=self.text,fill=self.fg,font=('Segoe UI',9,'bold' if self.primary else 'normal'))
 
+def _center_tk_dialog(dialog):
+    """Size a modal to its content and center it over the launcher window.
+
+    Fixed geometry was too small on scaled displays and clipped the action row.
+    """
+    dialog.update_idletasks()
+    width = max(dialog.winfo_reqwidth(), 320)
+    height = max(dialog.winfo_reqheight(), 180)
+    screen_w = max(dialog.winfo_screenwidth(), width + 40)
+    screen_h = max(dialog.winfo_screenheight(), height + 40)
+    width = min(width + 12, screen_w - 40)
+    height = min(height + 12, screen_h - 40)
+    if tk_root is not None and tk_root.winfo_viewable():
+        x = tk_root.winfo_rootx() + (tk_root.winfo_width() - width) // 2
+        y = tk_root.winfo_rooty() + (tk_root.winfo_height() - height) // 2
+    else:
+        x = (screen_w - width) // 2
+        y = (screen_h - height) // 2
+    x = max(0, min(x, screen_w - width))
+    y = max(0, min(y, screen_h - height))
+    dialog.geometry(f'{width}x{height}+{x}+{y}')
+
+
 def show_password_dialog():
     """Styled Tk modal matching the web Security tab."""
     dialog = tk.Toplevel(tk_root)
@@ -919,11 +1035,6 @@ def show_password_dialog():
     dialog.resizable(False, False)
     dialog.transient(tk_root)
     dialog.grab_set()
-    dialog.geometry('400x262')
-    dialog.update_idletasks()
-    x = tk_root.winfo_rootx() + (tk_root.winfo_width() - 400) // 2
-    y = tk_root.winfo_rooty() + (tk_root.winfo_height() - 262) // 2
-    dialog.geometry(f'+{x}+{y}')
 
     tk.Label(dialog, text='Set access password', bg='#191a1f', fg='#f4f4f5',
              font=('Segoe UI', 13, 'bold')).pack(anchor='w', padx=20, pady=(18, 4))
@@ -947,7 +1058,6 @@ def show_password_dialog():
     result = tk.Label(dialog, text='', bg='#191a1f', fg='#ff9aa4',
                       font=('Segoe UI', 9), wraplength=355, justify='left')
     result.pack(anchor='w', padx=20, pady=(8, 0))
-    pwd.focus_set()
 
     def save():
         value = pwd.get()
@@ -981,6 +1091,8 @@ def show_password_dialog():
     RoundedButton(bar, 'Save password', save, True, 130, 34).pack(side='right')
     dialog.bind('<Escape>', lambda e: dialog.destroy())
     dialog.bind('<Return>', lambda e: save())
+    _center_tk_dialog(dialog)
+    pwd.focus_set()
 
 
 def password_from_tray(icon=None, item=None):
@@ -990,8 +1102,6 @@ def password_from_tray(icon=None, item=None):
 
 def show_restart_dialog():
     dialog=tk.Toplevel(tk_root); dialog.title('Restart VideoManager'); dialog.configure(bg='#191a1f'); dialog.resizable(False,False); dialog.transient(tk_root); dialog.grab_set()
-    dialog.geometry('360x178'); dialog.update_idletasks()
-    x=tk_root.winfo_rootx()+(tk_root.winfo_width()-360)//2; y=tk_root.winfo_rooty()+(tk_root.winfo_height()-178)//2; dialog.geometry(f'+{x}+{y}')
     tk.Label(dialog,text='Restart VideoManager?',bg='#191a1f',fg='#f4f4f5',font=('Segoe UI',13,'bold')).pack(anchor='w',padx=20,pady=(18,6))
     tk.Label(dialog,text='The server will briefly go offline and then start again.',bg='#191a1f',fg='#aeb0b8',font=('Segoe UI',9),wraplength=315,justify='left').pack(anchor='w',padx=20)
     bar=tk.Frame(dialog,bg='#191a1f'); bar.pack(fill='x',side='bottom',padx=18,pady=16)
@@ -1005,6 +1115,7 @@ def show_restart_dialog():
         threading.Thread(target=request_restart,daemon=True).start()
     RoundedButton(bar,'Restart Server',confirm,True,126,34).pack(side='right')
     dialog.bind('<Escape>',lambda e:dialog.destroy()); dialog.bind('<Return>',lambda e:confirm())
+    _center_tk_dialog(dialog)
 
 def restart_from_tray(icon=None,item=None):
     if tk_root: tk_root.after(0,show_restart_dialog)

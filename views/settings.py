@@ -18,7 +18,7 @@ from urllib.parse import unquote, urlparse
 from urllib.request import url2pathname
 
 from flask import (
-    render_template, request, redirect, url_for, jsonify, Response,
+    current_app, render_template, request, redirect, url_for, jsonify, Response,
 )
 
 from models import (
@@ -161,6 +161,44 @@ def _spawn_restart():
 
 
 def register(app):
+
+    @app.route('/api/updates/status')
+    def api_update_status():
+        callback = current_app.config.get('VM_UPDATE_STATUS')
+        if callable(callback):
+            try:
+                return jsonify(callback())
+            except Exception as e:
+                return jsonify({'error': str(e)}), 500
+        return jsonify({'current': 'unknown', 'frozen': False, 'available': False})
+
+    @app.route('/api/updates/check')
+    def api_check_updates():
+        callback = current_app.config.get('VM_CHECK_UPDATES')
+        if not callable(callback):
+            return jsonify({
+                'available': False,
+                'error': 'Update checks are available only from the desktop launcher.',
+            })
+        try:
+            return jsonify(callback())
+        except Exception as e:
+            return jsonify({'available': False, 'error': str(e)}), 500
+
+    @app.route('/api/updates/install', methods=['POST'])
+    def api_install_update():
+        callback = current_app.config.get('VM_INSTALL_UPDATE')
+        if not callable(callback):
+            return jsonify({
+                'success': False,
+                'error': 'Updates can be installed only from the desktop launcher.',
+            })
+        data = request.get_json(silent=True) or request.form
+        try:
+            result = callback(data.get('version'))
+            return jsonify(result)
+        except Exception as e:
+            return jsonify({'success': False, 'error': str(e)}), 500
 
     @app.route('/settings', methods=['GET', 'POST'])
     def settings():
@@ -342,9 +380,16 @@ def register(app):
                 'total_videos': 0, 'total_categories': 0,
                 'total_size': 0, 'avg_rating': 0.0
             }
+            status_callback = current_app.config.get('VM_UPDATE_STATUS')
+            try:
+                update_status = (status_callback() if callable(status_callback)
+                                 else {'current': 'unknown', 'frozen': False})
+            except Exception:
+                update_status = {'current': 'unknown', 'frozen': False}
             return render_template('stats.html',
                                    stats_female=stats_female,
-                                   stats_transgender=stats_transgender)
+                                   stats_transgender=stats_transgender,
+                                   update_status=update_status)
 
         return render_template('settings.html',
                                tab=tab,

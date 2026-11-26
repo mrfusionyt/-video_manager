@@ -1,9 +1,222 @@
 {% extends "base.html" %}
 
-{% block title %}Statistics{% endblock %}
-{% block page_title %}Statistics{% endblock %}
+{% block title %}Status{% endblock %}
+{% block page_title %}Status / Statistics{% endblock %}
 
 {% block content %}
+{% set update_info = update_status or {} %}
+<style>
+    .update-status-card { padding: 18px 20px; margin-bottom: 22px; border: 1px solid var(--border);
+        border-radius: 12px; background: var(--bg-surface); }
+    .update-status-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+    .update-status-title { margin: 0 0 4px; font-size: 1.05rem; color: var(--text-primary); }
+    .update-status-meta { color: var(--text-muted); font-size: .82rem; }
+    .update-status-pill { display: inline-flex; align-items: center; gap: 8px; padding: 7px 12px;
+        border-radius: 999px; border: 1px solid var(--border); background: var(--bg-elevated, #141417);
+        color: var(--text-muted); font-size: .82rem; }
+    .update-status-pill i { width: 8px; height: 8px; border-radius: 50%; background: #6b7280; }
+    .update-status-pill.available { color: #e6e7ea; border-color: rgba(220,53,69,.45); background: rgba(220,53,69,.12); }
+    .update-status-pill.available i { background: var(--red); box-shadow: 0 0 0 3px rgba(220,53,69,.16); }
+    .update-status-pill.current i { background: var(--green, #22c55e); }
+    .update-status-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 16px; }
+    .update-status-btn { display: inline-flex; align-items: center; justify-content: center; height: 38px;
+        padding: 0 15px; border: 1px solid rgba(220,53,69,.32); border-radius: 8px;
+        background: rgba(220,53,69,.10); color: #e6e7ea; font-size: .84rem; cursor: pointer; transition: .15s; }
+    .update-status-btn:hover:not(:disabled) { background: rgba(220,53,69,.26); border-color: var(--red); color: #fff; }
+    .update-status-btn:disabled { opacity: .5; cursor: wait; }
+    .update-status-btn.primary { background: var(--red); border-color: var(--red); color: #fff; font-weight: 600; }
+    .update-status-btn.primary:hover:not(:disabled) { background: var(--red-hover, #b91c1c); }
+    .update-status-message { color: var(--text-muted); font-size: .82rem; }
+    .update-status-message.error { color: #ff8f9a; }
+
+    .update-modal { position: fixed; inset: 0; z-index: 1090; display: none; align-items: center; justify-content: center;
+        padding: 16px; background: rgba(0,0,0,.72); backdrop-filter: blur(5px); }
+    .update-modal.show { display: flex; }
+    .update-modal-dialog { width: 440px; max-width: 100%; border-radius: 14px; overflow: hidden;
+        border: 1px solid var(--border-strong, var(--border)); background: var(--bg-surface);
+        box-shadow: var(--shadow-modal); }
+    .update-modal-header { display: flex; align-items: center; justify-content: space-between;
+        padding: 16px 18px 10px; }
+    .update-modal-title { margin: 0; font-size: 1.05rem; color: var(--text-primary); }
+    .update-modal-close { border: 0; background: none; color: var(--text-muted); font-size: 1.2rem; cursor: pointer; }
+    .update-modal-close:hover { color: #fff; }
+    .update-modal-body { padding: 4px 18px 10px; color: var(--text-muted); font-size: .86rem; line-height: 1.55; }
+    .update-modal-version { color: #fff; font-weight: 650; }
+    .update-modal-versions { display: flex; gap: 18px; margin-top: 12px; padding: 10px 12px;
+        border-radius: 9px; background: var(--bg-elevated, #141417); border: 1px solid var(--border); }
+    .update-modal-versions span { display: flex; flex-direction: column; gap: 2px; }
+    .update-modal-versions b { color: var(--text-primary); font-size: .9rem; }
+    .update-modal-versions small { color: var(--text-muted); font-size: .72rem; }
+    .update-modal-error { margin-top: 10px; color: #ff8f9a; font-size: .82rem; }
+    .update-modal-footer { display: flex; justify-content: flex-end; gap: 8px; padding: 10px 18px 18px; }
+</style>
+
+<div class="update-status-card" id="updateStatusCard">
+    <div class="update-status-head">
+        <div>
+            <h4 class="update-status-title">Application status</h4>
+            <div class="update-status-meta">
+                Installed: <code>v{{ update_info.get('current', 'unknown') }}</code>
+                {% if not update_info.get('frozen', False) %}&nbsp;·&nbsp;source run (auto-update needs the compiled .exe){% endif %}
+            </div>
+        </div>
+        <span class="update-status-pill" id="updatePill"><i></i><span id="updatePillText">Not checked</span></span>
+    </div>
+    <div class="update-status-actions">
+        <button type="button" class="update-status-btn" id="checkUpdatesBtn">Check for updates</button>
+        <span class="update-status-message" id="updateMessage"></span>
+    </div>
+</div>
+
+<div class="update-modal" id="updateModal" tabindex="-1" aria-hidden="true">
+    <div class="update-modal-dialog">
+        <div class="update-modal-header">
+            <h3 class="update-modal-title">Update available</h3>
+            <button type="button" class="update-modal-close" id="updateModalClose" aria-label="Close">✕</button>
+        </div>
+        <div class="update-modal-body">
+            <div>A new version <span class="update-modal-version" id="updateModalVersion">v?</span> is available.</div>
+            <div class="update-modal-versions">
+                <span><small>Installed</small><b id="updateModalCurrent">v?</b></span>
+                <span><small>Latest</small><b id="updateModalLatest">v?</b></span>
+            </div>
+            <div class="update-modal-error" id="updateModalError" style="display:none;"></div>
+        </div>
+        <div class="update-modal-footer">
+            <button type="button" class="update-status-btn" id="updateLaterBtn">Later</button>
+            <button type="button" class="update-status-btn primary" id="updateNowBtn">Update now</button>
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const checkBtn = document.getElementById('checkUpdatesBtn');
+    const pill = document.getElementById('updatePill');
+    const pillText = document.getElementById('updatePillText');
+    const message = document.getElementById('updateMessage');
+    const modal = document.getElementById('updateModal');
+    const modalVersion = document.getElementById('updateModalVersion');
+    const modalCurrent = document.getElementById('updateModalCurrent');
+    const modalLatest = document.getElementById('updateModalLatest');
+    const modalError = document.getElementById('updateModalError');
+    const laterBtn = document.getElementById('updateLaterBtn');
+    const nowBtn = document.getElementById('updateNowBtn');
+    let latestInfo = null;
+
+    function setPill(text, kind) {
+        if (pillText) pillText.textContent = text;
+        if (pill) {
+            pill.classList.remove('available', 'current');
+            if (kind) pill.classList.add(kind);
+        }
+    }
+
+    function setMessage(text, isError) {
+        if (!message) return;
+        message.textContent = text || '';
+        message.classList.toggle('error', !!isError);
+    }
+
+    function openModal(info) {
+        latestInfo = info;
+        if (modalVersion) modalVersion.textContent = 'v' + (info.latest || '?');
+        if (modalCurrent) modalCurrent.textContent = 'v' + (info.current || '?');
+        if (modalLatest) modalLatest.textContent = 'v' + (info.latest || '?');
+        if (modalError) {
+            modalError.style.display = 'none';
+            modalError.textContent = '';
+        }
+        if (nowBtn) {
+            nowBtn.disabled = false;
+            nowBtn.textContent = 'Update now';
+        }
+        if (modal) modal.classList.add('show');
+    }
+
+    function closeModal(dismiss) {
+        if (!modal) return;
+        modal.classList.remove('show');
+        if (dismiss && latestInfo && latestInfo.latest) {
+            try { sessionStorage.setItem('vm_update_dismissed', latestInfo.latest); } catch (e) {}
+        }
+    }
+
+    async function checkUpdates(auto) {
+        if (!checkBtn) return;
+        checkBtn.disabled = true;
+        setPill('Checking…', '');
+        setMessage('Contacting GitHub…', false);
+        try {
+            const response = await fetch('/api/updates/check', { credentials: 'same-origin' });
+            const data = await response.json().catch(function () { return {}; });
+            if (!response.ok) throw new Error(data.error || ('HTTP ' + response.status));
+            if (data.error) throw new Error(data.error);
+            if (data.available) {
+                setPill('Update available', 'available');
+                setMessage('v' + data.latest + ' is ready to install.', false);
+                let dismissed = null;
+                try { dismissed = sessionStorage.getItem('vm_update_dismissed'); } catch (e) {}
+                if (!auto || dismissed !== data.latest) openModal(data);
+            } else {
+                setPill('Up to date', 'current');
+                setMessage('v' + (data.latest || data.current || '?') + ' is the latest release.', false);
+            }
+        } catch (e) {
+            setPill('Check failed', '');
+            setMessage(e.message || String(e), true);
+        } finally {
+            checkBtn.disabled = false;
+        }
+    }
+
+    if (checkBtn) checkBtn.addEventListener('click', function () { checkUpdates(false); });
+    if (modal) {
+        modal.addEventListener('click', function (e) { if (e.target === modal) closeModal(true); });
+    }
+    const closeBtn = document.getElementById('updateModalClose');
+    if (closeBtn) closeBtn.addEventListener('click', function () { closeModal(true); });
+    if (laterBtn) laterBtn.addEventListener('click', function () { closeModal(true); });
+    document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape' && modal && modal.classList.contains('show')) closeModal(true);
+    });
+
+    if (nowBtn) nowBtn.addEventListener('click', async function () {
+        nowBtn.disabled = true;
+        nowBtn.textContent = 'Starting…';
+        try {
+            const response = await fetch('/api/updates/install', {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ version: latestInfo ? latestInfo.latest : null })
+            });
+            const data = await response.json().catch(function () { return {}; });
+            if (!response.ok || !data.success) {
+                throw new Error(data.error || ('HTTP ' + response.status));
+            }
+            if (modalError) {
+                modalError.style.display = 'block';
+                modalError.style.color = 'var(--green, #22c55e)';
+                modalError.textContent = 'Update v' + data.version + ' started. The application will close and restart automatically.';
+            }
+            nowBtn.textContent = 'Update started';
+        } catch (e) {
+            if (modalError) {
+                modalError.style.display = 'block';
+                modalError.style.color = '#ff8f9a';
+                modalError.textContent = e.message || String(e);
+            }
+            nowBtn.disabled = false;
+            nowBtn.textContent = 'Update now';
+        }
+    });
+
+    // Automatic quiet check when the Status/Statistics page is opened.
+    setTimeout(function () { checkUpdates(true); }, 600);
+});
+</script>
+
 <div class="row">
     <div class="col-12">
         <h4 class="text-light mb-3">Female Profile</h4>
