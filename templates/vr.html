@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>VR Плеер - {{ video.filename }}</title>
+    <title>VR Player - {{ video.filename }}</title>
     <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
     <style>
         * { margin:0; padding:0; box-sizing:border-box; }
@@ -93,8 +93,8 @@
         <button id="vrBtn" class="vr-btn">VR</button>
     </div>
 
-    <button id="recenter-btn">⟲ Центрировать</button>
-    <button id="close-btn">✕ Закрыть</button>
+    <button id="recenter-btn">⟲ Recenter</button>
+    <button id="close-btn">✕ Close</button>
 
     <script>
         (function() {
@@ -356,7 +356,7 @@
                 recenterBtn.style.display = 'none';
             });
 
-            console.log('VR плеер загружен');
+            console.log('VR player loaded');
         })();
     </script>
 </body>

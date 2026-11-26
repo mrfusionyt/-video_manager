@@ -62,7 +62,7 @@ def cleanup_stale_tasks():
     c.execute("""
         UPDATE tasks
         SET status = 'cancelled',
-            message = '⚠️ Прервано из-за перезапуска сервера',
+            message = '⚠️ Interrupted due to server restart',
             completed_at = ?
         WHERE status IN ('starting', 'downloading')
     """, (datetime.now().isoformat(),))
@@ -70,7 +70,7 @@ def cleanup_stale_tasks():
     conn.commit()
     conn.close()
     if affected:
-        print(f"[db] Помечено зависших задач: {affected}")
+        print(f"[db] Marked stale tasks: {affected}")
 
 
 def create_task(task_id, profile_url, profile_name, save_dir, username, media_type):

@@ -299,8 +299,8 @@
         closeRatingPanel();
 
         var nextIdx = currentFeedIndex + direction;
-        if (nextIdx < 0) { showFeedToast('Это первое видео'); return; }
-        if (nextIdx >= FEED_IDS.length) { showFeedToast('Это последнее видео'); return; }
+        if (nextIdx < 0) { showFeedToast('This is the first video'); return; }
+        if (nextIdx >= FEED_IDS.length) { showFeedToast('This is the last video'); return; }
         if (!slideMap.has(nextIdx)) {
             rebuildWindow(true);
             if (!slideMap.has(nextIdx)) return;
@@ -1907,7 +1907,7 @@
             })
             .catch(function (err) {
                 isLoading = false;
-                console.error('Ошибка загрузки плейлистов:', err);
+                console.error('Failed to load playlists:', err);
                 if (page === 1) showError('Error: ' + err.message);
             });
     }

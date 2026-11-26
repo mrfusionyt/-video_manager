@@ -24,8 +24,8 @@
             </div>
             {% else %}
             <p class="text-muted">
-                Нет {{ 'фото' if is_photo else 'видео' }}-категорий.
-                Добавьте их в
+                No {{ 'photo' if is_photo else 'video' }} categories.
+                Add them in
                 <a href="{{ url_for('settings', tab='categories', media_type=('image' if is_photo else 'video'), profile=current_profile) }}">Settings → Categories</a>.
             </p>
             {% endfor %}

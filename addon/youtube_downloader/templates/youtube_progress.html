@@ -53,20 +53,20 @@
   <div class="modal-dialog modal-dialog-centered">
     <div class="modal-content">
       <div class="modal-header">
-        <h5 class="modal-title">Отменить загрузку?</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button>
+        <h5 class="modal-title">Cancel download?</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
       </div>
       <div class="modal-body">
         <p class="mb-0">
-          Текущая загрузка будет прервана. Уже скачанные файлы останутся на диске.
+          The current download will be interrupted. Already downloaded files will remain on disk.
         </p>
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
-          Нет
+          No
         </button>
         <button type="button" class="btn btn-danger" id="cancelConfirmBtn">
-          Да, отменить
+          Yes, cancel
         </button>
       </div>
     </div>
@@ -102,7 +102,7 @@
   // --- Подтвердить отмену ---
   cancelConfirmBtn.addEventListener('click', function () {
     cancelConfirmBtn.disabled = true;
-    cancelConfirmBtn.textContent = 'Отмена...';
+    cancelConfirmBtn.textContent = 'Cancelling...';
 
     fetch('/youtube/cancel/' + taskId, { method: 'POST' })
       .then(function (r) { return r.json().catch(function () { return {}; }); })
@@ -113,16 +113,16 @@
           progressBar.classList.remove('progress-bar-animated');
           progressBar.classList.add('bg-secondary');
         } else {
-          taskStatus.textContent = '⚠️ ' + (data.error || 'Не удалось отменить');
+          taskStatus.textContent = '⚠️ ' + (data.error || 'Failed to cancel');
         }
       })
       .catch(function (err) {
         console.error('cancel error:', err);
-        taskStatus.textContent = '⚠️ Ошибка отмены';
+        taskStatus.textContent = '⚠️ Cancellation error';
       })
       .finally(function () {
         cancelConfirmBtn.disabled = false;
-        cancelConfirmBtn.textContent = 'Да, отменить';
+        cancelConfirmBtn.textContent = 'Yes, cancel';
       });
   });
 

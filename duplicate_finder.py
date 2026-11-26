@@ -52,9 +52,14 @@ FPCALC_CANDIDATES = [
 KEYFRAME_POSITIONS = [round(0.05 + i * 0.10, 4) for i in range(10)]
 
 FAST_MAX_HAMMING = 2
+DEEP_MAX_HAMMING = 6
+DEEP_HASH_BLOCK_HEX = 4
+DEEP_FULL_COVERAGE = 0.65
+DEEP_PARTIAL_MIN_SUBSEQ_FRAMES = 2
 FULL_COVERAGE = 0.80
 PARTIAL_MIN_SUBSEQ_FRAMES = 3
 MIN_MATCHED_FRAMES = 2
+MAX_CANDIDATE_BUCKET = 250
 
 # ---------- Photo ----------
 IMAGE_MAX_HAMMING = 5
@@ -68,8 +73,9 @@ IMAGE_MIH_MAX_PAIRS = 50_000_000
 
 # ---------- Audio ----------
 AUDIO_SKIP_INTRO_SEC   = 30.0
+AUDIO_SKIP_VARIANTS    = (30.0, 0.0)
 AUDIO_SUBPRINT_PER_SEC = 1.0 / 0.1234
-AUDIO_FPCALC_MAX_LENGTH = 900
+AUDIO_FPCALC_MAX_LENGTH = 1800
 
 AUDIO_FULL_MIN_RUN_SEC    = 30.0
 AUDIO_PARTIAL_MIN_RUN_SEC = 60.0
@@ -119,8 +125,10 @@ print(f"[dup] photo: MIH lsh_hamming={IMAGE_LSH_HAMMING}, "
       f"triu_threshold={IMAGE_MIH_TRIU_THRESHOLD}, "
       f"max_bucket={IMAGE_MIH_MAX_BUCKET_SIZE}, "
       f"max_pairs={IMAGE_MIH_MAX_PAIRS}")
-print(f"[dup] audio: full>={AUDIO_FULL_MIN_RUN_SEC:.0f}s, "
-      f"partial>={AUDIO_PARTIAL_MIN_RUN_SEC:.0f}s")
+print(f"[dup] audio: min_run>={AUDIO_FULL_MIN_RUN_SEC:.0f}s, "
+      f"intro_skips={AUDIO_SKIP_VARIANTS}, "
+      f"tolerant_bits={AUDIO_BITS_TOLERANT}, "
+      f"max_length={AUDIO_FPCALC_MAX_LENGTH}s")
 print(f"[dup] workers: hash={HASH_WORKERS}, compare={COMPARE_WORKERS}")
 
 
@@ -626,13 +634,13 @@ def _fft_has_correlation(a, b):
     return ratio >= AUDIO_FFT_PEAK_STD_RATIO, ratio
 
 
-def _find_audio_match(a_raw, b_raw):
+def _find_audio_match_skip(a_raw, b_raw, skip_intro_sec=AUDIO_SKIP_INTRO_SEC):
     if not a_raw or not b_raw:
         return None
     a = np.asarray(a_raw, dtype=np.uint32)
     b = np.asarray(b_raw, dtype=np.uint32)
 
-    skip_steps = int(AUDIO_SKIP_INTRO_SEC * AUDIO_SUBPRINT_PER_SEC)
+    skip_steps = int(skip_intro_sec * AUDIO_SUBPRINT_PER_SEC)
     if skip_steps > 0:
         a = a[skip_steps:]
         b = b[skip_steps:]
@@ -656,8 +664,10 @@ def _find_audio_match(a_raw, b_raw):
     if lb < 40:
         return None
 
-    min_run_partial_steps = max(20, int(AUDIO_PARTIAL_MIN_RUN_SEC * AUDIO_SUBPRINT_PER_SEC))
-    min_run_partial_steps = min(min_run_partial_steps, lb)
+    # Accept runs from the full-search minimum (30 s) and label longer ones
+    # as partial. The old code required 60 s before any match was accepted.
+    min_run_steps = max(20, int(AUDIO_FULL_MIN_RUN_SEC * AUDIO_SUBPRINT_PER_SEC))
+    min_run_steps = min(min_run_steps, lb)
     prefilter_len = min(AUDIO_PREFILTER_SAMPLES, lb)
     short_head = short_fp[:prefilter_len]
 
@@ -674,7 +684,7 @@ def _find_audio_match(a_raw, b_raw):
         bits = _popcount_u32(xor)
         flags = (bits <= AUDIO_BITS_TOLERANT).astype(np.int32)
         run_len, run_start = _find_longest_run_np(flags)
-        if run_len >= min_run_partial_steps:
+        if run_len >= min_run_steps:
             if a_is_long:
                 run_slice = long_fp[shift + run_start:shift + run_start + run_len]
             else:
@@ -699,11 +709,11 @@ def _find_audio_match(a_raw, b_raw):
                 'run_steps': int(run_len),
                 'run_sec': run_sec,
                 'kind': kind,
-                'start_a_sec': float(AUDIO_SKIP_INTRO_SEC +
+                'start_a_sec': float(skip_intro_sec +
                                      start_a_step / AUDIO_SUBPRINT_PER_SEC),
-                'start_b_sec': float(AUDIO_SKIP_INTRO_SEC +
+                'start_b_sec': float(skip_intro_sec +
                                      start_b_step / AUDIO_SUBPRINT_PER_SEC),
-                'skipped_intro_sec': float(AUDIO_SKIP_INTRO_SEC),
+                'skipped_intro_sec': float(skip_intro_sec),
                 'fft_ratio': round(float(ratio), 2),
             }
 
@@ -715,6 +725,26 @@ def _find_audio_match(a_raw, b_raw):
                 break
 
     return best_match
+
+
+def _find_audio_match(a_raw, b_raw):
+    """Try both intro offsets; return the strongest match found."""
+    best = None
+    for skip_sec in AUDIO_SKIP_VARIANTS:
+        try:
+            candidate = _find_audio_match_skip(a_raw, b_raw, skip_sec)
+        except Exception as e:
+            print(f"[dup] audio match skip={skip_sec:g} failed: {e}", flush=True)
+            continue
+        if not candidate:
+            continue
+        rank = (0 if candidate.get('kind') == 'full' else 1,
+                -float(candidate.get('run_sec') or 0))
+        best_rank = (0 if best and best.get('kind') == 'full' else 1,
+                     -float(best.get('run_sec') or 0)) if best else (2, 0)
+        if rank < best_rank:
+            best = candidate
+    return best
 
 
 # ===================================================================
@@ -748,6 +778,17 @@ def _process_media(item, include_audio=True):
         frames = _load_video_frames(file_id)
         audio_fp = _load_audio_fp(file_id) if (media_type == 'video' and include_audio) else None
         if frames:
+            # A fast scan caches frames but not audio. Without this backfill a
+            # later deep scan sees the file as fresh and never calls fpcalc,
+            # so the audio phase has zero candidates.
+            if (include_audio and media_type == 'video' and not audio_fp and
+                    FPCALC_PATH):
+                audio_fp = _extract_audio_fingerprint(path)
+                if audio_fp:
+                    _save_audio_fp(file_id, audio_fp)
+                    print(f"[dup]   [AUDIO BACKFILL] {filename}", flush=True)
+                else:
+                    print(f"[dup]   [AUDIO BACKFILL FAILED] {filename}", flush=True)
             print(f"[dup]   [CACHED] {filename}", flush=True)
             return {
                 'file_id': file_id,
@@ -1163,13 +1204,18 @@ def _video_match_matrix(ha, hb, max_hamming=FAST_MAX_HAMMING):
     return matched
 
 
-def _classify_video_pair(ha, hb):
+def _classify_video_pair(ha, hb, mode='fast'):
     n_a = len(ha)
     n_b = len(hb)
     if n_a == 0 or n_b == 0:
         return None
 
-    matched = _video_match_matrix(ha, hb, FAST_MAX_HAMMING)
+    deep = mode == 'deep'
+    max_hamming = DEEP_MAX_HAMMING if deep else FAST_MAX_HAMMING
+    full_coverage = DEEP_FULL_COVERAGE if deep else FULL_COVERAGE
+    partial_min = (DEEP_PARTIAL_MIN_SUBSEQ_FRAMES if deep
+                   else PARTIAL_MIN_SUBSEQ_FRAMES)
+    matched = _video_match_matrix(ha, hb, max_hamming)
 
     greedy_pairs = []
     for i in range(n_a):
@@ -1210,8 +1256,8 @@ def _classify_video_pair(ha, hb):
     coverage_a = matched_count / n_a
     coverage_b = len(set(p[1] for p in greedy_pairs)) / n_b
 
-    if (coverage_a >= FULL_COVERAGE and
-            coverage_b >= FULL_COVERAGE and
+    if (coverage_a >= full_coverage and
+            coverage_b >= full_coverage and
             subseq_len >= MIN_MATCHED_FRAMES):
         return {
             'kind': 'full',
@@ -1227,7 +1273,7 @@ def _classify_video_pair(ha, hb):
             ],
         }
 
-    if subseq_len >= PARTIAL_MIN_SUBSEQ_FRAMES:
+    if subseq_len >= partial_min:
         return {
             'kind': 'partial',
             'coverage_a': round(coverage_a, 3),
@@ -1255,23 +1301,47 @@ def _precompute_video_hashes(frames_by_path, paths):
     return out
 
 
-def _video_candidates(paths, hash_objs, image_path_set):
+def _video_candidates(paths, hash_objs, image_path_set, mode='fast'):
+    """Exact-hash candidates, plus block keys in deep mode.
+
+    Exact equality alone misses re-encoded clips where every sampled frame
+    differs by one or two bits, because the tolerance is applied only after a
+    candidate pair has been found. Block keys let those pairs reach the
+    verifier while keeping the index small.
+    """
     n = len(paths)
     pairs = set()
     index = defaultdict(list)
+    block_index = defaultdict(list) if mode == 'deep' else None
+
     for i in range(n):
         if paths[i] in image_path_set:
             continue
         for _, hashes in hash_objs[i]:
             for h in hashes:
                 index[h].append(i)
-    for _, files in index.items():
-        if len(files) < 2:
+                if block_index is None:
+                    continue
+                text = str(h)
+                for block_no in range(0, len(text), DEEP_HASH_BLOCK_HEX):
+                    block = text[block_no:block_no + DEEP_HASH_BLOCK_HEX]
+                    if len(block) == DEEP_HASH_BLOCK_HEX:
+                        block_index[(block_no, block)].append(i)
+
+    for buckets in (index, block_index):
+        if not buckets:
             continue
-        uniq = sorted(set(files))
-        for a in range(len(uniq)):
-            for b in range(a + 1, len(uniq)):
-                pairs.add((uniq[a], uniq[b]))
+        for _, files in buckets.items():
+            if len(files) < 2:
+                continue
+            uniq = sorted(set(files))
+            if len(uniq) > MAX_CANDIDATE_BUCKET:
+                # A bucket this large is almost always a degenerate hash
+                # (black frames, static intro) and would explode pairwise work.
+                continue
+            for a in range(len(uniq)):
+                for b in range(a + 1, len(uniq)):
+                    pairs.add((uniq[a], uniq[b]))
     return pairs
 
 
@@ -1280,7 +1350,6 @@ def _video_candidates(paths, hash_objs, image_path_set):
 # ===================================================================
 def _audio_lsh_candidates(paths, audio_by_path, image_path_set):
     n = len(paths)
-    skip_steps = int(AUDIO_SKIP_INTRO_SEC * AUDIO_SUBPRINT_PER_SEC)
     mask = (1 << AUDIO_LSH_BAND_BITS) - 1
     bucket = defaultdict(list)
 
@@ -1290,23 +1359,24 @@ def _audio_lsh_candidates(paths, audio_by_path, image_path_set):
         fp = audio_by_path.get(paths[i])
         if not fp:
             continue
-        arr = np.asarray(fp, dtype=np.uint32)
-        if skip_steps > 0:
-            arr = arr[skip_steps:]
-        if len(arr) < 40:
-            continue
-        if _is_silence_like(arr):
-            continue
-        for band in range(AUDIO_LSH_BANDS):
-            shift = band * AUDIO_LSH_BAND_BITS
-            band_vals = (arr >> np.uint32(shift)) & np.uint32(mask)
-            seen = {}
-            for pos, bv in enumerate(band_vals):
-                bv_i = int(bv)
-                if bv_i not in seen:
-                    seen[bv_i] = pos
-            for bv_i, pos in seen.items():
-                bucket[(band, bv_i)].append((i, pos))
+        arr_all = np.asarray(fp, dtype=np.uint32)
+        for skip_sec in AUDIO_SKIP_VARIANTS:
+            skip_steps = int(skip_sec * AUDIO_SUBPRINT_PER_SEC)
+            arr = arr_all[skip_steps:] if skip_steps > 0 else arr_all
+            if len(arr) < 40:
+                continue
+            if _is_silence_like(arr):
+                continue
+            for band in range(AUDIO_LSH_BANDS):
+                shift = band * AUDIO_LSH_BAND_BITS
+                band_vals = (arr >> np.uint32(shift)) & np.uint32(mask)
+                seen = {}
+                for pos, bv in enumerate(band_vals):
+                    bv_i = int(bv)
+                    if bv_i not in seen:
+                        seen[bv_i] = pos
+                for bv_i, pos in seen.items():
+                    bucket[(skip_sec, band, bv_i)].append((i, pos))
 
     pair_hits = defaultdict(int)
     for _, items in bucket.items():
@@ -1371,7 +1441,7 @@ def _group_all(task_id, frames_by_path, audio_by_path,
     hash_objs = _precompute_video_hashes(frames_by_path, paths)
 
     _set_progress(task_id, 42, 0, 0, 'Building video candidate index...')
-    video_pairs = _video_candidates(paths, hash_objs, image_path_set)
+    video_pairs = _video_candidates(paths, hash_objs, image_path_set, mode=mode)
     print(f"[dup] video candidates (raw): {len(video_pairs)}")
 
     video_pairs = {p for p in video_pairs if not is_ignored(p[0], p[1])}
@@ -1387,7 +1457,7 @@ def _group_all(task_id, frames_by_path, audio_by_path,
         with ThreadPoolExecutor(max_workers=COMPARE_WORKERS) as ex:
             futures = [
                 ex.submit(_classify_video_pair,
-                          hash_objs[i], hash_objs[j])
+                          hash_objs[i], hash_objs[j], mode)
                 for (i, j) in pairs_list
             ]
             for fut, (i, j) in zip(futures, pairs_list):
@@ -1954,7 +2024,8 @@ def get_duplicate_groups():
 
 
 def get_progress(task_id):
-    return scan_progress.get(task_id, None)
+    task = scan_progress.get(task_id)
+    return dict(task) if task is not None else None
 
 
 # ===================================================================

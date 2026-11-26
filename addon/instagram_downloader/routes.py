@@ -58,7 +58,7 @@ def start_download():
 
     if not profile_url:
         return render_template('instagram_index.html',
-                               error='Profile URL обязателен.',
+                               error='Profile URL is required.',
                                recent_tasks=db.get_all_tasks(limit=10))
 
     # --- Получаем cookies из Firefox ---
@@ -66,19 +66,19 @@ def start_download():
         cookies = get_instagram_cookies_dict()
     except Exception as e:
         return render_template('instagram_index.html',
-                               error=f'Не удалось получить cookies из Firefox: {e}',
+                               error=f'Failed to get cookies from Firefox: {e}',
                                recent_tasks=db.get_all_tasks(limit=10))
 
     if not cookies or 'sessionid' not in cookies:
         return render_template('instagram_index.html',
-                               error='В Firefox нет cookies Instagram. '
-                                     'Войдите в Instagram в Firefox и попробуйте снова.',
+                               error='No Instagram cookies in Firefox. '
+                                     'Log in to Instagram in Firefox and try again.',
                                recent_tasks=db.get_all_tasks(limit=10))
 
-    print(f"[routes] cookies из Firefox: {sorted(cookies.keys())}")
+    print(f"[routes] cookies from Firefox: {sorted(cookies.keys())}")
 
     # --- Закрываем Firefox, чтобы Instagram не видел один sessionid из двух клиентов ---
-    print("[routes] Закрываем Firefox...")
+    print("[routes] Closing Firefox...")
     close_firefox()
 
     # --- Определяем папку ---
@@ -114,17 +114,17 @@ def cancel_task(task_id):
         return jsonify({
             'success': False,
             'already_done': True,
-            'error': 'Задача уже завершена.',
+            'error': 'Task is already complete.',
             'status': task.get('status') if task else None,
         })
     if result == 'lost':
         db.complete_task(task_id, 'cancelled',
-                         '⚠️ Прервано (сервер был перезапущен)')
+                         '⚠️ Interrupted (server was restarted)')
         return jsonify({
             'success': True,
-            'note': 'Задача потеряна — помечена как отменённая.'
+            'note': 'Task was lost — marked as cancelled.'
         })
-    return jsonify({'success': False, 'error': 'Задача не найдена'}), 404
+    return jsonify({'success': False, 'error': 'Task not found'}), 404
 
 
 @instagram_bp.route('/tasks')

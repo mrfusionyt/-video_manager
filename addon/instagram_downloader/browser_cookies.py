@@ -17,8 +17,8 @@ def get_instagram_cookies_dict():
     profile_path = _find_firefox_profile_with_instagram()
     if not profile_path:
         raise RuntimeError(
-            'Не найден профиль Firefox с cookie instagram.com. '
-            'Убедитесь, что Firefox установлен и вы залогинены в Instagram в нём.'
+            'No Firefox profile with instagram.com cookies found. '
+            'Make sure Firefox is installed and you are logged in to Instagram there.'
         )
     return _read_cookies(profile_path)
 
@@ -28,7 +28,7 @@ def get_instagram_sessionid_from_chrome_safe(start_url=None):
     try:
         cookies = get_instagram_cookies_dict()
         if 'sessionid' not in cookies:
-            return None, 'sessionid не найден в Firefox'
+            return None, 'sessionid was not found in Firefox'
         import json
         return json.dumps(cookies), None
     except Exception as e:
@@ -237,15 +237,15 @@ def _extract_from_sqlite(cookies_path):
 
     if not rows:
         raise RuntimeError(
-            'В профиле Firefox нет cookies instagram.com. '
-            'Залогиньтесь в Instagram в Firefox и попробуйте снова.'
+            'Firefox profile has no instagram.com cookies. '
+            'Log in to Instagram in Firefox and try again.'
         )
 
     cookies = {name: value for name, value in rows if name and value}
     if 'sessionid' not in cookies:
         raise RuntimeError(
-            'Cookie "sessionid" не найдена в Firefox. '
-            'Убедитесь, что вы залогинены в Instagram именно в Firefox.'
+            'The "sessionid" cookie was not found in Firefox. '
+            'Make sure you are logged in to Instagram specifically in Firefox.'
         )
     return cookies
 
@@ -345,5 +345,5 @@ def _copy_to_temp(src):
     except Exception:
         pass
     raise RuntimeError(
-        'Не удалось прочитать cookies.sqlite Firefox. Закройте Firefox и попробуйте снова.'
+        'Failed to read Firefox cookies.sqlite. Close Firefox and try again.'
     )

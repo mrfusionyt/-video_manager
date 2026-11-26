@@ -18,57 +18,57 @@
   <main>
     <section class="hero">
       <div class="eyebrow">FILE TRANSFER</div>
-      <h1>Отправить<br><span>на сервер</span></h1>
-      <p class="hero-note">Выбери файлы или целую папку — они появятся на твоём компьютере.</p>
+      <h1>Send<br><span>to server</span></h1>
+      <p class="hero-note">Choose files or a whole folder — they will appear on your computer.</p>
     </section>
 
     <section class="panel upload-panel">
       <div class="panel-heading">
-        <div><span class="section-kicker">01 / ДОБАВИТЬ</span><h2>Что отправляем?</h2></div>
+        <div><span class="section-kicker">01 / ADD</span><h2>What are we sending?</h2></div>
         <div class="round-icon">＋</div>
       </div>
       <div class="pick-grid">
         <label class="pick-card" for="fileInput">
           <span class="pick-icon icon-file">▤</span>
-          <span class="pick-title">Файлы</span>
-          <span class="pick-sub">Фото, видео, документы</span>
+          <span class="pick-title">Files</span>
+          <span class="pick-sub">Photos, videos, documents</span>
           <span class="pick-arrow">↗</span>
           <input id="fileInput" type="file" multiple>
         </label>
         <label class="pick-card" for="folderInput">
           <span class="pick-icon icon-folder">▱</span>
-          <span class="pick-title">Папка</span>
-          <span class="pick-sub">Отправить содержимое</span>
+          <span class="pick-title">Folder</span>
+          <span class="pick-sub">Send contents</span>
           <span class="pick-arrow">↗</span>
           <input id="folderInput" type="file" multiple webkitdirectory>
         </label>
       </div>
       <div class="selection" id="selectionCard">
         <div class="selection-icon">▧</div>
-        <div class="selection-info"><strong id="selectedTitle">Ничего не выбрано</strong><span id="selectedDetail">Добавь файлы или папку выше</span></div>
-        <button id="clearBtn" class="icon-button" type="button" title="Очистить выбор" aria-label="Очистить">×</button>
+        <div class="selection-info"><strong id="selectedTitle">Nothing selected</strong><span id="selectedDetail">Add files or a folder above</span></div>
+        <button id="clearBtn" class="icon-button" type="button" title="Clear selection" aria-label="Clear">×</button>
       </div>
-      <button id="uploadBtn" class="primary-btn" disabled><span>Отправить файлы</span><span class="btn-arrow">↗</span></button>
+      <button id="uploadBtn" class="primary-btn" disabled><span>Send files</span><span class="btn-arrow">↗</span></button>
       <div id="uploadStatus" class="status"></div>
     </section>
 
     <section class="panel destination-panel">
       <div class="panel-heading">
-        <div><span class="section-kicker">02 / МЕСТО</span><h2>Куда сохранять</h2></div>
+        <div><span class="section-kicker">02 / DESTINATION</span><h2>Where to save</h2></div>
         <div class="round-icon">⌁</div>
       </div>
-      <label class="field-label" for="destination">Путь на компьютере-сервере</label>
-      <div class="path-field"><span class="path-symbol">⌂</span><input id="destination" type="text" placeholder="D:\Incoming"><button id="saveConfig" type="button">Сохранить</button></div>
-      <div class="hint"><span class="hint-dot"></span><span>Путь относится к дискам компьютера, на котором запущен сервер.</span></div>
+      <label class="field-label" for="destination">Path on the server computer</label>
+      <div class="path-field"><span class="path-symbol">⌂</span><input id="destination" type="text" placeholder="D:\Incoming"><button id="saveConfig" type="button">Save</button></div>
+      <div class="hint"><span class="hint-dot"></span><span>The path refers to drives on the computer running the server.</span></div>
       <div id="configStatus" class="status"></div>
     </section>
 
     <section class="panel history-panel">
       <div class="panel-heading">
-        <div><span class="section-kicker">03 / ИСТОРИЯ</span><h2>Последние файлы</h2></div>
-        <button id="refreshBtn" class="refresh-btn" type="button"><span>↻</span> Обновить</button>
+        <div><span class="section-kicker">03 / HISTORY</span><h2>Recent files</h2></div>
+        <button id="refreshBtn" class="refresh-btn" type="button"><span>↻</span> Refresh</button>
       </div>
-      <div id="historyStatus" class="history-status">Загрузка списка…</div>
+      <div id="historyStatus" class="history-status">Loading list…</div>
       <div id="historyBody" class="history-list"></div>
     </section>
   </main>

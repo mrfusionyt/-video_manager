@@ -199,26 +199,26 @@
   <header>
     <span class="header-brand">PhotoClassifier</span>
     <span class="header-spacer"></span>
-    <button id="btn-fullscreen" title="Полноэкранный режим (F)">⛶</button>
-    <button id="btn-undo" disabled title="Отменить последнее перемещение (Ctrl+Z)">↶ <span id="undoCount">0</span></button>
-    <button id="btn-settings" title="Настройки">⚙</button>
+    <button id="btn-fullscreen" title="Fullscreen (F)">⛶</button>
+    <button id="btn-undo" disabled title="Undo last move (Ctrl+Z)">↶ <span id="undoCount">0</span></button>
+    <button id="btn-settings" title="Settings">⚙</button>
     <a href="{{ url_for('settings', profile=current_profile) }}" class="header-back" title="Back">Back</a>
   </header>
 
   <div id="main">
-    <button class="nav" id="prev" title="Назад (←)">‹</button>
-    <button class="nav" id="next" title="Вперёд (→)">›</button>
+    <button class="nav" id="prev" title="Back (←)">‹</button>
+    <button class="nav" id="next" title="Forward (→)">›</button>
     <div id="img-container">
       <img id="photo" alt="" draggable="false">
-      <div id="photo-placeholder">Нажми ⚙, чтобы выбрать папку с фото</div>
+      <div id="photo-placeholder">Click ⚙ to select a photo folder</div>
     </div>
   </div>
 
   <div id="toolbar">
-    <button id="b-down" title="Темнее (↓)">☀−</button>
+    <button id="b-down" title="Darker (↓)">☀−</button>
     <span id="brightness-value">1.00</span>
-    <button id="b-up" title="Светлее (↑)">☀+</button>
-    <button id="b-reset" title="Сбросить яркость (R)">↺</button>
+    <button id="b-up" title="Brighter (↑)">☀+</button>
+    <button id="b-reset" title="Reset brightness (R)">↺</button>
     <span id="counter"></span>
   </div>
 
@@ -229,23 +229,23 @@
 
   <div class="modal-bg" id="settings-modal">
     <div class="modal">
-      <h2>Настройки</h2>
+      <h2>Settings</h2>
       <div class="field">
-        <label>Папка с фото (источник)</label>
-        <div class="row"><input type="text" id="source-folder" placeholder="Путь к папке или Выбрать..."><button onclick="pickFolder('source')">Выбрать…</button></div>
+        <label>Photo folder (source)</label>
+        <div class="row"><input type="text" id="source-folder" placeholder="Folder path or Browse..."><button onclick="pickFolder('source')">Browse…</button></div>
       </div>
       <div class="field">
-        <label>Сюда — кнопка «{{ app_labels.not_nude }}»</label>
-        <div class="row"><input type="text" id="not-nude-folder" placeholder="Путь к папке или Выбрать..."><button onclick="pickFolder('not_nude')">Выбрать…</button></div>
+        <label>Destination for the "{{ app_labels.not_nude }}" button</label>
+        <div class="row"><input type="text" id="not-nude-folder" placeholder="Folder path or Browse..."><button onclick="pickFolder('not_nude')">Browse…</button></div>
       </div>
       <div class="field">
-        <label>Сюда — кнопка «{{ app_labels.nude }}»</label>
-        <div class="row"><input type="text" id="nude-folder" placeholder="Путь к папке или Выбрать..."><button onclick="pickFolder('nude')">Выбрать…</button></div>
+        <label>Destination for the "{{ app_labels.nude }}" button</label>
+        <div class="row"><input type="text" id="nude-folder" placeholder="Folder path or Browse..."><button onclick="pickFolder('nude')">Browse…</button></div>
       </div>
       <div class="actions">
-        <button onclick="restartServer()" title="Перезагрузить настройки и пересканировать источник">🔄 Перезапустить сервер</button>
-        <button onclick="closeSettings()">Отмена</button>
-        <button class="primary" onclick="saveSettings()">Сохранить</button>
+        <button onclick="restartServer()" title="Reload settings and rescan source">🔄 Restart Server</button>
+        <button onclick="closeSettings()">Cancel</button>
+        <button class="primary" onclick="saveSettings()">Save</button>
       </div>
     </div>
   </div>
@@ -299,7 +299,7 @@ function updateUI() {
 function updateUndoButton(count) {
   const btn = $('btn-undo');
   btn.disabled = count === 0;
-  btn.title = count > 0 ? 'Отменить последнее перемещение (' + count + ' доступно)' : 'Нечего отменять';
+  btn.title = count > 0 ? 'Undo last move (' + count + ' available)' : 'Nothing to undo';
   setText('undoCount', count);
 }
 
@@ -312,7 +312,7 @@ async function render() {
 
   if (images.length === 0) {
     img.style.display = 'none'; img.removeAttribute('src'); ph.style.display = 'block';
-    ph.textContent = settings.source ? 'Нет изображений в выбранной папке (или все уже отсортированы)' : 'Нажми ⚙, чтобы выбрать папку с фото';
+    ph.textContent = settings.source ? 'No images in the selected folder (or all are already sorted)' : 'Click ⚙ to select a photo folder';
     counter.textContent = ''; btnNN.disabled = true; btnN.disabled = true; applyBrightness();
     progressBar.style.width = '0%';
     return;
@@ -429,11 +429,11 @@ $('img-container').addEventListener('touchend', (e) => {
 async function classify(category) {
   if (images.length === 0) return;
   const label = settings[category];
-  if (!label) { toast('Сначала выберите папку в настройках', true); return; }
+  if (!label) { toast('Select a folder in Settings first', true); return; }
   const name = images[currentIndex];
   const r = await fetch(BP + '/api/classify', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ name, category }) });
   const data = await r.json();
-  if (!data.ok) { toast('Ошибка: ' + data.error, true); return; }
+  if (!data.ok) { toast('Error: ' + data.error, true); return; }
   images = data.images;
   if (images.length === 0) currentIndex = 0; else if (currentIndex >= images.length) currentIndex = images.length - 1;
   brightness = 1.0; updateUndoButton(data.undo_count); render();
@@ -443,7 +443,7 @@ async function undoLast() {
   const r = await fetch(BP + '/api/undo', { method: 'POST' });
   const data = await r.json();
   updateUndoButton(data.undo_count || 0);
-  if (!data.ok) { toast('Ошибка: ' + data.error, true); return; }
+  if (!data.ok) { toast('Error: ' + data.error, true); return; }
   images = data.images;
   if (currentIndex >= images.length) currentIndex = Math.max(0, images.length - 1);
   brightness = 1.0; render();
@@ -451,20 +451,20 @@ async function undoLast() {
 
 async function deleteImage() {
   if (images.length === 0) return;
-  if (!confirm('Переместить файл в Корзину?\n\n' + images[currentIndex])) return;
+  if (!confirm('Move the file to the Recycle Bin?\n\n' + images[currentIndex])) return;
   const name = images[currentIndex];
   const r = await fetch(BP + '/api/delete', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ name }) });
   const data = await r.json();
-  if (!data.ok) { toast('Ошибка: ' + data.error, true); return; }
+  if (!data.ok) { toast('Error: ' + data.error, true); return; }
   images = data.images;
   if (currentIndex >= images.length) currentIndex = Math.max(0, images.length - 1);
   brightness = 1.0; updateUndoButton(data.undo_count); render();
 }
 
 async function pickFolder(key) {
-  const titles = { source: 'Выбрать папку', not_nude: 'Выбрать папку для «' + (settings.label_not_nude || 'Not Nude') + '»', nude: 'Выбрать папку для «' + (settings.label_nude || 'Nude') + '»' };
-  toast('Открывается диалог выбора папки…');
-  const r = await fetch(BP + '/api/pick-folder', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ title: titles[key] || 'Выбрать папку' }) });
+  const titles = { source: 'Select folder', not_nude: 'Select folder for "' + (settings.label_not_nude || 'Not Nude') + '"', nude: 'Select folder for "' + (settings.label_nude || 'Nude') + '"' };
+  toast('Opening folder picker…');
+  const r = await fetch(BP + '/api/pick-folder', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ title: titles[key] || 'Select folder' }) });
   const data = await r.json();
   if (data.path) {
     if (key === 'source') setText('source-folder', data.path);
@@ -483,28 +483,28 @@ async function saveSettings() {
   };
   const r = await fetch(BP + '/api/save-settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) });
   const data = await r.json();
-  if (!data.ok) { toast('Ошибка: ' + data.error, true); return; }
+  if (!data.ok) { toast('Error: ' + data.error, true); return; }
   settings = body; images = data.images; currentIndex = 0; brightness = 1.0;
-  updateUI(); updateUndoButton(data.undo_count); render(); closeSettings(); toast('Настройки сохранены');
+  updateUI(); updateUndoButton(data.undo_count); render(); closeSettings(); toast('Settings saved');
 }
 
 async function restartServer() {
   try {
     const r = await fetch(BP + '/api/restart', { method: 'POST' });
     const data = await r.json();
-    if (!data.ok) { toast('Ошибка перезапуска', true); return; }
+    if (!data.ok) { toast('Restart failed', true); return; }
     settings = data.settings || settings; images = data.images || [];
     setText('source-folder', settings.source || '');
     setText('not-nude-folder', settings.not_nude || '');
     setText('nude-folder', settings.nude || '');
-    updateUI(); updateUndoButton(data.undo_count || 0); render(); closeSettings(); toast('Сервер перезапущен');
-  } catch (e) { toast('Ошибка: ' + e.message, true); }
+    updateUI(); updateUndoButton(data.undo_count || 0); render(); closeSettings(); toast('Server restarted');
+  } catch (e) { toast('Error: ' + e.message, true); }
 }
 
 function openSettings() { $('settings-modal').classList.add('open'); }
 function closeSettings() { $('settings-modal').classList.remove('open'); }
 function toggleFullscreen() {
-  if (!document.fullscreenElement) document.documentElement.requestFullscreen().catch(err => toast(`Ошибка: ${err.message}`, true));
+  if (!document.fullscreenElement) document.documentElement.requestFullscreen().catch(err => toast(`Error: ${err.message}`, true));
   else document.exitFullscreen();
 }
 

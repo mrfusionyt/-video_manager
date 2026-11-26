@@ -33,7 +33,7 @@ from addon.photo_classifier import state as pv_state
 # =====================================================================
 # UPDATE SETTINGS
 # =====================================================================
-CURRENT_VERSION = '1.0.10'
+CURRENT_VERSION = '1.0.11'
 GITHUB_USER = 'mrfusionyt'
 GITHUB_REPO = '-video_manager'
 AUTO_UPDATE_INTERVAL = 3600       # seconds between automatic checks
@@ -69,6 +69,10 @@ except Exception:
 tk_root = None
 status_label = None
 update_btn = None
+update_progress_frame = None
+update_progress_canvas = None
+update_progress_percent = None
+update_progress_detail = None
 pending_update_url = None
 pending_version = None
 ignored_version = None
@@ -89,9 +93,92 @@ def _version_key(v):
     return tuple(parts) or (0,)
 
 
+def _clamp_progress(value):
+    try:
+        return max(0, min(100, int(round(float(value)))))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _blend_hex(first, second, ratio):
+    a = [int(first[i:i + 2], 16) for i in (1, 3, 5)]
+    b = [int(second[i:i + 2], 16) for i in (1, 3, 5)]
+    return '#%02x%02x%02x' % tuple(
+        int(round(a[i] + (b[i] - a[i]) * ratio)) for i in range(3))
+
+
+def _show_update_progress():
+    if not update_progress_frame or update_progress_frame.winfo_ismapped():
+        return
+    if update_btn and update_btn.winfo_ismapped():
+        update_progress_frame.pack(before=update_btn, fill=tk.X, pady=(0, 6))
+    else:
+        update_progress_frame.pack(fill=tk.X, pady=(0, 6))
+
+
+def _paint_update_progress(percent=None, state='active', detail=None):
+    """Tk twin of the dark/red web progress card (called on the Tk thread)."""
+    if not update_progress_canvas:
+        return
+    last = getattr(update_progress_canvas, '_vm_progress', 0)
+    pct = _clamp_progress(last if percent is None else percent)
+    state = state or 'active'
+    if state == 'done':
+        pct = 100
+    update_progress_canvas._vm_progress = pct
+
+    _show_update_progress()
+    canvas = update_progress_canvas
+    width = canvas.winfo_width()
+    height = canvas.winfo_height()
+    if width < 20:
+        width = 440
+    if height < 6:
+        height = 10
+    canvas.delete('all')
+    canvas.create_rectangle(0, 0, width, height, fill='#27272a', outline='')
+
+    if state == 'done':
+        start_color, end_color = '#166534', '#4ade80'
+    elif state == 'error':
+        start_color, end_color = '#7f1d1d', '#ef4444'
+    else:
+        start_color, end_color = '#7f1d1d', '#ef4444'
+
+    filled = int(width * pct / 100)
+    if filled > 0:
+        if state == 'active':
+            for x in range(filled):
+                ratio = x / max(1, filled - 1)
+                canvas.create_rectangle(x, 0, x + 1, height,
+                                        fill=_blend_hex(start_color, end_color, ratio),
+                                        outline='')
+        else:
+            canvas.create_rectangle(0, 0, filled, height,
+                                    fill=end_color, outline='')
+        radius = min(height, filled) // 2
+        if radius:
+            canvas.create_oval(0, 0, radius * 2, height, fill=start_color, outline='')
+            if filled > radius * 2:
+                canvas.create_oval(filled - radius * 2, 0, filled, height,
+                                   fill=end_color, outline='')
+
+    if update_progress_percent:
+        update_progress_percent.config(text=f'{pct}%')
+        if state == 'done':
+            update_progress_percent.config(fg='#4ade80')
+        elif state == 'error':
+            update_progress_percent.config(fg='#ff7b86')
+        else:
+            update_progress_percent.config(fg='#ff9aa4')
+    if detail is not None and update_progress_detail:
+        update_progress_detail.config(text=str(detail))
+
+
 def set_update_ui(status=None, color='#ff596b', btn_text=None,
-                  btn_state=None, show_btn=False):
-    """Thread-safe status/button update for the launcher window."""
+                  btn_state=None, show_btn=False, progress=None,
+                  progress_state=None, progress_detail=None):
+    """Thread-safe status/button/progress update for the launcher window."""
     def apply():
         if status_label and status is not None:
             status_label.config(text=status, fg=color)
@@ -102,6 +189,10 @@ def set_update_ui(status=None, color='#ff596b', btn_text=None,
                 update_btn.config(state=btn_state)
             if show_btn and not update_btn.winfo_ismapped():
                 update_btn.pack(fill=tk.X, padx=0, pady=(0, 6))
+        if progress is not None or progress_state is not None:
+            _paint_update_progress(progress,
+                                   progress_state or 'active',
+                                   progress_detail)
     if tk_root:
         try:
             tk_root.after(0, apply)
@@ -380,7 +471,8 @@ def start_update(download_url, target_version=None, auto=False):
     append_log(f'[update] {"automatic" if auto else "manual"} update to v{ver} started')
     set_update_ui(status=f'{verb} v{ver}...', color='#ff596b',
                   btn_text=f'{verb} v{ver}...', btn_state=tk.DISABLED,
-                  show_btn=True)
+                  show_btn=True, progress=0, progress_state='active',
+                  progress_detail=f'Preparing v{ver}...')
     threading.Thread(target=download_and_update,
                      args=(download_url, ver, auto), daemon=True).start()
 
@@ -419,26 +511,39 @@ def download_and_update(download_url, target_version=None, auto=False):
         total = int(r.headers.get('content-length') or 0)
         done = 0
         next_report = 10
+        last_stage = -1
         with open(zip_path, 'wb') as f:
             for chunk in r.iter_content(chunk_size=1024 * 256):
                 if not chunk:
                     continue
                 f.write(chunk)
                 done += len(chunk)
-                if total:
-                    pct = done * 100 // total
-                    if pct >= next_report:
-                        append_log(f'[update] downloaded {pct}%')
-                        set_update_ui(status=f'Update v{ver}: {pct}%',
-                                      btn_text=f'Downloading v{ver} {pct}%')
-                        next_report += 10
+                if not total:
+                    continue
+                pct = done * 100 // total
+                # The download is the first 80% of the bar; installing the
+                # remaining stages fills the last 20%.
+                stage = min(80, pct * 80 // 100)
+                if pct >= next_report:
+                    append_log(f'[update] downloaded {pct}%')
+                    next_report += 10
+                if stage != last_stage:
+                    last_stage = stage
+                    set_update_ui(status=f'Update v{ver}: {pct}%',
+                                  btn_text=f'Downloading v{ver} {pct}%',
+                                  progress=stage, progress_state='active',
+                                  progress_detail=f'Downloading v{ver}: {pct}%')
         append_log(f'[update] archive saved ({done // 1048576} MB)')
+        set_update_ui(status=f'Preparing v{ver}...', progress=86,
+                      progress_state='active', progress_detail='Preparing files...')
 
         if os.path.exists(update_dir):
             shutil.rmtree(update_dir, ignore_errors=True)
         os.makedirs(update_dir)
         with zipfile.ZipFile(zip_path, 'r') as zf:
             safe_extract(zf, update_dir)
+        set_update_ui(status=f'Verifying v{ver}...', progress=92,
+                      progress_state='active', progress_detail='Verifying package...')
 
         src_root = _find_payload_root(update_dir)
         if not os.path.isfile(os.path.join(src_root, 'VideoManager.exe')):
@@ -491,9 +596,14 @@ del "%~f0"
 ''')
         append_log('[update] installing to ' + target_dir + ', app will restart')
         set_update_ui(status=f'Installing v{ver}...', color='#ff596b',
-                      btn_text=f'Installing v{ver}...', btn_state=tk.DISABLED)
+                      btn_text=f'Installing v{ver}...', btn_state=tk.DISABLED,
+                      progress=97, progress_state='active',
+                      progress_detail='Installing and restarting...')
         flags = getattr(subprocess, 'CREATE_NO_WINDOW', 0) | getattr(subprocess, 'DETACHED_PROCESS', 0)
         subprocess.Popen(['cmd', '/c', bat_path], creationflags=flags, close_fds=True)
+        set_update_ui(status=f'Update v{ver} installed - restarting...',
+                      color='#4ade80', progress=100, progress_state='done',
+                      progress_detail=f'Restarting with v{ver}...')
         quit_requested.set()
         if tray_icon:
             try:
@@ -507,7 +617,8 @@ del "%~f0"
         append_log(f'[update] failed: {e}')
         set_update_ui(status='Update failed - see log', color='#ff596b',
                       btn_text=f'Retry update v{ver}', btn_state=tk.NORMAL,
-                      show_btn=True)
+                      show_btn=True, progress_state='error',
+                      progress_detail='Update failed - retry when ready')
         if not auto and tk_root:
             tk_root.after(0, lambda: messagebox.showerror(
                 'Update Error', f'Failed to update: {e}', parent=tk_root))
@@ -641,6 +752,8 @@ def restart_from_tray(icon=None,item=None):
 
 def main():
     global tk_root, status_label, update_btn, local_url_global, tray_icon, log_text
+    global update_progress_frame, update_progress_canvas
+    global update_progress_percent, update_progress_detail
 
     install_log_redirect()
 
@@ -650,8 +763,9 @@ def main():
     lan_ips = get_local_ips()
     shown_ips = lan_ips[:5]
 
-    # Window height follows the number of network rows so nothing gets clipped.
-    window_height = 336 + 26 * len(shown_ips)
+    # Window height follows the number of network rows; extra room is reserved
+    # for the update progress card so the log never gets clipped.
+    window_height = 384 + 26 * len(shown_ips)
     tk_root = tk.Tk()
     tk_root.title('VideoManager')
     tk_root.geometry(f'470x{window_height}')
@@ -673,7 +787,7 @@ def main():
     pv_state.load_config()
     pv_state.scan_source()
 
-    # Основной фрейм без expand, чтобы не было пустоты
+    # Main frame without expand, so no empty space appears
     root_frame = tk.Frame(tk_root, bg='#18181b')
     root_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=8)
 
@@ -690,6 +804,29 @@ def main():
 
     update_frame = tk.Frame(root_frame, bg='#18181b')
     update_frame.pack(fill=tk.X)
+
+    # Hidden until an update starts; mirrors the web progress card.
+    update_progress_frame = tk.Frame(
+        update_frame, bg='#141417', padx=8, pady=6,
+        highlightthickness=1, highlightbackground='#2a2a31')
+    progress_head = tk.Frame(update_progress_frame, bg='#141417')
+    progress_head.pack(fill=tk.X, pady=(0, 4))
+    tk.Label(progress_head, text='Update progress', bg='#141417',
+             fg='#e5e7eb', font=('Segoe UI', 9, 'bold'),
+             anchor='w').pack(side=tk.LEFT)
+    update_progress_percent = tk.Label(progress_head, text='0%', bg='#141417',
+                                       fg='#ff9aa4', font=('Segoe UI', 9, 'bold'),
+                                       anchor='e')
+    update_progress_percent.pack(side=tk.RIGHT)
+    update_progress_canvas = tk.Canvas(update_progress_frame, height=10,
+                                       bg='#27272a', highlightthickness=0,
+                                       bd=0)
+    update_progress_canvas.pack(fill=tk.X)
+    update_progress_detail = tk.Label(update_progress_frame,
+                                      text='Initializing...', bg='#141417',
+                                      fg='#9ca3af', font=('Segoe UI', 8),
+                                      anchor='w')
+    update_progress_detail.pack(fill=tk.X, pady=(5, 0))
 
     update_btn = tk.Button(update_frame, text='', command=trigger_update,
                            bg='#3a1f24', fg='#fca5a5',

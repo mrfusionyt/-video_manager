@@ -64,9 +64,9 @@ def _find_ffmpeg_dir():
 
 FFMPEG_DIR = _find_ffmpeg_dir()
 if FFMPEG_DIR:
-    print(f"[downloader] ffmpeg найден: {FFMPEG_DIR}")
+    print(f"[downloader] ffmpeg found: {FFMPEG_DIR}")
 else:
-    print("[downloader] ВНИМАНИЕ: ffmpeg не найден — видео и аудио могут скачиваться раздельно")
+    print("[downloader] WARNING: ffmpeg not found — video and audio may be downloaded separately")
 
 
 # ===================================================================
@@ -227,7 +227,7 @@ def _yt_dlp_opts(save_dir, cookie_file):
         opts['ffmpeg_location'] = FFMPEG_DIR
     else:
         opts['format'] = 'best[ext=mp4]/best[acodec!=none][vcodec!=none]/best'
-        print("[downloader] ffmpeg не найден, формат ограничен единым файлом")
+        print("[downloader] ffmpeg not found; format limited to a single file")
 
     return opts
 

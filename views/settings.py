@@ -14,6 +14,8 @@ import time
 import sqlite3
 import threading
 import subprocess
+from urllib.parse import unquote, urlparse
+from urllib.request import url2pathname
 
 from flask import (
     render_template, request, redirect, url_for, jsonify, Response,
@@ -30,7 +32,6 @@ from models import (
     CONFIG_PATH,
 )
 from scanner import (
-    scan_libraries,
     scan_libraries_async,
     get_scan_progress,
     is_scan_in_progress,
@@ -81,6 +82,21 @@ def _parse_scan_paths(raw_text):
         if p:
             result.append(p)
     return result
+
+
+def _normalize_library_path(raw):
+    """Accept a plain path, a quoted path or a file:// link."""
+    path = (raw or '').strip()
+    while len(path) >= 2 and path[0] == path[-1] and path[0] in ('"', "'"):
+        path = path[1:-1].strip()
+    if not path:
+        return ''
+    if path.lower().startswith('file://'):
+        try:
+            path = url2pathname(unquote(urlparse(path).path))
+        except Exception:
+            path = path.replace('file:///', '', 1)
+    return os.path.normpath(os.path.expanduser(path))
 
 
 RESTART_EXIT_CODE = 42
@@ -187,13 +203,31 @@ def register(app):
                                       media_type=form_media_type)
 
             elif action == 'add_library':
-                path = request.form.get('path')
-                if path and os.path.isdir(path):
-                    try:
-                        add_library(path, mode=current_mode)
-                        scan_libraries()
-                    except sqlite3.IntegrityError:
-                        pass
+                path = _normalize_library_path(request.form.get('path'))
+                if not path:
+                    return redirect(url_for('settings', tab='libraries',
+                                            profile=current_profile,
+                                            error='Enter a folder path first.'))
+                if not os.path.isdir(path):
+                    return redirect(url_for('settings', tab='libraries',
+                                            profile=current_profile,
+                                            error='Folder not found: ' + path))
+                try:
+                    add_library(path, mode=current_mode)
+                except sqlite3.IntegrityError:
+                    return redirect(url_for('settings', tab='libraries',
+                                            profile=current_profile,
+                                            error='This library is already added.'))
+                # Do not block the POST with a full scan: start it in the
+                # background so the same progress bar used by Scan shows up.
+                new_task_id = str(uuid.uuid4())
+                started = scan_libraries_async(new_task_id)
+                if started:
+                    return redirect(url_for('settings', tab='libraries',
+                                            task_id=new_task_id,
+                                            profile=current_profile))
+                return redirect(url_for('settings', tab='libraries',
+                                        profile=current_profile))
 
             elif action == 'delete_library':
                 lib_id = request.form.get('library_id')
@@ -228,8 +262,12 @@ def register(app):
                 if mode not in ('fast', 'deep'):
                     mode = 'deep'
                 new_task_id = str(uuid.uuid4())
-                find_duplicates_async(new_task_id, filters,
-                                      scan_paths or None, mode=mode)
+                started = find_duplicates_async(new_task_id, filters,
+                                                scan_paths or None, mode=mode)
+                if not started:
+                    return redirect(url_for(
+                        'duplicates_page', profile=current_profile,
+                        error='A duplicate scan is already running.'))
                 return redirect(url_for('duplicates_page',
                                         task_id=new_task_id,
                                         profile=current_profile))
@@ -279,6 +317,7 @@ def register(app):
         return render_template('settings.html',
                                tab=tab,
                                task_id=task_id,
+                               error=request.args.get('error'),
                                scan_running=is_scan_in_progress())
 
     # ================================================================
@@ -301,8 +340,12 @@ def register(app):
                 if mode not in ('fast', 'deep'):
                     mode = 'deep'
                 new_task_id = str(uuid.uuid4())
-                find_duplicates_async(new_task_id, filters,
-                                      scan_paths or None, mode=mode)
+                started = find_duplicates_async(new_task_id, filters,
+                                                scan_paths or None, mode=mode)
+                if not started:
+                    return redirect(url_for(
+                        'duplicates_page', profile=current_profile,
+                        error='A duplicate scan is already running.'))
                 return redirect(url_for('duplicates_page',
                                         task_id=new_task_id,
                                         profile=current_profile))

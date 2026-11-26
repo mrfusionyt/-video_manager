@@ -24,7 +24,7 @@ def open_browser_and_wait_for_login():
         from playwright.sync_api import sync_playwright
     except ImportError:
         raise RuntimeError(
-            'Playwright не установлен. Выполните:\n'
+            'Playwright is not installed. Run:\n'
             '  pip install playwright\n'
             '  playwright install chromium'
         )
@@ -42,7 +42,7 @@ def open_browser_and_wait_for_login():
                 viewport={'width': 1280, 'height': 800},
             )
         except Exception as e:
-            raise RuntimeError(f'Не удалось запустить браузер: {e}')
+            raise RuntimeError(f'Failed to start the browser: {e}')
 
         try:
             page = context.pages[0] if context.pages else context.new_page()
@@ -51,18 +51,18 @@ def open_browser_and_wait_for_login():
             except Exception:
                 pass
 
-            print("[browser_login] Окно браузера открыто. Войдите в Instagram вручную.")
-            print("[browser_login] Ожидание входа...")
+            print("[browser_login] Browser window opened. Log in to Instagram manually.")
+            print("[browser_login] Waiting for login...")
 
             session_cookies = _wait_for_login(context, MAX_WAIT_SECONDS)
 
             if not session_cookies:
                 raise RuntimeError(
-                    f'Не удалось получить cookies за {MAX_WAIT_SECONDS} секунд. '
-                    'Убедитесь, что вы вошли в Instagram в открывшемся окне.'
+                    f'Failed to get cookies within {MAX_WAIT_SECONDS} seconds. '
+                    'Make sure you logged in to Instagram in the opened window.'
                 )
 
-            print("[browser_login] Вход выполнен! Cookies получены.")
+            print("[browser_login] Login successful! Cookies received.")
             return session_cookies
 
         finally:
@@ -94,13 +94,13 @@ def _wait_for_login(context, timeout_seconds):
             now = time.time()
             if now - last_log > 15:
                 remaining = int(deadline - now)
-                print(f"[browser_login] Ожидание входа... осталось ~{remaining}s")
+                print(f"[browser_login] Waiting for login... ~{remaining}s left")
                 last_log = now
 
             time.sleep(1)
 
         except Exception as e:
-            print(f"[browser_login] Ошибка при чтении cookies: {e}")
+            print(f"[browser_login] Error reading cookies: {e}")
             time.sleep(1)
 
     return None

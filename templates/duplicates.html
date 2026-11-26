@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from '_vm_progress.html' import vm_progress %}
 
 {% block title %}Duplicates{% endblock %}
 {% block page_title %}Duplicates{% endblock %}
@@ -26,26 +27,26 @@
             </div>
             <div class="form-check form-check-inline">
                 <input class="form-check-input" type="checkbox" name="media_types" value="image" checked id="media_image">
-                <label class="form-check-label" for="media_image">Image</label>
+                <label class="form-check-label" for="media_image">Photo</label>
             </div>
             <span class="text-muted ms-2" style="font-size:0.8rem;">
-                (в «Быстром» режиме image игнорируются)
+                (photos are ignored in Fast mode)
             </span>
         </div>
 
         <div class="mb-2">
             <label class="form-label">
-                Scan paths <span class="text-muted" style="font-size:0.8rem;">(опционально, один путь на строку — включая подпапки)</span>
+                Scan paths <span class="text-muted" style="font-size:0.8rem;">(optional, one path per line — including subfolders)</span>
             </label>
             <textarea name="scan_paths" id="scanPaths" class="form-control form-control-dark"
                       rows="4"
-                      placeholder="Оставь пустым — скан всей библиотеки&#10;Или впиши пути, например:&#10;G:\Female\New folder&#10;D:\Videos\temp"></textarea>
+                      placeholder="Leave empty to scan the entire library&#10;Or enter paths, for example:&#10;G:\Female\New folder&#10;D:\Videos\temp"></textarea>
             <div class="d-flex gap-2 mt-2 flex-wrap">
                 <button type="button" class="btn btn-outline-secondary btn-sm" id="addLibraryPathsBtn">
-                    + Добавить все библиотеки профиля
+                    + Add all profile libraries
                 </button>
                 <button type="button" class="btn btn-outline-secondary btn-sm" id="clearPathsBtn">
-                    Очистить
+                    Clear
                 </button>
                 <span class="text-muted align-self-center" id="pathsHint" style="font-size:0.78rem;"></span>
             </div>
@@ -53,16 +54,16 @@
 
         <div class="d-flex gap-2 flex-wrap align-items-center">
             <button type="button" class="btn-add" id="startFastBtn"
-                    title="Только видео, строгие правила, минимум ложных срабатываний">
-                ⚡ Быстрый поиск
+                    title="Videos only, strict rules, minimal false positives">
+                Fast Search
             </button>
             <button type="button" class="btn-add" id="startDeepBtn"
-                    title="Видео + аудио + фото, ищет совпадения даже если монтаж отличается">
-                🔍 Глубокий поиск
+                    title="Videos + audio + photos; tolerant matching finds edited versions">
+                Deep Search
             </button>
             <span class="text-muted" style="font-size:0.78rem;">
-                Fast: видео по 25 кадрам (full/partial), фото brute-force.<br>
-                Deep: то же + аудио (непрерывный run ≥30с).
+                Fast: videos by 10 sampled frames (full/partial), strict matching.<br>
+                Deep: tolerant video matching + audio (30 s continuous run) + photos.
             </span>
         </div>
     </form>
@@ -94,12 +95,7 @@
     </div>
 {% endif %}
 
-<div id="progressContainer" class="dup-progress" style="display:none;">
-    <div class="dup-progress-bar">
-        <div id="progressFill" class="dup-progress-fill" style="width:0%;"></div>
-    </div>
-    <div id="progressText" class="dup-progress-text">Initializing...</div>
-</div>
+{{ vm_progress('progressContainer', 'Duplicate search', 'progressText') }}
 
 {% if duplicates %}
     <h5>Found {{ duplicates|length }} groups</h5>
@@ -125,9 +121,9 @@
                     {% endif %}
 
                     {% if kind == 'partial' %}
-                        <span class="reason-badge" style="background:#ff9800;" title="Одно видео содержится в другом (substring match)">partial</span>
+                        <span class="reason-badge" style="background:#ff9800;" title="One video is contained in another (substring match)">partial</span>
                     {% elif kind == 'mixed' %}
-                        <span class="reason-badge" style="background:linear-gradient(90deg,#4caf50,#ff9800);" title="Есть и полные, и частичные совпадения">mixed</span>
+                        <span class="reason-badge" style="background:linear-gradient(90deg,#4caf50,#ff9800);" title="Both full and partial matches">mixed</span>
                     {% endif %}
 
                     <a class="btn-mini" href="{{ url_for('compare_group', group_index=outer_idx, profile=current_profile) }}"
@@ -199,7 +195,7 @@
         {% endfor %}
     </div>
 {% else %}
-    <p class="text-muted">No duplicates found. Click "Быстрый" или "Глубокий" to start scanning.</p>
+    <p class="text-muted">No duplicates found. Click "Fast Search" or "Deep Search" to start scanning.</p>
 {% endif %}
 
 <script>
@@ -230,10 +226,10 @@
         if (!pathsHint || !scanPathsEl) return;
         var n = countLines(scanPathsEl.value);
         if (n === 0) {
-            pathsHint.textContent = '(вся библиотека)';
+            pathsHint.textContent = '(entire library)';
         } else {
-            pathsHint.textContent = '(фильтр: ' + n + ' путь' +
-                (n === 1 ? '' : (n < 5 ? 'и' : 'ей')) + ')';
+            pathsHint.textContent = '(filter: ' + n +
+                (n === 1 ? ' path' : ' paths') + ')';
         }
     }
 
@@ -247,7 +243,7 @@
     if (addLibsBtn && scanPathsEl) {
         addLibsBtn.addEventListener('click', function () {
             if (!allLibraries.length) {
-                alert('Нет ни одной библиотеки для этого профиля.');
+                alert('There are no libraries for this profile.');
                 return;
             }
             var existing = scanPathsEl.value.split('\n')
@@ -282,6 +278,16 @@
     function submitWithMode(mode) {
         if (!form) return;
         if (modeInput) modeInput.value = mode;
+        try {
+            var checked = Array.from(document.querySelectorAll('input[name="media_types"]:checked'))
+                .map(function (cb) { return cb.value; });
+            localStorage.setItem('vm_duplicate_filters', JSON.stringify({
+                paths: scanPathsEl ? scanPathsEl.value : '',
+                types: checked
+            }));
+        } catch (e) { /* storage is optional */ }
+        if (startFastBtn) { startFastBtn.disabled = true; startFastBtn.textContent = 'Starting...'; }
+        if (startDeepBtn) { startDeepBtn.disabled = true; startDeepBtn.textContent = 'Starting...'; }
         form.submit();
     }
 
@@ -323,47 +329,64 @@
     document.addEventListener('DOMContentLoaded', function () {
         var urlParams = new URLSearchParams(window.location.search);
         var taskId = urlParams.get('task_id');
-        if (taskId) startProgressMonitoring(taskId);
+        var pageError = urlParams.get('error');
+        if (pageError) alert(pageError);
+
+        try {
+            var saved = JSON.parse(localStorage.getItem('vm_duplicate_filters') || 'null');
+            if (saved) {
+                if (scanPathsEl && !scanPathsEl.value && saved.paths) {
+                    scanPathsEl.value = saved.paths;
+                    updateHint();
+                }
+                if (saved.types && Array.isArray(saved.types)) {
+                    document.querySelectorAll('input[name="media_types"]').forEach(function (cb) {
+                        cb.checked = saved.types.indexOf(cb.value) !== -1;
+                    });
+                }
+            }
+        } catch (e) { /* storage is optional */ }
+
+        if (taskId && window.VMProgress) {
+            VMProgress.monitor(document.getElementById('progressContainer'), {
+                url: '/progress/' + taskId,
+                onComplete: function () {
+                    setTimeout(function () {
+                        var url = new URL(window.location.href);
+                        url.searchParams.delete('task_id');
+                        window.location.href = url.toString();
+                    }, 1200);
+                },
+                onError: function (data) {
+                    var text = document.getElementById('progressText');
+                    if (text) text.textContent = 'Error: ' + (data.message || 'Unknown error');
+                    enableSearchButtons();
+                },
+                onNotFound: function () {
+                    var text = document.getElementById('progressText');
+                    if (text) text.textContent = 'Scan already finished. Refreshing...';
+                    setTimeout(function () {
+                        var url = new URL(window.location.href);
+                        url.searchParams.delete('task_id');
+                        window.location.href = url.toString();
+                    }, 800);
+                },
+                onConnectionError: function () {
+                    var text = document.getElementById('progressText');
+                    if (text) text.textContent = 'Connection lost. Refresh the page.';
+                    enableSearchButtons();
+                }
+            });
+        }
+
+        function enableSearchButtons() {
+            if (startFastBtn) { startFastBtn.disabled = false; startFastBtn.textContent = 'Fast Search'; }
+            if (startDeepBtn) { startDeepBtn.disabled = false; startDeepBtn.textContent = 'Deep Search'; }
+        }
 
         document.getElementById('refreshDuplicates')?.addEventListener('click', function () {
             location.reload();
         });
-
-        function startProgressMonitoring(taskId) {
-            var pc = document.getElementById('progressContainer');
-            var pf = document.getElementById('progressFill');
-            var pt = document.getElementById('progressText');
-            pc.style.display = 'block';
-            var es = new EventSource('/progress/' + taskId);
-            es.onmessage = function (event) {
-                var data = JSON.parse(event.data);
-                if (data.status === 'complete') {
-                    pf.style.width = '100%';
-                    pt.textContent = '✅ ' + data.message;
-                    es.close();
-                    var url = new URL(window.location.href);
-                    url.searchParams.delete('task_id');
-                    setTimeout(function () { window.location.href = url.toString(); }, 1200);
-                } else if (data.status === 'error') {
-                    pf.style.width = '100%';
-                    pf.style.background = '#dc3545';
-                    pt.textContent = '❌ Error: ' + data.message;
-                    es.close();
-                } else if (data.status === 'not_found') {
-                    pt.textContent = 'Скан уже завершён. Обновляю...';
-                    es.close();
-                    var url = new URL(window.location.href);
-                    url.searchParams.delete('task_id');
-                    setTimeout(function () { window.location.href = url.toString(); }, 800);
-                } else if (data.status === 'scanning') {
-                    pf.style.width = data.progress + '%';
-                    pt.textContent = (data.message || '') + ' (' + data.progress + '%)';
-                } else {
-                    pt.textContent = (data.message || 'Unknown') + ' [' + data.status + ']';
-                }
-            };
-            es.onerror = function () { es.close(); };
-        }
 
         var moveSelectedBtn = document.getElementById('moveSelectedBtn');
         if (moveSelectedBtn) {

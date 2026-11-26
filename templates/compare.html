@@ -81,7 +81,7 @@
                 {% for p in m.pairs %}
                     <div class="match-row">
                         <span class="match-label">
-                            кадр <b>{{ (p.pos_a * 100)|round|int }}%</b>
+                            frame <b>{{ (p.pos_a * 100)|round|int }}%</b>
                             ↔ <b>{{ (p.pos_b * 100)|round|int }}%</b>
                             <span class="match-hamming">(hamming {{ p.hamming }})</span>
                         </span>
@@ -112,8 +112,8 @@
                     <span class="match-label">
                         <b>{{ m.start_a_sec|round(1) }}s</b> ↔ <b>{{ m.start_b_sec|round(1) }}s</b>
                         <span class="match-hamming">
-                            (длина {{ m.run_sec|round(1) }}s
-                            {% if m.skipped_intro_sec %} • интро {{ m.skipped_intro_sec|round|int }}s пропущено{% endif %})
+                            (length {{ m.run_sec|round(1) }}s
+                            {% if m.skipped_intro_sec %} • intro {{ m.skipped_intro_sec|round|int }}s skipped{% endif %})
                         </span>
                     </span>
                     <button type="button" class="btn-mini"

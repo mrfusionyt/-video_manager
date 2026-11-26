@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from '_vm_progress.html' import vm_progress %}
 
 {% block title %}Settings{% endblock %}
 
@@ -11,8 +12,9 @@
                 <input type="hidden" name="profile" value="{{ current_profile }}">
                 <input type="text" name="path" id="libraryPath" class="form-control form-control-dark" placeholder="Enter full path to video folder (e.g., C:\Users\...)" value="">
                 <button type="button" class="btn-paste" id="pasteBtn">Paste</button>
-                <button type="submit" class="btn-add">Add</button>
+                <button type="submit" class="btn-add" id="addLibraryBtn">Add</button>
             </form>
+            <div id="libraryMessage" class="vm-inline-message" style="display:none;"></div>
             <form method="post" class="scan-form" id="scanForm">
                 <input type="hidden" name="action" value="scan">
                 <input type="hidden" name="profile" value="{{ current_profile }}">
@@ -22,12 +24,7 @@
             </form>
         </div>
 
-        <div id="scanProgressContainer" class="dup-progress" style="display:none;">
-            <div class="dup-progress-bar">
-                <div id="scanProgressFill" class="dup-progress-fill" style="width:0%;"></div>
-            </div>
-            <div id="scanProgressText" class="dup-progress-text">Initializing...</div>
-        </div>
+        {{ vm_progress('scanProgressContainer', 'Library scan', 'scanProgressText') }}
 
         {% if all_libraries %}
         <div class="table-responsive">
@@ -216,8 +213,8 @@
     <div class="settings-section restart-card" style="margin-top: 2rem; padding-top: 1.5rem; border-top: 1px solid var(--border);">
         <h5>Server</h5>
         <p class="text-muted small mb-3">
-            Перезапуск сервера требуется, например, при смене статического IP или после обновления проекта.
-            Активные фоновые задачи (сканирование, поиск дубликатов, загрузки) будут прерваны, после чего страница обновится автоматически.
+            A server restart is required, for example, after changing the static IP or updating the project.
+            Active background tasks (scanning, duplicate search, downloads) will be interrupted, then the page will refresh automatically.
         </p>
         <div class="restart-card-actions">
             <button type="button" class="btn-restart" id="restartServerBtn">
@@ -232,22 +229,22 @@
     <div class="restart-modal-dialog">
         <div class="restart-modal-content">
             <div class="restart-modal-header">
-                <h3 class="restart-modal-title">Перезапустить сервер?</h3>
-                <button type="button" class="restart-modal-close" id="restartModalClose" aria-label="Закрыть">✕</button>
+                <h3 class="restart-modal-title">Restart server?</h3>
+                <button type="button" class="restart-modal-close" id="restartModalClose" aria-label="Close">✕</button>
             </div>
             <div class="restart-modal-body">
                 <div class="restart-warn">
                     <div class="restart-warn-icon">⚠</div>
                     <div class="restart-warn-text">
-                        <div class="restart-warn-line">Активные задачи будут остановлены</div>
-                        <div class="restart-warn-sub">Сканирование, поиск дубликатов и загрузки
-                            прервутся. После перезапуска страница обновится автоматически.</div>
+                        <div class="restart-warn-line">Active tasks will be stopped</div>
+                        <div class="restart-warn-sub">Scanning, duplicate search and downloads
+                            will be interrupted. After restart the page will refresh automatically.</div>
                     </div>
                 </div>
             </div>
             <div class="restart-modal-footer">
-                <button type="button" class="btn-outline-red" id="restartModalCancel">Отмена</button>
-                <button type="button" class="btn-restart btn-restart-confirm" id="confirmRestartBtn"><span class="btn-restart-label">Перезапустить</span><span class="btn-restart-spin"></span></button>
+                <button type="button" class="btn-outline-red" id="restartModalCancel">Cancel</button>
+                <button type="button" class="btn-restart btn-restart-confirm" id="confirmRestartBtn"><span class="btn-restart-label">Restart</span><span class="btn-restart-spin"></span></button>
             </div>
         </div>
     </div>
@@ -257,8 +254,8 @@
 <div class="restart-overlay" id="restartOverlay" style="display:none;">
     <div class="restart-overlay-inner">
         <div class="restart-overlay-mark" id="restartOverlayMark"><span>…</span></div>
-        <div class="restart-overlay-text" id="restartOverlayText">Перезапуск сервера…</div>
-        <div class="restart-overlay-hint" id="restartOverlayHint">Ждём, пока сервер вернётся онлайн</div>
+        <div class="restart-overlay-text" id="restartOverlayText">Restarting server…</div>
+        <div class="restart-overlay-hint" id="restartOverlayHint">Waiting for the server to come back online</div>
     </div>
 </div>
 
@@ -340,16 +337,67 @@
 
 <script>
     document.addEventListener('DOMContentLoaded', function() {
+        const urlParams = new URLSearchParams(window.location.search);
         const pasteBtn = document.getElementById('pasteBtn');
         const pathInput = document.getElementById('libraryPath');
+        const addForm = document.getElementById('addLibraryForm');
+        const addBtn = document.getElementById('addLibraryBtn');
+        const messageEl = document.getElementById('libraryMessage');
+        let pastePending = false;
+
+        function showMessage(text, isError) {
+            if (!messageEl) return;
+            messageEl.textContent = text || '';
+            messageEl.classList.toggle('is-error', !!isError);
+            messageEl.style.display = text ? 'block' : 'none';
+        }
+
+        const errorMessage = urlParams.get('error');
+        if (errorMessage) showMessage(errorMessage, true);
+
         if (pasteBtn && pathInput) {
             pasteBtn.addEventListener('click', async function() {
+                pastePending = true;
+                if (addBtn) addBtn.disabled = true;
+                pasteBtn.disabled = true;
                 try {
                     const text = await navigator.clipboard.readText();
-                    if (text) pathInput.value = text;
-                    else alert('Clipboard is empty or contains non-text data.');
+                    if (text) {
+                        pathInput.value = text.trim();
+                        showMessage('', false);
+                    } else {
+                        showMessage('Clipboard is empty or contains non-text data.', true);
+                    }
                 } catch (err) {
-                    alert('Unable to access clipboard. Please paste manually (Ctrl+V).');
+                    showMessage('Unable to access clipboard. Please paste manually (Ctrl+V).', true);
+                } finally {
+                    pastePending = false;
+                    if (addBtn) addBtn.disabled = false;
+                    pasteBtn.disabled = false;
+                    pathInput.focus();
+                }
+            });
+
+            pathInput.addEventListener('paste', function(e) {
+                const text = (e.clipboardData || window.clipboardData).getData('text');
+                if (text) {
+                    e.preventDefault();
+                    pathInput.value = text.trim();
+                    showMessage('', false);
+                }
+            });
+        }
+
+        if (addForm) {
+            addForm.addEventListener('submit', function(e) {
+                if (pastePending) {
+                    e.preventDefault();
+                    return;
+                }
+                if (pathInput && !pathInput.value.trim()) {
+                    e.preventDefault();
+                    showMessage('Enter a folder path first.', true);
+                    pathInput.focus();
                 }
             });
         }
@@ -366,64 +414,44 @@
             });
         }
 
-        const urlParams = new URLSearchParams(window.location.search);
         const taskId = urlParams.get('task_id');
         const scanBtn = document.getElementById('scanBtn');
         const scanForm = document.getElementById('scanForm');
+        const progressContainer = document.getElementById('scanProgressContainer');
 
         if (scanForm) {
             scanForm.addEventListener('submit', function() {
                 if (scanBtn) { scanBtn.disabled = true; scanBtn.textContent = 'Scanning…'; }
-                const pc = document.getElementById('scanProgressContainer');
-                if (pc) pc.style.display = 'block';
-                const pt = document.getElementById('scanProgressText');
-                if (pt) pt.textContent = 'Starting scan...';
+                if (window.VMProgress) VMProgress.reset(progressContainer);
             });
         }
 
-        if (taskId && scanBtn) startScanProgress(taskId);
-
-        function startScanProgress(taskId) {
-            const progressContainer = document.getElementById('scanProgressContainer');
-            const progressFill = document.getElementById('scanProgressFill');
-            const progressText = document.getElementById('scanProgressText');
-            if (!progressContainer) return;
-            progressContainer.style.display = 'block';
-            const es = new EventSource('/scan_progress/' + taskId);
-            es.onmessage = function(event) {
-                let data; try { data = JSON.parse(event.data); } catch (e) { return; }
-                if (data.status === 'complete') {
-                    progressFill.style.width = '100%';
-                    progressText.textContent = '✅ ' + (data.message || 'Done');
-                    es.close();
-                    setTimeout(() => {
+        if (taskId && window.VMProgress) {
+            VMProgress.monitor(progressContainer, {
+                url: '/scan_progress/' + taskId,
+                onComplete: function() {
+                    setTimeout(function() {
                         const url = new URL(window.location.href);
                         url.searchParams.delete('task_id');
                         window.location.href = url.toString();
-                    }, 900);
-                } else if (data.status === 'error') {
-                    progressFill.style.width = '100%';
-                    progressFill.style.background = '#dc3545';
-                    progressText.textContent = '❌ ' + (data.message || 'Error');
-                    es.close();
+                    }, 1000);
+                },
+                onError: function(data) {
+                    if (scanBtn) {
+                        scanBtn.disabled = false;
+                        scanBtn.textContent = 'Scan';
+                    }
+                },
+                onNotFound: function() {
+                    const text = document.getElementById('scanProgressText');
+                    if (text) text.textContent = 'Progress is no longer available. Refresh the page.';
+                },
+                onConnectionError: function() {
+                    const text = document.getElementById('scanProgressText');
+                    if (text) text.textContent = 'Connection lost. Refresh the page.';
                     if (scanBtn) { scanBtn.disabled = false; scanBtn.textContent = 'Scan'; }
-                } else if (data.status === 'scanning') {
-                    const pct = data.progress || 0;
-                    progressFill.style.width = pct + '%';
-                    const processed = data.processed || 0;
-                    const total = data.total || 0;
-                    const msg = data.message || '';
-                    progressText.textContent = total > 0 ? `${pct}% — ${processed}/${total} — ${msg}` : msg;
-                } else if (data.status === 'not_found') {
-                    progressText.textContent = 'Progress lost. Refresh the page.';
-                    es.close();
                 }
-            };
-            es.onerror = function() {
-                progressText.textContent = 'Connection lost. Refresh the page.';
-                es.close();
-                if (scanBtn) { scanBtn.disabled = false; scanBtn.textContent = 'Scan'; }
-            };
+            });
         }
 
         const restartBtn = document.getElementById('restartServerBtn');
@@ -442,7 +470,7 @@
             restartModalEl.style.display = 'flex';
             restartModalEl.classList.add('show');
             const label = confirmRestartBtn.querySelector('.btn-restart-label');
-            if (label) label.textContent = 'Перезапустить';
+            if (label) label.textContent = 'Restart';
             confirmRestartBtn.classList.remove('btn-restart-spin');
             confirmRestartBtn.disabled = false;
         }
@@ -466,7 +494,7 @@
                 if (confirmRestartBtn.disabled) return;
                 confirmRestartBtn.disabled = true;
                 confirmRestartBtn.classList.add('btn-restart-spin');
-                if (confirmRestartBtn.querySelector('.btn-restart-label')) confirmRestartBtn.querySelector('.btn-restart-label').textContent = 'Перезапускаем…';
+                if (confirmRestartBtn.querySelector('.btn-restart-label')) confirmRestartBtn.querySelector('.btn-restart-label').textContent = 'Restarting…';
                 fetch('/restart_server', { method: 'POST', headers: { 'Content-Type': 'application/json' } })
                     .catch(function() {})
                     .finally(function() { hideRestartModal(); startRestartOverlay(); });
@@ -476,8 +504,8 @@
         function startRestartOverlay() {
             if (!restartOverlay) return;
             if (restartOverlayInner) restartOverlayInner.classList.remove('success', 'error');
-            restartOverlayText.textContent = 'Перезапуск сервера…';
-            restartOverlayHint.textContent = 'Ждём, пока сервер вернётся онлайн';
+            restartOverlayText.textContent = 'Restarting server…';
+            restartOverlayHint.textContent = 'Waiting for the server to come back online';
             restartOverlay.style.display = 'flex';
             const startTime = Date.now();
             const TIMEOUT_MS = 60000;
@@ -487,15 +515,15 @@
             function markSuccess() {
                 if (stopped) return; stopped = true;
                 if (restartOverlayInner) restartOverlayInner.classList.add('success');
-                restartOverlayText.textContent = 'Сервер снова онлайн';
-                restartOverlayHint.textContent = 'Обновляем страницу…';
+                restartOverlayText.textContent = 'Server is online again';
+                restartOverlayHint.textContent = 'Refreshing page…';
                 setTimeout(() => { window.location.reload(); }, 900);
             }
             function markError() {
                 if (stopped) return; stopped = true;
                 if (restartOverlayInner) restartOverlayInner.classList.add('error');
-                restartOverlayText.textContent = 'Сервер не вернулся';
-                restartOverlayHint.textContent = 'Проверьте консоль. Обновите страницу вручную (F5).';
+                restartOverlayText.textContent = 'Server did not come back';
+                restartOverlayHint.textContent = 'Check the console. Refresh the page manually (F5).';
                 setTimeout(() => { window.location.reload(); }, 4000);
             }
             function ping() {

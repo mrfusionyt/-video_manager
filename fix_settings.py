@@ -165,11 +165,15 @@ def register(app):
             elif action == \'delete_all_categories\':
                 delete_all_categories(current_mode)
             elif action == \'add_library\':
-                path = request.form.get(\'path\')
+                path = (request.form.get(\'path\') or \'\').strip().strip(\'"\').strip("\'")
                 if path and os.path.isdir(path):
                     try:
                         add_library(path, mode=current_mode)
-                        scan_libraries()
+                        new_task_id = str(uuid.uuid4())
+                        if scan_libraries_async(new_task_id):
+                            return redirect(url_for(\'settings\', tab=\'libraries\',
+                                                    task_id=new_task_id,
+                                                    profile=current_profile))
                     except sqlite3.IntegrityError:
                         pass
             elif action == \'delete_library\':

@@ -1,0 +1,20 @@
+{# Shared dark/red progress card used by library scan, duplicate search and tools. #}
+{% macro vm_progress(container_id, title, detail_id=none, extra_id=none) %}
+<div id="{{ container_id }}" class="vm-progress" style="display:none;" role="status" aria-live="polite">
+    <div class="vm-progress-head">
+        <span class="vm-progress-title">{{ title }}</span>
+        <span class="vm-progress-percent" data-vm-percent>0%</span>
+    </div>
+    <div class="vm-progress-track" data-vm-track role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+        <div id="{{ container_id }}Fill" class="vm-progress-fill" data-vm-fill></div>
+    </div>
+    {% if detail_id %}
+    <div id="{{ detail_id }}" class="vm-progress-detail" data-vm-detail>Initializing...</div>
+    {% else %}
+    <div class="vm-progress-detail" data-vm-detail>Initializing...</div>
+    {% endif %}
+    {% if extra_id %}
+    <div id="{{ extra_id }}" class="vm-progress-extra" data-vm-extra></div>
+    {% endif %}
+</div>
+{% endmacro %}

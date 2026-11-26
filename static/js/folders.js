@@ -163,7 +163,7 @@
 
     function setCover(folderPath, videoId) {
         if (!folderPath || !videoId) {
-            showNotify('Обложка', 'Сначала выберите видео.', 'info');
+            showNotify('Cover', 'Please select a video first.', 'info');
             return;
         }
 
@@ -185,14 +185,14 @@
                     if (coverModalInstance) coverModalInstance.hide();
                     location.reload();
                 } else {
-                    showNotify('Ошибка', 'Не удалось установить обложку: ' + (data.error || 'Unknown'), 'error');
+                    showNotify('Error', 'Failed to set cover: ' + (data.error || 'Unknown'), 'error');
                     selectBtn.disabled = false;
                     selectBtn.textContent = 'Select';
                 }
             })
             .catch(function (err) {
                 console.error('Error setting cover:', err);
-                showNotify('Ошибка сети', 'Проверьте соединение и попробуйте снова.', 'error');
+                showNotify('Network error', 'Check your connection and try again.', 'error');
                 selectBtn.disabled = false;
                 selectBtn.textContent = 'Select';
             });
@@ -208,8 +208,8 @@
 
         if (!artists.length) {
             container.innerHTML =
-                '<div class="text-muted">Артистов пока нет. ' +
-                'Создайте первого на вкладке «Создать нового».</div>';
+                '<div class="text-muted">No artists yet. ' +
+                'Create the first one on the "Create new" tab.</div>';
             updateAssignBtn();
             return;
         }
@@ -251,7 +251,7 @@
         if (!btn) return;
         var n = document.querySelectorAll('#artistCheckboxList input[type="checkbox"]:checked').length;
         btn.disabled = (n === 0);
-        btn.textContent = n ? ('Назначить (' + n + ')') : 'Назначить';
+        btn.textContent = n ? ('Assign (' + n + ')') : 'Assign';
     }
 
     function openAssignArtistModal(folderPath, folderName) {
@@ -281,7 +281,7 @@
 
         var btn = document.getElementById('assignArtistBtn');
         btn.disabled = true;
-        btn.textContent = 'Назначение…';
+        btn.textContent = 'Assigning…';
 
         fetch('/folders/assign_artist', {
             method: 'POST',
@@ -299,20 +299,20 @@
                 if (d.success) {
                     var n = d.assigned || 0;
                     var msg = (n > 0)
-                        ? ('Назначено: ' + n + ' видео.')
-                        : 'Нет видео для назначения (все уже привязаны к артистам).';
-                    showNotify('Готово', msg, 'success', function () {
+                        ? ('Assigned: ' + n + ' video(s).')
+                        : 'No videos to assign (all are already linked to artists).';
+                    showNotify('Done', msg, 'success', function () {
                         location.reload();
                     });
                 } else {
-                    showNotify('Ошибка', d.error || 'Не удалось назначить артиста.', 'error');
+                    showNotify('Error', d.error || 'Failed to assign artist.', 'error');
                     btn.disabled = false;
                     updateAssignBtn();
                 }
             })
             .catch(function (err) {
                 console.error('assign_artist error:', err);
-                showNotify('Ошибка сети', 'Проверьте соединение и попробуйте снова.', 'error');
+                showNotify('Network error', 'Check your connection and try again.', 'error');
                 btn.disabled = false;
                 updateAssignBtn();
             });
@@ -321,13 +321,13 @@
     function createArtistAndSelect() {
         var name = document.getElementById('newArtistName').value.trim();
         if (!name) {
-            showNotify('Внимание', 'Введите имя артиста.', 'info');
+            showNotify('Warning', 'Enter the artist name.', 'info');
             return;
         }
 
         var btn = document.getElementById('createArtistBtn');
         btn.disabled = true;
-        btn.textContent = 'Создание…';
+        btn.textContent = 'Creating…';
 
         fetch('/folders/create_artist', {
             method: 'POST',
@@ -355,16 +355,16 @@
 
                     document.getElementById('newArtistName').value = '';
                 } else {
-                    showNotify('Ошибка', d.error || 'Не удалось создать артиста.', 'error');
+                    showNotify('Error', d.error || 'Failed to create artist.', 'error');
                 }
             })
             .catch(function (err) {
                 console.error('create_artist error:', err);
-                showNotify('Ошибка сети', 'Проверьте соединение и попробуйте снова.', 'error');
+                showNotify('Network error', 'Check your connection and try again.', 'error');
             })
             .finally(function () {
                 btn.disabled = false;
-                btn.textContent = 'Создать и выбрать';
+                btn.textContent = 'Create and select';
             });
     }
 

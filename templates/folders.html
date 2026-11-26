@@ -118,7 +118,7 @@
         <div class="modal-content edit-modal-content">
             <div class="modal-header">
                 <h5 class="modal-title">
-                    Назначить артиста для папки <span id="assignFolderName"></span>
+                    Assign artist for folder <span id="assignFolderName"></span>
                 </h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
@@ -129,14 +129,14 @@
                         <button class="nav-link active" id="tabExistingBtn"
                                 data-bs-toggle="tab" data-bs-target="#tabExisting"
                                 type="button" role="tab">
-                            Существующие артисты
+                            Existing artists
                         </button>
                     </li>
                     <li class="nav-item" role="presentation">
                         <button class="nav-link" id="tabNewBtn"
                                 data-bs-toggle="tab" data-bs-target="#tabNew"
                                 type="button" role="tab">
-                            Создать нового
+                            Create new
                         </button>
                     </li>
                 </ul>
@@ -144,7 +144,7 @@
                 <div class="tab-content">
                     <div class="tab-pane fade show active" id="tabExisting" role="tabpanel">
                         <div id="artistCheckboxList" class="artist-checkbox-list">
-                            <div class="text-muted">Загрузка…</div>
+                            <div class="text-muted">Loading…</div>
                         </div>
                     </div>
                     <div class="tab-pane fade" id="tabNew" role="tabpanel">
@@ -152,11 +152,11 @@
                             <input type="text"
                                    class="form-control"
                                    id="newArtistName"
-                                   placeholder="Имя нового артиста"
+                                   placeholder="New artist name"
                                    autocomplete="off">
                         </div>
                         <button type="button" class="btn btn-secondary" id="createArtistBtn">
-                            Создать и выбрать
+                            Create and select
                         </button>
                     </div>
                 </div>
@@ -164,19 +164,19 @@
                 <div class="form-check mt-3">
                     <input class="form-check-input" type="checkbox" id="onlyUnassignedChk" checked>
                     <label class="form-check-label" for="onlyUnassignedChk">
-                        Только видео без артиста
+                        Only videos without an artist
                     </label>
                 </div>
 
                 <div class="small-muted mt-2">
-                    Видео из этой папки, у которых уже есть артист, будут пропущены,
-                    если галочка выше установлена.
+                    Videos in this folder that already have an artist will be skipped
+                    if the checkbox above is checked.
                 </div>
             </div>
             <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
                 <button type="button" class="btn btn-primary" id="assignArtistBtn" disabled>
-                    Назначить
+                    Assign
                 </button>
             </div>
         </div>
@@ -188,7 +188,7 @@
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content edit-modal-content">
             <div class="modal-header">
-                <h5 class="modal-title" id="notifyTitle">Уведомление</h5>
+                <h5 class="modal-title" id="notifyTitle">Notification</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <div class="modal-body">
@@ -198,7 +198,7 @@
                 </div>
             </div>
             <div class="modal-footer">
-                <button type="button" class="btn btn-primary" id="notifyOkBtn" data-bs-dismiss="modal">ОК</button>
+                <button type="button" class="btn btn-primary" id="notifyOkBtn" data-bs-dismiss="modal">OK</button>
             </div>
         </div>
     </div>

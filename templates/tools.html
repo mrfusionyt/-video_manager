@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from '_vm_progress.html' import vm_progress %}
 
 {% block title %}Tools{% endblock %}
 
@@ -74,13 +75,7 @@
             </button>
         </div>
 
-        <div id="progressContainer" class="dup-progress" style="display:none;">
-            <div class="dup-progress-bar">
-                <div id="progressFill" class="dup-progress-fill" style="width:0%;"></div>
-            </div>
-            <div id="progressText" class="dup-progress-text">Initializing...</div>
-            <div id="progressCurrent" class="dup-progress-current" style="font-size:0.85em;color:#aaa;margin-top:6px;"></div>
-        </div>
+        {{ vm_progress('progressContainer', 'Task progress', 'progressText', 'progressCurrent') }}
 
         <div id="resultContainer" style="display:none; margin-top:20px;">
             <h6>Result</h6>
@@ -141,7 +136,10 @@
                     alert('Error: ' + data.error);
                     return;
                 }
-                monitorProgress(data.task_id);
+                var progressUrl = (url === '/tools/scan')
+                    ? '/scan_progress/'
+                    : '/tools/progress/';
+                monitorProgress(data.task_id, progressUrl);
             })
             .catch(err => alert('Error: ' + err));
     }
@@ -155,55 +153,35 @@
         runTask('/tools/restore', {library_id: sel.value});
     }
 
-    function monitorProgress(taskId) {
+    function monitorProgress(taskId, progressUrl) {
         const c = document.getElementById('progressContainer');
-        const fill = document.getElementById('progressFill');
-        const text = document.getElementById('progressText');
-        const cur = document.getElementById('progressCurrent');
         const res = document.getElementById('resultContainer');
         const resBody = document.getElementById('resultBody');
-
-        c.style.display = 'block';
-        fill.style.background = '';
-        fill.style.width = '0%';
-        text.textContent = 'Initializing...';
-        cur.textContent = '';
         res.style.display = 'none';
 
-        const es = new EventSource('/tools/progress/' + taskId);
-        es.onmessage = function(event) {
-            let d;
-            try { d = JSON.parse(event.data); } catch(e) { return; }
-
-            if (d.status === 'complete') {
-                fill.style.width = '100%';
-                text.textContent = '✅ ' + (d.message || 'Done');
-                cur.textContent = '';
-                es.close();
+        if (!window.VMProgress) return;
+        VMProgress.monitor(c, {
+            url: (progressUrl || '/tools/progress/') + taskId,
+            onComplete: function (d) {
                 if (d.result) {
                     resBody.innerHTML = formatResult(d.result);
                     res.style.display = 'block';
                 }
-                setTimeout(() => location.reload(), 2500);
-            } else if (d.status === 'error') {
-                fill.style.width = '100%';
-                fill.style.background = '#dc3545';
-                text.textContent = '❌ ' + (d.message || 'Error');
-                es.close();
-            } else if (d.status === 'not_found') {
-                text.textContent = 'Progress lost';
-                es.close();
-            } else {
-                const pct = d.progress || 0;
-                fill.style.width = pct + '%';
-                text.textContent = `${pct}% — ${d.processed || 0}/${d.total || 0}`;
-                cur.textContent = d.message || d.current || '';
+                setTimeout(function () { location.reload(); }, 2500);
+            },
+            onError: function (d) {
+                const text = document.getElementById('progressText');
+                if (text) text.textContent = 'Error: ' + (d.message || 'Unknown error');
+            },
+            onNotFound: function () {
+                const text = document.getElementById('progressText');
+                if (text) text.textContent = 'Progress is no longer available.';
+            },
+            onConnectionError: function () {
+                const text = document.getElementById('progressText');
+                if (text) text.textContent = 'Connection lost. Refresh the page.';
             }
-        };
-        es.onerror = function() {
-            text.textContent = 'Connection lost';
-            es.close();
-        };
+        });
     }
 
     function formatResult(r) {
