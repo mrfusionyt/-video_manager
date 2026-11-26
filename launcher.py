@@ -33,7 +33,7 @@ from addon.photo_classifier import state as pv_state
 # =====================================================================
 # UPDATE SETTINGS
 # =====================================================================
-CURRENT_VERSION = '1.0.8'
+CURRENT_VERSION = '1.0.9'
 GITHUB_USER = 'mrfusionyt'
 GITHUB_REPO = '-video_manager'
 AUTO_UPDATE_INTERVAL = 3600       # seconds between automatic checks
@@ -449,7 +449,8 @@ def download_and_update(download_url, target_version=None, auto=False):
         log_path = os.path.join(tmp, 'vm_update.log')
         pid = os.getpid()
         # Copying over a running exe is impossible on Windows. A detached
-        # batch waits for this PID to disappear, copies the files and relaunches.
+        # batch waits for this PID to disappear, closes any remaining
+        # instances that still hold the files, copies and relaunches.
         with open(bat_path, 'w', encoding='utf-8') as f:
             f.write(f'''@echo off
 chcp 65001 >nul
@@ -461,7 +462,7 @@ set /a WAITS=0
 rem NB: a tasklist|findstr pipe hangs when cmd runs detached without a console.
 rem Write the process list to a file and search that file instead.
 tasklist /FI "PID eq {pid}" /NH > "%TASKFILE%"
-findstr /C:"{pid}" "%TASKFILE%" >nul
+findstr /C:" {pid} " "%TASKFILE%" >nul
 if errorlevel 1 goto install
 set /a WAITS+=1
 if %WAITS% GEQ 120 (
@@ -474,8 +475,13 @@ goto wait_pid
 :install
 del "%TASKFILE%" >nul 2>&1
 if not exist "{target_dir}" mkdir "{target_dir}"
+echo [%DATE% %TIME%] closing running VideoManager instances >> "%LOG%"
+rem The updating process is gone, but another launcher/service instance may
+rem still hold the destination exe and DLLs. Close all of them before copying.
+taskkill /F /IM VideoManager.exe >> "%LOG%" 2>&1
+ping -n 3 127.0.0.1 >nul
 echo [%DATE% %TIME%] copying to {target_dir} >> "%LOG%"
-robocopy "{src_root}" "{target_dir}" /E /IS /IT /R:3 /W:2 /NFL /NDL /NJH /NJS /NC /NS /NP >> "%LOG%" 2>&1
+robocopy "{src_root}" "{target_dir}" /E /IS /IT /R:5 /W:1 /NFL /NDL /NJH /NJS /NC /NS /NP >> "%LOG%" 2>&1
 echo [%DATE% %TIME%] robocopy exit %ERRORLEVEL% >> "%LOG%"
 rmdir /s /q "{update_dir}" >nul 2>&1
 del "{zip_path}" >nul 2>&1
