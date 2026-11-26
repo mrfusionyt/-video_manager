@@ -24,13 +24,13 @@
 Версия хранится в одном месте — `launcher.py`:
 
 ```python
-CURRENT_VERSION = '1.0.2'
+CURRENT_VERSION = '1.0.4'
 GITHUB_USER = 'mrfusionyt'
 GITHUB_REPO = '-video_manager'
 ```
 
-Перед новым релизом увеличьте `CURRENT_VERSION` (например `1.0.1`), иначе лаунчер
-у пользователей не увидит обновление. `release.bat 1.0.1` сделает это сам.
+Перед новым релизом увеличьте `CURRENT_VERSION` (например `1.0.4`), иначе лаунчер
+у пользователей не увидит обновление. `release.bat 1.0.4` сделает это сам.
 
 ---
 
@@ -45,19 +45,19 @@ GITHUB_REPO = '-video_manager'
 или сразу с новой версией:
 
 ```bat
-.\release.bat 1.0.1
+.\release.bat 1.0.4
 ```
 
 Что происходит:
 
-1. `CURRENT_VERSION` в `launcher.py` меняется на `1.0.1`;
-2. все локальные изменения коммитятся (`release v1.0.1`) — включая workflow;
-3. создаётся тег `v1.0.1` и делается `git push` ветки и тега;
+1. `CURRENT_VERSION` в `launcher.py` меняется на `1.0.4`;
+2. все локальные изменения коммитятся (`release v1.0.4`) — включая workflow;
+3. создаётся тег `v1.0.4` и делается `git push` ветки и тега;
 4. **GitHub Actions** на `windows-latest`:
    - ставит Python 3.12 и зависимости из `requirements.txt`;
    - скачивает бинарники `_dop` (см. ниже);
    - собирает `onedir` из `VideoManager.spec` (точка входа — `launcher.py`);
-   - пакует `VideoManager-v1.0.1-win64-onedir.zip`;
+   - пакует `VideoManager-v1.0.4-win64-onedir.zip`;
    - создаёт релиз и прикрепляет архив через встроенный `GITHUB_TOKEN`;
 5. в конце выводятся ссылки на Actions и на релиз; лог — `cloud_release.log`.
 
@@ -67,10 +67,10 @@ GITHUB_REPO = '-video_manager'
 
 ```bat
 release.bat                   :: текущая версия → облачный релиз
-release.bat 1.0.1             :: поднять версию → облачный релиз
+release.bat 1.0.4             :: поднять версию → облачный релиз
 release.bat --watch           :: дождаться окончания сборки в Actions
 release.bat --dry-run         :: только показать план, ничего не менять
-release.bat 1.0.1 --force-tag :: заменить тег v1.0.1, если он уже есть
+release.bat 1.0.4 --force-tag :: заменить тег v1.0.4, если он уже есть
 ```
 
 Первый раз проверьте, что git может пушить: `git push -u origin HEAD`.
@@ -95,7 +95,7 @@ variables → Variables репозитория). Существующие фай
 ### Запуск без батника
 
 Вкладка **Actions** → `Build & Release (onedir)` → **Run workflow** → при желании
-укажите версию. Либо просто сделайте `git push origin v1.0.1` — тег сам запустит
+укажите версию. Либо просто сделайте `git push origin v1.0.4` — тег сам запустит
 сборку.
 
 ---
@@ -104,7 +104,7 @@ variables → Variables репозитория). Существующие фай
 
 ```bat
 .\release-local.bat
-.\release-local.bat 1.0.1
+.\release-local.bat 1.0.4
 .\release-local.bat --zip-only
 .\release-local.bat --skip-build
 ```
@@ -146,8 +146,8 @@ python make_release.py
 `set GH_TOKEN=ghp_...` и `python make_release.py`. Либо файл `.gh_token` в корне
 проекта (уже в `.gitignore`).
 
-Ручная загрузка: https://github.com/mrfusionyt/-video_manager/releases/new?tag=v1.0.2
-→ прикрепить `VideoManager-v1.0.2-win64-onedir.zip` → Publish release. Имя ассета
+Ручная загрузка: https://github.com/mrfusionyt/-video_manager/releases/new?tag=v1.0.4
+→ прикрепить `VideoManager-v1.0.4-win64-onedir.zip` → Publish release. Имя ассета
 должно содержать `onedir` и заканчиваться на `.zip` — лаунчер ищет именно такой
 файл.
 
@@ -173,12 +173,12 @@ python make_release.py
 
 ## 4. Чек-лист нового релиза
 
-- [ ] `release.bat 1.0.1` — версия поднялась, тег запушен
-- [ ] в выводе есть ссылка `Release : https://github.com/.../releases/tag/v1.0.1`
+- [ ] `release.bat 1.0.4` — версия поднялась, тег запушен
+- [ ] в выводе есть ссылка `Release : https://github.com/.../releases/tag/v1.0.4`
 - [ ] во вкладке Actions задача `Build & Release (onedir)` зелёная
 - [ ] `cloud_release.log` без ошибок
 - [ ] на «чистой» машине скачал zip из релиза, распаковал, запустил `.exe`
-- [ ] лаунчер на старой версии увидел `Update to v1.0.1`
+- [ ] лаунчер на старой версии сам показал `Update v1.0.4 available!`, скачал zip, установил его в `C:\!video_manager` и перезапустился
 
 ---
 
@@ -188,7 +188,7 @@ python make_release.py
 |--------|-------------------|
 | `git push failed` | авторизуйтесь: `gh auth login` или Credential Manager; проверьте `git push -u origin HEAD` |
 | `remote: invalid credentials` при push | `release.bat` не шлёт OAuth `gho_*` как bearer; используется Credential Manager. При необходимости `gh auth setup-git` |
-| `tag v1.0.1 already exists` | если тег есть только локально, `release.bat` сам передвинет его на новый коммит; если он уже на GitHub — `--force-tag` или новая версия |
+| `tag v1.0.4 already exists` | если тег есть только локально, `release.bat` сам передвинет его на новый коммит; если он уже на GitHub — `--force-tag` или новая версия |
 | `Tag version ... does not match CURRENT_VERSION` | батник должен менять версию; при ручном теге обновите `launcher.py` |
 | `Resolve version: No module named 'requests'` | зависимости теперь ставятся до проверки версии; повторите запуск workflow/тег |
 | Actions: `ffmpeg.exe not found` | упал `tools/fetch_dop.py`; проверьте лог шага и доступ к URL (или задайте `DOP_*_URL`) |

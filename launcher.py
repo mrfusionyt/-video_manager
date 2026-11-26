@@ -33,9 +33,11 @@ from addon.photo_classifier import state as pv_state
 # =====================================================================
 # UPDATE SETTINGS
 # =====================================================================
-CURRENT_VERSION = '1.0.3'
+CURRENT_VERSION = '1.0.4'
 GITHUB_USER = 'mrfusionyt'
 GITHUB_REPO = '-video_manager'
+AUTO_UPDATE_INTERVAL = 3600       # seconds between automatic checks
+INSTALL_DIR = r'C:\!video_manager'  # where the compiled app installs updates
 # =====================================================================
 
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
@@ -68,7 +70,9 @@ tk_root = None
 status_label = None
 update_btn = None
 pending_update_url = None
+pending_version = None
 ignored_version = None
+update_in_progress = False
 tray_icon = None
 local_url_global = ''
 quit_requested = threading.Event()
@@ -84,6 +88,67 @@ def _version_key(v):
         parts.pop()
     return tuple(parts) or (0,)
 
+
+def set_update_ui(status=None, color='#ff596b', btn_text=None,
+                  btn_state=None, show_btn=False):
+    """Thread-safe status/button update for the launcher window."""
+    def apply():
+        if status_label and status is not None:
+            status_label.config(text=status, fg=color)
+        if update_btn:
+            if btn_text is not None:
+                update_btn.config(text=btn_text)
+            if btn_state is not None:
+                update_btn.config(state=btn_state)
+            if show_btn and not update_btn.winfo_ismapped():
+                update_btn.pack(fill=tk.X, padx=0, pady=(0, 6))
+    if tk_root:
+        try:
+            tk_root.after(0, apply)
+        except Exception:
+            pass
+
+
+def resolve_install_dir():
+    """Target folder for an update: C:\\!video_manager, with a safe fallback."""
+    candidates = []
+    override = os.environ.get('VIDEOMANAGER_INSTALL_DIR', '').strip()
+    if override:
+        candidates.append(override)
+    if os.name == 'nt':
+        candidates.append(INSTALL_DIR)
+    candidates.append(os.path.dirname(os.path.abspath(sys.executable)))
+
+    for path in candidates:
+        try:
+            os.makedirs(path, exist_ok=True)
+            probe = os.path.join(path, 'vm_write_test.tmp')
+            with open(probe, 'w', encoding='utf-8') as f:
+                f.write('')
+            os.remove(probe)
+            return path
+        except Exception as e:
+            append_log(f'[update] folder {path} is not writable: {e}')
+    return os.path.dirname(os.path.abspath(sys.executable))
+
+
+def safe_extract(zf, dest):
+    """Extract a zip without allowing ../ or absolute paths to escape dest."""
+    dest_root = os.path.normpath(os.path.abspath(dest))
+    members = []
+    for info in zf.infolist():
+        name = info.filename.replace('\\', '/')
+        if name.startswith('/') or ':' in name.split('/')[0]:
+            append_log(f'[update] skipped unsafe archive entry: {info.filename}')
+            continue
+        target = os.path.normpath(os.path.abspath(os.path.join(dest_root, name)))
+        if target != dest_root and not target.startswith(dest_root + os.sep):
+            append_log(f'[update] skipped unsafe archive entry: {info.filename}')
+            continue
+        members.append(info)
+    if not members:
+        raise RuntimeError('update archive has no usable files')
+    zf.extractall(dest_root, members=members)
 
 
 def resource_path(rel: str) -> str:
@@ -182,7 +247,8 @@ def create_tray():
 
 
 def check_for_updates(manual=False):
-    global ignored_version
+    """Check GitHub once; a newer release is installed automatically."""
+    global ignored_version, update_in_progress
     if GITHUB_USER == 'YOUR_NICKNAME' or GITHUB_REPO == 'YOUR_REPO':
         return False
     try:
@@ -218,8 +284,16 @@ def check_for_updates(manual=False):
             if not download_url:
                 append_log('[update] release has no .zip asset')
                 return False
+            if update_in_progress:
+                append_log('[update] newer version is already being installed')
+                return True
             if tk_root:
                 tk_root.after(0, lambda: show_update_indicator(latest_version, download_url))
+            if getattr(sys, 'frozen', False):
+                append_log(f'[update] auto-installing v{latest_version}')
+                start_update(download_url, latest_version, auto=True)
+            else:
+                append_log('[update] source run: auto-install needs the compiled .exe')
             return True
         return False
     except Exception as e:
@@ -229,9 +303,10 @@ def check_for_updates(manual=False):
 
 def force_check_update():
     def do_check():
-        global ignored_version, pending_update_url
+        global ignored_version, pending_update_url, pending_version
         ignored_version = None
         pending_update_url = None
+        pending_version = None
 
         append_log('[update] manual check started')
         if status_label:
@@ -262,33 +337,58 @@ def update_loop():
         time.sleep(0.1)
     while not quit_requested.is_set():
         check_for_updates(manual=False)
-        for _ in range(3600):
+        for _ in range(AUTO_UPDATE_INTERVAL):
             if quit_requested.is_set():
                 break
             time.sleep(1)
 
 
 def show_update_indicator(latest_version, download_url):
-    global pending_update_url
+    global pending_update_url, pending_version
     pending_update_url = download_url
+    pending_version = latest_version
     append_log(f'[update] new version v{latest_version} available')
     if update_btn and not update_btn.winfo_ismapped():
         update_btn.config(text=f'Update to v{latest_version}', state=tk.NORMAL)
         update_btn.pack(fill=tk.X, padx=0, pady=(0, 6))
-        if status_label:
-            status_label.config(text='Update available!', fg='#ff596b')
+    if status_label:
+        status_label.config(text=f'Update v{latest_version} available!', fg='#ff596b')
+    if tray_icon:
+        try:
+            tray_icon.title = f'VideoManager - update v{latest_version}'
+        except Exception:
+            pass
+
+
+def start_update(download_url, target_version=None, auto=False):
+    """Download and install in the background; the button stays as a retry."""
+    global update_in_progress, pending_update_url, pending_version
+    if update_in_progress:
+        append_log('[update] install already in progress, skipping')
+        return
+    if not getattr(sys, 'frozen', False):
+        if tk_root:
+            tk_root.after(0, lambda: messagebox.showinfo(
+                'Info', 'Auto-update works only in the compiled .exe.', parent=tk_root))
+        return
+    update_in_progress = True
+    pending_update_url = download_url
+    if target_version:
+        pending_version = target_version
+    ver = target_version or 'new'
+    verb = 'Downloading' if auto else 'Updating'
+    append_log(f'[update] {"automatic" if auto else "manual"} update to v{ver} started')
+    set_update_ui(status=f'{verb} v{ver}...', color='#ff596b',
+                  btn_text=f'{verb} v{ver}...', btn_state=tk.DISABLED,
+                  show_btn=True)
+    threading.Thread(target=download_and_update,
+                     args=(download_url, ver, auto), daemon=True).start()
 
 
 def trigger_update():
-    global pending_update_url
     if not pending_update_url:
         return
-    if update_btn:
-        update_btn.config(state=tk.DISABLED, text='Downloading update...')
-    if status_label:
-        status_label.config(text='Downloading update...', fg='#ff596b')
-    append_log('[update] download started')
-    threading.Thread(target=download_and_update, args=(pending_update_url,), daemon=True).start()
+    start_update(pending_update_url, pending_version, auto=False)
 
 
 def _find_payload_root(folder):
@@ -303,17 +403,16 @@ def _find_payload_root(folder):
     return folder
 
 
-def download_and_update(download_url):
-    if not getattr(sys, 'frozen', False):
-        tk_root.after(0, lambda: messagebox.showinfo('Info', 'Auto-update works only in the compiled .exe.', parent=tk_root))
-        return
+def download_and_update(download_url, target_version=None, auto=False):
+    """Download -> extract -> install into C:\\!video_manager -> restart."""
+    global update_in_progress
+    ver = target_version or 'new'
     try:
-        exe_path = sys.executable
-        exe_dir = os.path.dirname(exe_path)
-        exe_name = os.path.basename(exe_path)
         tmp = tempfile.gettempdir()
         zip_path = os.path.join(tmp, 'vm_update.zip')
         update_dir = os.path.join(tmp, 'vm_update_temp')
+        target_dir = resolve_install_dir()
+        append_log(f'[update] install folder: {target_dir}')
 
         r = requests.get(download_url, stream=True, timeout=(10, 120))
         r.raise_for_status()
@@ -326,49 +425,81 @@ def download_and_update(download_url):
                     continue
                 f.write(chunk)
                 done += len(chunk)
-                if total and (done * 100 // total) >= next_report:
-                    append_log(f'[update] downloaded {done * 100 // total}%')
-                    next_report += 10
+                if total:
+                    pct = done * 100 // total
+                    if pct >= next_report:
+                        append_log(f'[update] downloaded {pct}%')
+                        set_update_ui(status=f'Update v{ver}: {pct}%',
+                                      btn_text=f'Downloading v{ver} {pct}%')
+                        next_report += 10
         append_log(f'[update] archive saved ({done // 1048576} MB)')
 
         if os.path.exists(update_dir):
             shutil.rmtree(update_dir, ignore_errors=True)
         os.makedirs(update_dir)
         with zipfile.ZipFile(zip_path, 'r') as zf:
-            zf.extractall(update_dir)
+            safe_extract(zf, update_dir)
 
         src_root = _find_payload_root(update_dir)
-        if not os.path.isfile(os.path.join(src_root, exe_name)):
-            raise RuntimeError(f'{exe_name} not found inside the update archive')
+        if not os.path.isfile(os.path.join(src_root, 'VideoManager.exe')):
+            raise RuntimeError('VideoManager.exe not found inside the update archive')
 
+        target_exe = os.path.join(target_dir, 'VideoManager.exe')
         bat_path = os.path.join(tmp, 'vm_update.bat')
         log_path = os.path.join(tmp, 'vm_update.log')
+        pid = os.getpid()
+        # Copying over a running exe is impossible on Windows. A detached
+        # batch waits for this PID to disappear, copies the files and relaunches.
         with open(bat_path, 'w', encoding='utf-8') as f:
             f.write(f'''@echo off
 chcp 65001 >nul
 set "LOG={log_path}"
-echo [%DATE% %TIME%] update started >> "%LOG%"
-timeout /t 2 /nobreak >nul
-taskkill /IM "{exe_name}" /F >> "%LOG%" 2>&1
+echo [%DATE% %TIME%] update to v{ver} started, pid {pid} >> "%LOG%"
+set /a WAITS=0
+:wait_pid
+tasklist /FI "PID eq {pid}" /NH | findstr /C:"{pid}" >nul
+if errorlevel 1 goto install
+set /a WAITS+=1
+if %WAITS% GEQ 120 (
+  echo [%DATE% %TIME%] timeout, forcing exit >> "%LOG%"
+  taskkill /PID {pid} /F >> "%LOG%" 2>&1
+  goto install
+)
 timeout /t 1 /nobreak >nul
-robocopy "{src_root}" "{exe_dir}" /E /IS /IT /R:3 /W:2 /NFL /NDL /NJH /NJS /NC /NS /NP >> "%LOG%" 2>&1
+goto wait_pid
+:install
+if not exist "{target_dir}" mkdir "{target_dir}"
+echo [%DATE% %TIME%] copying to {target_dir} >> "%LOG%"
+robocopy "{src_root}" "{target_dir}" /E /IS /IT /R:3 /W:2 /NFL /NDL /NJH /NJS /NC /NS /NP >> "%LOG%" 2>&1
+echo [%DATE% %TIME%] robocopy exit %ERRORLEVEL% >> "%LOG%"
 rmdir /s /q "{update_dir}" >nul 2>&1
 del "{zip_path}" >nul 2>&1
-start "" "{exe_path}"
+echo [%DATE% %TIME%] starting {target_exe} >> "%LOG%"
+start "" "{target_exe}"
 del "%~f0"
 ''')
-        append_log('[update] installing, the app will restart')
-        subprocess.Popen(['cmd', '/c', bat_path], shell=False,
-                         creationflags=subprocess.CREATE_NO_WINDOW)
+        append_log('[update] installing to ' + target_dir + ', app will restart')
+        set_update_ui(status=f'Installing v{ver}...', color='#ff596b',
+                      btn_text=f'Installing v{ver}...', btn_state=tk.DISABLED)
+        flags = getattr(subprocess, 'CREATE_NO_WINDOW', 0) | getattr(subprocess, 'DETACHED_PROCESS', 0)
+        subprocess.Popen(['cmd', '/c', bat_path], creationflags=flags, close_fds=True)
         quit_requested.set()
         if tray_icon:
-            tray_icon.stop()
+            try:
+                tray_icon.stop()
+            except Exception:
+                pass
         if tk_root:
-            tk_root.after(400, tk_root.destroy)
+            tk_root.after(500, tk_root.destroy)
     except Exception as e:
+        update_in_progress = False
         append_log(f'[update] failed: {e}')
-        if tk_root:
-            tk_root.after(0, lambda: messagebox.showerror('Update Error', f'Failed to update: {e}', parent=tk_root))
+        set_update_ui(status='Update failed - see log', color='#ff596b',
+                      btn_text=f'Retry update v{ver}', btn_state=tk.NORMAL,
+                      show_btn=True)
+        if not auto and tk_root:
+            tk_root.after(0, lambda: messagebox.showerror(
+                'Update Error', f'Failed to update: {e}', parent=tk_root))
 
 
 def drain_log():
