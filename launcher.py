@@ -33,7 +33,7 @@ from addon.photo_classifier import state as pv_state
 # =====================================================================
 # UPDATE SETTINGS
 # =====================================================================
-CURRENT_VERSION = '1.0.6'
+CURRENT_VERSION = '1.0.7'
 GITHUB_USER = 'mrfusionyt'
 GITHUB_REPO = '-video_manager'
 AUTO_UPDATE_INTERVAL = 3600       # seconds between automatic checks
@@ -454,10 +454,14 @@ def download_and_update(download_url, target_version=None, auto=False):
             f.write(f'''@echo off
 chcp 65001 >nul
 set "LOG={log_path}"
+set "TASKFILE={tmp}\\vm_update_tasks.txt"
 echo [%DATE% %TIME%] update to v{ver} started, pid {pid} >> "%LOG%"
 set /a WAITS=0
 :wait_pid
-tasklist /FI "PID eq {pid}" /NH | findstr /C:"{pid}" >nul
+rem NB: a tasklist|findstr pipe hangs when cmd runs detached without a console.
+rem Write the process list to a file and search that file instead.
+tasklist /FI "PID eq {pid}" /NH > "%TASKFILE%"
+findstr /C:"{pid}" "%TASKFILE%" >nul
 if errorlevel 1 goto install
 set /a WAITS+=1
 if %WAITS% GEQ 120 (
@@ -465,9 +469,10 @@ if %WAITS% GEQ 120 (
   taskkill /PID {pid} /F >> "%LOG%" 2>&1
   goto install
 )
-timeout /t 1 /nobreak >nul
+ping -n 2 127.0.0.1 >nul
 goto wait_pid
 :install
+del "%TASKFILE%" >nul 2>&1
 if not exist "{target_dir}" mkdir "{target_dir}"
 echo [%DATE% %TIME%] copying to {target_dir} >> "%LOG%"
 robocopy "{src_root}" "{target_dir}" /E /IS /IT /R:3 /W:2 /NFL /NDL /NJH /NJS /NC /NS /NP >> "%LOG%" 2>&1
