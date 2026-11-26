@@ -79,17 +79,7 @@ for _c in _cookie_candidates:
 if DOP_DIR:
     os.environ['PATH'] = DOP_DIR + os.pathsep + os.environ.get('PATH', '')
 
-PYTHON_EXE = sys.executable
 IS_FROZEN = getattr(sys, 'frozen', False)
-
-print(f"[downloader] _dop dir = {DOP_DIR}")
-print(f"[downloader] ffmpeg   = {FFMPEG_DIR}")
-print(f"[downloader] deno     = {DENO_PATH}")
-print(f"[downloader] yt-dlp   = {YTDLP_EXE or '(not in _dop)'}")
-print(f"[downloader] cookies  = {COOKIES_FILE or '(none)'}")
-print(f"[downloader] frozen   = {IS_FROZEN}")
-print(f"[downloader] mode     = "
-      f"{'EXE (standalone yt-dlp.exe)' if IS_FROZEN else 'dev (python -m yt_dlp)'}")
 
 if not FFMPEG_DIR:
     print("[downloader] ⚠️ ffmpeg.exe not found in _dop.")

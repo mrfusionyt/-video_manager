@@ -78,7 +78,6 @@ AUDIO_SUBPRINT_PER_SEC = 1.0 / 0.1234
 AUDIO_FPCALC_MAX_LENGTH = 1800
 
 AUDIO_FULL_MIN_RUN_SEC    = 30.0
-AUDIO_PARTIAL_MIN_RUN_SEC = 60.0
 
 AUDIO_BITS_TOLERANT = 8
 AUDIO_PREFILTER_SAMPLES    = 40
@@ -111,26 +110,6 @@ for cand in FPCALC_CANDIDATES:
     if cand and os.path.exists(cand):
         FPCALC_PATH = cand
         break
-
-print(f"[dup] fpcalc path = {FPCALC_PATH}")
-print(f"[dup] video: {len(KEYFRAME_POSITIONS)} keyframes, "
-      f"hashes/frame={NUM_HASHES} (orig+mirror), "
-      f"max_hamming={FAST_MAX_HAMMING}, "
-      f"full_coverage>={FULL_COVERAGE}, "
-      f"partial_min_subseq={PARTIAL_MIN_SUBSEQ_FRAMES}")
-print(f"[dup] photo: MIH lsh_hamming={IMAGE_LSH_HAMMING}, "
-      f"final_hamming={IMAGE_MAX_HAMMING}, "
-      f"brute_force_limit={IMAGE_BRUTE_FORCE_LIMIT}, "
-      f"min_entropy={IMAGE_MIN_ENTROPY}, "
-      f"triu_threshold={IMAGE_MIH_TRIU_THRESHOLD}, "
-      f"max_bucket={IMAGE_MIH_MAX_BUCKET_SIZE}, "
-      f"max_pairs={IMAGE_MIH_MAX_PAIRS}")
-print(f"[dup] audio: min_run>={AUDIO_FULL_MIN_RUN_SEC:.0f}s, "
-      f"intro_skips={AUDIO_SKIP_VARIANTS}, "
-      f"tolerant_bits={AUDIO_BITS_TOLERANT}, "
-      f"max_length={AUDIO_FPCALC_MAX_LENGTH}s")
-print(f"[dup] workers: hash={HASH_WORKERS}, compare={COMPARE_WORKERS}")
-
 
 # ===================================================================
 #                     SQLite cache
@@ -1684,13 +1663,6 @@ def find_duplicates_async(task_id, filters=None, scan_paths=None, mode='deep'):
 def _find_duplicates_worker(task_id, filters, scan_paths=None, mode='deep'):
     global DUPLICATE_GROUPS, scan_in_progress
     try:
-        print(f"\n{'=' * 70}")
-        print(f"[dup] === WORKER START (mode={mode}) ===")
-        print(f"[dup] task_id:     {task_id}")
-        print(f"[dup] filters:     {filters}")
-        print(f"[dup] scan_paths:  {scan_paths}")
-        print(f"{'=' * 70}")
-
         _init_db()
 
         all_items = get_all_videos()

@@ -8,7 +8,7 @@
 import os
 import sys
 
-from flask import Flask, request, send_from_directory
+from flask import Flask, request
 
 
 def resource_path(relative_path: str) -> str:

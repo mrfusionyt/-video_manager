@@ -20,3 +20,20 @@ VideoManager_changes.zip
 release.log
 cloud_release.log
 .gh_token
+
+# ---- generated runtime data (kept locally, not in git) ----
+*.db-shm
+*.db-wal
+duplicates_cache.json
+duplicates_hash_cache.json
+hash_cache.db
+probe_cache.json
+scan_cache.json
+addon/instagram_downloader/tasks.db
+
+# ---- browser profiles / downloads (user data) ----
+addon/instagram_downloader/browser_profile/
+addon/instagram_downloader/chrome_profile/
+addon/instagram_downloader/cookies/
+addon/instagram_downloader/downloads/
+addon/youtube_downloader/downloads/

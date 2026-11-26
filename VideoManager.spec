@@ -15,7 +15,7 @@ datas = [
 binaries = []
 hiddenimports = ['flask', 'flask.json', 'flask.json.provider', 'werkzeug.security',
                  'werkzeug.utils', 'jinja2', 'sqlite3']
-for package in ('playwright', 'cv2', 'PIL', 'imagehash', 'yt_dlp', 'Cryptodome', 'instagrapi'):
+for package in ('cv2', 'PIL', 'imagehash', 'yt_dlp', 'Cryptodome', 'instagrapi'):
     try:
         pkg_datas, pkg_binaries, pkg_hidden = collect_all(package)
     except Exception:

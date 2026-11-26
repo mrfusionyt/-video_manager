@@ -1,8 +1,5 @@
 {
   "destination": "C:\\FileDrop",
-  "port": 8765,
-  "username": "mrf",
-  "password": "123!",
   "max_file_size": 0,
   "preserve_structure": true,
   "collision": "rename"

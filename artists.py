@@ -197,34 +197,3 @@ def remove_video_from_artist(artist_id, video_id):
     )
     conn.commit()
     conn.close()
-
-
-def get_artists_for_video(video_id):
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute("""
-        SELECT a.* FROM artists a
-        JOIN video_artists va ON va.artist_id = a.id
-        WHERE va.video_id = ?
-        ORDER BY a.name COLLATE NOCASE ASC
-    """, (video_id,))
-    rows = c.fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
-
-
-def set_video_artists(video_id, artist_ids):
-    """Полностью перезаписывает список артистов для видео."""
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute("DELETE FROM video_artists WHERE video_id = ?", (video_id,))
-    for aid in artist_ids:
-        try:
-            c.execute(
-                "INSERT OR IGNORE INTO video_artists (video_id, artist_id) VALUES (?, ?)",
-                (video_id, aid)
-            )
-        except Exception:
-            pass
-    conn.commit()
-    conn.close()

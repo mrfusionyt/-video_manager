@@ -31,10 +31,6 @@ if errorlevel 1 (
 )
 echo.
 
-echo [*] Playwright Chromium (skipped when already installed)...
-"%PYTHON%" -m playwright install chromium
-echo.
-
 echo [*] Cleaning previous build...
 if exist "%HERE%build" rmdir /s /q "%HERE%build"
 if exist "%HERE%dist" rmdir /s /q "%HERE%dist"

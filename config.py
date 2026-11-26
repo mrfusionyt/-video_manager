@@ -62,13 +62,6 @@ MODE_LABELS = {
 QUALITY_LOW_HEIGHT = 720
 QUALITY_4K_HEIGHT  = 2160
 
-# Подписи и css-классы для бейджей. Порядок: от лучшего к худшему.
-QUALITY_LABELS = {
-    '4k':  {'label': '4K',  'cls': 'quality-4k'},
-    'low': {'label': 'Low', 'cls': 'quality-low'},
-}
-
-
 def video_quality_tag(width, height):
     """
     Возвращает '4k' | 'low' | None для видео по разрешению.
@@ -106,11 +99,6 @@ def video_quality_tag(width, height):
     if short and short < QUALITY_LOW_HEIGHT:
         return 'low'
     return None
-
-
-def video_is_low(width, height):
-    """True, если видео считается низким по разрешению."""
-    return video_quality_tag(width, height) == 'low'
 
 
 # ---------- Folder covers ----------

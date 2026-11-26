@@ -35,7 +35,7 @@
 
 Проект ориентирован на Windows: в зависимостях есть `pywin32`, а вспомогательные бинарники в `_dop\` — `.exe`.
 
-Самый простой путь — `run.bat`: он создаст `venv\`, установит зависимости и Playwright Chromium, затем поднимет сервер на `http://127.0.0.1:5000`.
+The easiest way is `run.bat`: it creates `venv\`, installs dependencies, and starts the server at `http://127.0.0.1:5000`.
 
 Если нужен полноценный лаунчер (окно, трей, логи, обновления):
 
@@ -43,7 +43,6 @@
 python -m venv venv
 venv\Scripts\activate
 python -m pip install -r requirements.txt
-python -m playwright install chromium
 python launcher.py
 ```
 

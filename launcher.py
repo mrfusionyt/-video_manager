@@ -317,10 +317,6 @@ def tray_quit(icon, item):
         tk_root.after(0, tk_root.destroy)
 
 
-def open_photo_classifier():
-    webbrowser.open(local_url_global + '/pv')
-
-
 def create_tray():
     global tray_icon
     try:

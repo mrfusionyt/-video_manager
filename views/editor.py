@@ -43,9 +43,6 @@ if not os.path.exists(FFMPEG):
 if not os.path.exists(FFPROBE):
     FFPROBE = shutil.which('ffprobe') or 'ffprobe'
 
-print(f"[editor] FFMPEG  = {FFMPEG}")
-print(f"[editor] FFPROBE = {FFPROBE}")
-
 
 def _sp_kwargs():
     return hidden_process_kwargs(capture_output=True)
@@ -315,25 +312,6 @@ def register(app):
             return (f"<pre style='color:#f88;background:#1a1a1a;padding:20px;'>"
                     f"Editor page error:\n\n{tb}</pre>"), 500
 
-    @app.route('/editor/debug/<int:video_id>')
-    def editor_debug(video_id):
-        try:
-            v = get_video_by_id(video_id)
-            if not v:
-                return jsonify({'error': 'video not found'}), 404
-            meta = probe_video(v['filepath'])
-            return jsonify({
-                'ok': True,
-                'video_id': v['id'],
-                'filename': v['filename'],
-                'filepath': v['filepath'],
-                'file_exists': os.path.exists(v['filepath']),
-                'meta': meta,
-                'ffmpeg': FFMPEG, 'ffprobe': FFPROBE,
-            })
-        except Exception:
-            return f"<pre>{traceback.format_exc()}</pre>", 500
-
     @app.route('/editor/list_videos')
     def editor_list_videos():
         try:
@@ -517,14 +495,6 @@ def register(app):
             cmd += ['-movflags', '+faststart']
             cmd += ['-t', _num(total_duration)]
             cmd += [tmp_path]
-
-            print(f"[editor] save: {len(clips_meta)} clips, "
-                  f"target={target_w}x{target_h}@{target_fps}, "
-                  f"total={total_duration:.3f}s, global_crop={global_crop}")
-            for i, cm in enumerate(clips_meta):
-                print(f"[editor]   clip #{i+1}: id={cm['video_id']} "
-                      f"scale={cm['scale']} off=({cm['offset_x']},{cm['offset_y']}) "
-                      f"clip_crop={cm['clip_crop']}")
 
             try:
                 r = subprocess.run(cmd, timeout=7200, **_sp_kwargs())

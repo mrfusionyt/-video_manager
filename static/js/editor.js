@@ -2099,5 +2099,4 @@
     initInitialClip();
     renderCanvas();
 
-    console.log('[editor] ready. canvas=' + TARGET_W + 'x' + TARGET_H + '@' + TARGET_FPS);
 })();

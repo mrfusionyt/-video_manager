@@ -1,12 +1,10 @@
 import os
 import re
-import json
 import time
 import random
 import threading
 import yt_dlp
 from instagrapi import Client
-from instagrapi.exceptions import LoginRequired
 from . import db
 from . import run_post_download_hook
 from .browser_cookies import reopen_firefox
@@ -143,14 +141,6 @@ def get_downloaded_files(task_id):
     task = get_task(task_id)
     if task and task.get('status') in ('complete', 'cancelled', 'error'):
         return task.get('file_objects', [])
-    return None
-
-
-def get_saved_sessions():
-    return []
-
-
-def get_session_path(username):
     return None
 
 

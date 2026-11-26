@@ -93,14 +93,7 @@ if %ERRORLEVEL% NEQ 0 (
     exit /b 1
 )
 
-REM --- 4. Playwright Chromium -------------------------------------
-echo [*] Checking Playwright browsers...
-"%PY%" -m playwright install chromium
-if %ERRORLEVEL% NEQ 0 (
-    echo [WARNING] Playwright browsers were not installed.
-)
-
-REM --- 5. Run -----------------------------------------------------
+REM --- 4. Run -----------------------------------------------------
 echo.
 echo ===================================================
 echo  Server is running: http://127.0.0.1:5000

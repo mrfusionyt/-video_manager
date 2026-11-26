@@ -16,7 +16,6 @@ from models import (
     get_folders,
     get_videos_by_folder,
     query_videos_paged,
-    count_videos,
 )
 from scanner import scan_libraries
 from config import (

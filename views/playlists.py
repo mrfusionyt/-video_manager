@@ -3,7 +3,7 @@
 """
 import math
 from flask import (
-    render_template, request, url_for, jsonify, abort,
+    render_template, request, jsonify, abort,
 )
 
 from models import (
@@ -121,7 +121,6 @@ def register(app):
     @app.route('/playlist/<int:playlist_id>')
     def view_playlist(playlist_id):
         current_profile = get_current_profile()
-        current_mode = profile_to_mode(current_profile)
         playlist = get_playlist_by_id(playlist_id)
         if not playlist:
             abort(404)

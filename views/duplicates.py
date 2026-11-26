@@ -1,5 +1,5 @@
 """Роуты дубликатов: сравнение, перемещение, blacklist."""
-from flask import request, jsonify, render_template, abort, redirect, url_for
+from flask import request, jsonify, render_template, abort
 
 from duplicate_finder import (
     move_group, move_all_groups, move_selected, get_duplicate_groups,

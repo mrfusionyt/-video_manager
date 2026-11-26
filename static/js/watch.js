@@ -2276,5 +2276,4 @@
         });
     })();
 
-    console.log('[watch] ready. IS_MOBILE=' + IS_MOBILE + ', HAS_HOVER=' + HAS_HOVER + ', feed size=' + FEED_IDS.length);
 })();

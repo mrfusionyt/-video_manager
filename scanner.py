@@ -121,11 +121,6 @@ def get_scan_progress(task_id):
         return dict(t) if t else None
 
 
-def clear_scan_tasks():
-    with SCAN_LOCK:
-        SCAN_TASKS.clear()
-
-
 def get_media_info(filepath):
     ext = os.path.splitext(filepath)[1].lower()
     if ext in VIDEO_EXTENSIONS:

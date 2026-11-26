@@ -23,18 +23,6 @@ def get_instagram_cookies_dict():
     return _read_cookies(profile_path)
 
 
-def get_instagram_sessionid_from_chrome_safe(start_url=None):
-    """Обёртка для совместимости."""
-    try:
-        cookies = get_instagram_cookies_dict()
-        if 'sessionid' not in cookies:
-            return None, 'sessionid was not found in Firefox'
-        import json
-        return json.dumps(cookies), None
-    except Exception as e:
-        return None, str(e)
-
-
 # ===================================================================
 #                     ЗАКРЫТИЕ FIREFOX
 # ===================================================================

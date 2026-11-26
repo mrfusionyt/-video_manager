@@ -9,8 +9,7 @@ from flask import (
 from instagrapi import Client
 from .downloader import (
     download_profile, get_progress, get_downloaded_files, get_task,
-    request_cancel, TASKS, get_saved_sessions, get_session_path,
-    rescan_task_files,
+    request_cancel, rescan_task_files,
 )
 from .browser_cookies import get_instagram_cookies_dict, close_firefox
 from . import db

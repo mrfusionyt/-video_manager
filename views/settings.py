@@ -29,7 +29,6 @@ from models import (
     delete_library,
     get_stats,
     get_categories,
-    CONFIG_PATH,
 )
 from scanner import (
     scan_libraries_async,
@@ -112,7 +111,6 @@ def _spawn_restart():
             pass
         time.sleep(0.4)
         os._exit(RESTART_EXIT_CODE)
-        return
 
     try:
         if getattr(sys, 'frozen', False):

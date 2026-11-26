@@ -349,5 +349,4 @@
     });
     resetView();
 
-    console.log('[photo_view] ready. id=' + photoId + ', prev=' + prevId + ', next=' + nextId);
 })();

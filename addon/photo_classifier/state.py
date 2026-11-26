@@ -10,8 +10,6 @@ import threading
 from collections import deque
 from pathlib import Path
 
-from PIL import Image
-
 
 SUPPORTED = ('.jpg', '.jpeg', '.png', '.gif', '.bmp',
              '.webp', '.tiff', '.tif', '.ico', '.ppm', '.pgm')

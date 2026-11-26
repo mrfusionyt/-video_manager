@@ -47,7 +47,6 @@ BAD_FORMATS = {
     'ogg', 'rm', 'realmedia',
 }
 
-GOOD_CODECS = {'h264', 'avc1', 'vp8', 'vp9', 'av1', 'mp4v'}
 GOOD_FORMATS = {'mov', 'mp4', 'm4a', '3gp', '3g2', 'mj2', 'webm'}
 
 BAD_EXTENSIONS = {

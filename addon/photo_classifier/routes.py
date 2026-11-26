@@ -9,7 +9,7 @@ from flask import (
 
 from . import photo_classifier_bp
 from .state import (
-    state, moves, moves_lock, SUPPORTED,
+    state, moves, moves_lock,
     load_config, save_config, scan_source, is_safe_name, ask_folder,
 )
 
