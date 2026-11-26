@@ -71,6 +71,14 @@ jobs:
       - name: Download helper binaries (_dop)
         run: python tools/fetch_dop.py
 
+      - name: Verify helper binaries (_dop)
+        shell: pwsh
+        run: |
+          foreach ($f in @('ffmpeg.exe', 'ffprobe.exe', 'yt-dlp.exe', 'deno.exe', 'fpcalc.exe')) {
+            if (-not (Test-Path (Join-Path '_dop' $f))) { throw "Missing _dop/$f" }
+          }
+          Write-Host '_dop OK'
+
       - name: 'Build onedir with PyInstaller (entry point: launcher.py)'
         run: python -m PyInstaller --noconfirm --clean VideoManager.spec
 

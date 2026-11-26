@@ -177,6 +177,7 @@ python make_release.py --no-release
 |---|---|
 | Окно не появилось | проверь иконку в трее и `%TEMP%\vm_launcher_error.log` |
 | Нет ffmpeg / yt-dlp / fpcalc | запусти `python tools\fetch_dop.py` или положи бинарники в `_dop\` |
+| Actions: `Invalid URL ''` в `fetch_dop` | пустая переменная `DOP_*_URL` больше не перебивает адрес по умолчанию |
 | `pyinstaller : Имя не распознано` | используй `python -m PyInstaller ...` или `build.bat` |
 | `gh : Имя не распознано` | перезапусти терминал; для облачного пути `gh` не нужен вообще |
 | Actions падает на `Resolve version` | зависимости теперь ставятся до проверки версии; повторите запуск workflow |

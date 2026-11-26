@@ -192,6 +192,7 @@ python make_release.py
 | `Tag version ... does not match CURRENT_VERSION` | батник должен менять версию; при ручном теге обновите `launcher.py` |
 | `Resolve version: No module named 'requests'` | зависимости теперь ставятся до проверки версии; повторите запуск workflow/тег |
 | Actions: `ffmpeg.exe not found` | упал `tools/fetch_dop.py`; проверьте лог шага и доступ к URL (или задайте `DOP_*_URL`) |
+| Actions: `Invalid URL ''` в `fetch_dop` | исправлено: пустая переменная `DOP_*_URL` больше не перебивает URL по умолчанию |
 | `pyinstaller : Имя не распознано` | используйте `python -m PyInstaller ...`, `build.bat` или облачную сборку |
 | `No package found matching input criteria` | неверный id: нужно `winget install --id GitHub.cli -e` (только локальный путь) |
 | `gh : Имя не распознано` | PATH обновится в новом окне; `release-local.bat` сам находит `C:\Program Files\GitHub CLI\gh.exe` |

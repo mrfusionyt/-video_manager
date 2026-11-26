@@ -64,11 +64,18 @@ ENV_OVERRIDES = {
 
 
 def env_url(name, default):
+    """Use a DOP_*_URL override only when it is actually set to a non-empty value."""
     var = ENV_OVERRIDES.get(name)
-    return (os.environ.get(var) or '').strip() if var else default
+    if var:
+        value = (os.environ.get(var) or '').strip()
+        if value:
+            return value
+    return default
 
 
 def download(url, timeout=(15, 600)):
+    if not url or not str(url).lower().startswith(('http://', 'https://')):
+        raise RuntimeError(f'invalid download URL: {url!r}')
     print(f'  downloading {url}', flush=True)
     for attempt in range(3):
         try:
