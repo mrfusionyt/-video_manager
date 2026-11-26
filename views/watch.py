@@ -1,6 +1,6 @@
 r"""
 Страница просмотра.
-  • /video/<id>   — потоковая отдача видео (конвертация на месте при необходимости)
+  • /video/<id>   — потоковая отдача видео (конвертация запускается в фоне)
   • /watch/<id>   — HTML-плеер для видео
   • /photo/<id>   — HTML-просмотрщик для фото (новая вкладка)
 Несовместимые видео конвертируются на месте. Битые файлы отсеивает сканер.
@@ -25,13 +25,132 @@ from config import ITEMS_PER_PAGE
 from helpers.profiles import get_current_profile, profile_to_mode
 from helpers.video_filter import process_videos
 from converter import (
+    CONVERT_LOCK,
     needs_conversion,
     convert_video_in_place,
     update_db_after_conversion,
 )
+import task_registry
 
 
-_CONVERT_LOCK = threading.Lock()
+# Защищает только от повторного запуска фоновой конвертации для одного video id.
+# Никогда не держится во время самой конвертации (иначе /video ждал бы её).
+_PENDING_CONVERSIONS = set()
+_PENDING_CONVERSIONS_LOCK = threading.Lock()
+
+
+def _run_background_conversion(video_id, task_id):
+    """Тело фоновой задачи. Все ошибки уходят в registry, не в HTTP-ответ."""
+    try:
+        video = get_video_by_id(video_id)
+        if not video:
+            raise RuntimeError('Video not found in DB')
+
+        if task_registry.is_cancel_requested(task_id):
+            task_registry.update(
+                task_id, status='cancelled', progress=100,
+                processed=0, total=1, message='Conversion cancelled',
+            )
+            return
+
+        task_registry.update(
+            task_id, status='converting', progress=10,
+            processed=0, total=1,
+            message=f'Converting {video["filename"]}...',
+            current=video['filename'],
+        )
+
+        # CONVERT_LOCK общий со scanner; не блокирует HTTP-поток /video.
+        with CONVERT_LOCK:
+            if task_registry.is_cancel_requested(task_id):
+                task_registry.update(
+                    task_id, status='cancelled', progress=100,
+                    processed=0, total=1, message='Conversion cancelled',
+                )
+                return
+            ok, new_video, msg = convert_video_in_place(video)
+
+        if not ok:
+            print(f"[watch] background convert FAILED for {video_id}: {msg}")
+            task_registry.update(
+                task_id, status='error', progress=100,
+                processed=0, total=1,
+                message=f'Conversion failed: {msg}',
+                result={'error': msg},
+            )
+            return
+
+        update_db_after_conversion(video_id, new_video)
+
+        cancelled = task_registry.is_cancel_requested(task_id)
+        status = 'cancelled' if cancelled else 'complete'
+        message = ('Conversion cancelled' if cancelled
+                   else f'Converted {new_video["filename"]}')
+        task_registry.update(
+            task_id, status=status, progress=100,
+            processed=1, total=1, message=message,
+            current=new_video['filename'],
+            result={'filepath': new_video['filepath']},
+        )
+        print(f"[watch] background convert {status}: {msg}")
+    except Exception as e:
+        print(f"[watch] background convert ERROR for {video_id}: {e}")
+        try:
+            task_registry.update(
+                task_id, status='error', progress=100,
+                processed=0, total=1,
+                message=f'Conversion failed: {str(e)[:300]}',
+                result={'error': str(e)},
+            )
+        except Exception as reg_exc:
+            print(f"[watch] cannot update task {task_id}: {reg_exc}")
+    finally:
+        task_registry.unregister_cancel_handler(task_id)
+        with _PENDING_CONVERSIONS_LOCK:
+            _PENDING_CONVERSIONS.discard(video_id)
+
+
+def _start_background_conversion(video, reason):
+    """Создаёт стабильную задачу и демона-воркер; вызывается из /video."""
+    video_id = video['id']
+    task_id = f'convert_{video_id}'
+
+    with _PENDING_CONVERSIONS_LOCK:
+        if video_id in _PENDING_CONVERSIONS:
+            return False
+        _PENDING_CONVERSIONS.add(video_id)
+
+    try:
+        task_registry.create(
+            task_id, 'video_conversion', status='converting',
+            progress=0, processed=0, total=1,
+            message=f'Converting {video["filename"]}...',
+            current=video['filename'], mode=reason or 'conversion',
+            payload={
+                'video_id': video_id,
+                'filename': video['filename'],
+                'reason': reason,
+            },
+        )
+        task_registry.register_cancel_handler(
+            task_id,
+            lambda: task_registry.update(
+                task_id, message='Cancelling conversion...'
+            ),
+        )
+    except Exception as e:
+        with _PENDING_CONVERSIONS_LOCK:
+            _PENDING_CONVERSIONS.discard(video_id)
+        print(f"[watch] cannot create conversion task {task_id}: {e}")
+        return False
+
+    thread = threading.Thread(
+        target=_run_background_conversion,
+        args=(video_id, task_id),
+        name=f'convert-{video_id}', daemon=True,
+    )
+    thread.start()
+    return True
 
 
 def register(app):
@@ -50,23 +169,13 @@ def register(app):
             abort(404)
 
         # Конвертация только для видео. Для фото — отдаём как есть.
+        # Запускаем в фоне и отдаём текущий файл сразу, без ожидания ffmpeg.
         if video.get('media_type') != 'image':
             need, reason = needs_conversion(filepath, video.get('codec'))
             if need:
-                with _CONVERT_LOCK:
-                    video = get_video_by_id(video_id)
-                    filepath = video['filepath']
-                    need, reason = needs_conversion(filepath, video.get('codec'))
-                    if need:
-                        print(f"[watch] on-demand convert ({reason}): "
-                              f"{video['filename']}")
-                        ok, new_video, msg = convert_video_in_place(video)
-                        if ok:
-                            update_db_after_conversion(video_id, new_video)
-                            filepath = new_video['filepath']
-                        else:
-                            print(f"[watch] convert FAILED, serving original: {msg}")
-                            filepath = video['filepath']
+                print(f"[watch] scheduling background convert ({reason}): "
+                      f"{video['filename']}")
+                _start_background_conversion(video, reason)
 
         mimetype, _ = mimetypes.guess_type(filepath)
         if not mimetype:
@@ -79,6 +188,7 @@ def register(app):
         response.headers['Access-Control-Allow-Origin'] = '*'
         response.headers['Access-Control-Allow-Methods'] = 'GET, HEAD, OPTIONS'
         response.headers['Access-Control-Allow-Headers'] = 'Range'
+        response.headers['Vary'] = 'Range'
         response.headers['Accept-Ranges'] = 'bytes'
         response.headers['Cache-Control'] = 'public, max-age=86400'
         return response
@@ -116,8 +226,12 @@ def register(app):
         filepath = video['filepath']
         if not os.path.exists(filepath):
             abort(404)
-        return send_file(filepath, as_attachment=True,
-                         download_name=video['filename'])
+        response = send_file(
+            filepath, as_attachment=True,
+            download_name=video['filename'], conditional=True,
+        )
+        response.headers['Vary'] = 'Range'
+        return response
 
     # ================================================================
     #                       VR-ПЛЕЕР

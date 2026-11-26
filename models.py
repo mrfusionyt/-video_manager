@@ -30,6 +30,7 @@ from db.categories import (
 
 from db.videos import (
     add_video,
+    update_video_scan_state,
     update_video_intro,
     delete_video,
     get_all_videos,

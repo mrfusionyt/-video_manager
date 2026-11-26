@@ -23,6 +23,7 @@ from pathlib import Path
 
 from flask import current_app, jsonify, render_template, request
 
+import task_registry
 from db.connection import APP_DATA_DIR
 
 from . import file_transfer_bp
@@ -199,6 +200,63 @@ def maybe_save_job(job, force=False):
         _job_save_times[job_id] = now
 
 
+_JOB_STATUS_MAP = {
+    'uploading': 'uploading',
+    'completed': 'complete',
+    'cancelled': 'cancelled',
+    'error': 'error',
+}
+
+
+def _sync_job_task(job):
+    """Mirror a transfer job into the unified task registry."""
+    total = int(job.get('total_bytes') or 0)
+    received = sum(int(f.get('received') or 0) for f in job.get('files', []))
+    status = _JOB_STATUS_MAP.get(job.get('status'), job.get('status') or 'uploading')
+    message = (f"{len(job.get('uploaded') or [])} file(s) uploaded, "
+               f"{len(job.get('skipped') or [])} skipped")
+    fields = {
+        'status': status,
+        'progress': min(100, round(received * 100 / total)) if total else 100,
+        'processed': received,
+        'total': total,
+        'message': message,
+        'current': job.get('folder') or '',
+    }
+    if status in ('complete', 'cancelled', 'error'):
+        fields['result'] = {
+            'uploaded': len(job.get('uploaded') or []),
+            'skipped': len(job.get('skipped') or []),
+            'errors': len(job.get('errors') or []),
+        }
+    existing = task_registry.get(job['id'])
+    if existing is None:
+        task_registry.create(job['id'], 'file_transfer', **fields)
+    else:
+        task_registry.update(job['id'], **fields)
+
+
+def _cancel_job_internal(job_id):
+    """Idempotent cancellation shared by the transfer UI and task registry."""
+    job = get_job(job_id)
+    if job is None:
+        return 'not_found'
+    with _jobs_lock:
+        if job['status'] in ('completed', 'cancelled', 'error'):
+            return 'already_done'
+        job['status'] = 'cancelled'
+        job['updated'] = time.time()
+        for f in job['files']:
+            if f.get('temp'):
+                try:
+                    Path(f['temp']).unlink(missing_ok=True)
+                except OSError:
+                    pass
+        maybe_save_job(job, force=True)
+        _sync_job_task(job)
+    return 'ok'
+
+
 def cleanup_jobs():
     """Drop finished/abandoned jobs older than one day."""
     now = time.time()
@@ -231,6 +289,9 @@ def get_job(job_id):
             if not job.get('dir') or not os.path.isdir(job['dir']):
                 return None
             _jobs[job_id] = job
+            _sync_job_task(job)
+            task_registry.register_cancel_handler(
+                job_id, lambda: _cancel_job_internal(job_id))
             return job
         except (OSError, ValueError, TypeError):
             return None
@@ -337,6 +398,7 @@ def finalize_job(job):
     job['status'] = 'completed'
     job['updated'] = time.time()
     maybe_save_job(job, force=True)
+    _sync_job_task(job)
 
 
 def maybe_finalize(job):
@@ -500,6 +562,9 @@ def start_upload():
         maybe_finalize(job)
         maybe_save_job(job, force=True)
         payload = job_payload(job)
+        _sync_job_task(job)
+    task_registry.register_cancel_handler(
+        job_id, lambda: _cancel_job_internal(job_id))
 
     return jsonify({
         'job_id': job_id,
@@ -579,6 +644,7 @@ def upload_chunk(job_id):
         finalized = maybe_finalize(job)
         maybe_save_job(job, force=finalized or file_done)
         save_ms = (time.perf_counter() - save_started) * 1000
+        _sync_job_task(job)
         current_app.logger.debug(
             '[transfer] job=%s file=%s chunk=%s bytes=%d read=%.0fms write=%.0fms persist=%.0fms',
             job_id, index, chunk_index, len(data), read_ms, write_ms, save_ms,
@@ -597,22 +663,10 @@ def upload_status(job_id):
 
 @file_transfer_bp.route('/api/upload/<job_id>/cancel', methods=['POST'])
 def cancel_upload(job_id):
-    job = get_job(job_id)
-    if job is None:
+    result = _cancel_job_internal(job_id)
+    if result == 'not_found':
         return jsonify({'error': 'Upload job not found'}), 404
-
-    with _jobs_lock:
-        if job['status'] not in ('completed', 'cancelled', 'error'):
-            job['status'] = 'cancelled'
-            job['updated'] = time.time()
-            for f in job['files']:
-                if f.get('temp'):
-                    try:
-                        Path(f['temp']).unlink(missing_ok=True)
-                    except OSError:
-                        pass
-            maybe_save_job(job, force=True)
-        return jsonify(job_payload(job))
+    return jsonify(job_payload(get_job(job_id)))
 
 
 @file_transfer_bp.route('/api/history')

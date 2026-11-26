@@ -15,11 +15,13 @@ import subprocess
 import json
 import threading
 
+import task_registry
+
 from helpers.subprocess_utils import hidden_process_kwargs
 from helpers.intro_detector import DETECTOR_VERSION, detect_intro_end
 from db.thumbnails import delete_thumbnail
 from models import (
-    get_libraries, add_video, update_video_intro,
+    get_libraries, add_video, update_video_intro, update_video_scan_state,
     get_db_connection, delete_video, get_video_by_id,
 )
 from converter import (
@@ -128,21 +130,20 @@ def get_scan_progress(task_id):
         return dict(t) if t else None
 
 
-def request_scan_cancel(task_id):
-    """Запросить остановку фонового скана. Идемпотентно."""
+def _set_scan_cancel_flags(task_id):
+    """Legacy in-memory flags used by the running worker's cancel checks."""
     with SCAN_LOCK:
         t = SCAN_TASKS.get(task_id)
-        if not t:
-            return 'not_found'
-        status = t.get('status')
-        if status in ('complete', 'error', 'cancelled'):
-            return 'already_done'
-        if status == 'cancelling':
-            return 'ok'
+        if not t or t.get('status') in ('complete', 'error', 'cancelled'):
+            return
         t['cancel_requested'] = True
         t['status'] = 'cancelling'
         t['message'] = 'Cancelling...'
-        return 'ok'
+
+
+def request_scan_cancel(task_id):
+    """Запросить остановку фонового скана. Идемпотентно."""
+    return task_registry.request_cancel(task_id)
 
 
 def _cancel_requested(task_id):
@@ -262,20 +263,21 @@ def _is_temp_file(filename):
     return False
 
 
-def _analyze_intro(video_id, filepath, duration=0):
+def _analyze_intro(video_id, filepath, duration=0, force=False):
     """Deep-scan one video and persist its intro boundary."""
     if not video_id or not filepath or not os.path.exists(filepath):
         return False
 
-    conn = get_db_connection()
-    try:
-        row = conn.execute(
-            "SELECT intro_version FROM videos WHERE id = ?", (video_id,)
-        ).fetchone()
-    finally:
-        conn.close()
-    if row and int(row['intro_version'] or 0) == DETECTOR_VERSION:
-        return False
+    if not force:
+        conn = get_db_connection()
+        try:
+            row = conn.execute(
+                "SELECT intro_version FROM videos WHERE id = ?", (video_id,)
+            ).fetchone()
+        finally:
+            conn.close()
+        if row and int(row['intro_version'] or 0) == DETECTOR_VERSION:
+            return False
 
     info = detect_intro_end(filepath, duration)
     previous = update_video_intro(
@@ -352,13 +354,20 @@ def _scan_impl_locked(progress_cb=None, deep=False, cancel_check=None):
     conn = get_db_connection()
     try:
         cursor = conn.cursor()
-        cursor.execute("SELECT id, filepath, width, height, folder FROM videos")
+        cursor.execute(
+            "SELECT id, filepath, width, height, folder, duration, mtime, size, "
+            "intro_version FROM videos"
+        )
         for row in cursor.fetchall():
             existing_map[row['filepath']] = {
                 'id': row['id'],
                 'width': row['width'] or 0,
                 'height': row['height'] or 0,
                 'folder': row['folder'] or '',
+                'duration': float(row['duration'] or 0.0),
+                'mtime': float(row['mtime'] or 0.0),
+                'size': int(row['size'] or 0),
+                'intro_version': int(row['intro_version'] or 0),
             }
     finally:
         conn.close()
@@ -372,6 +381,31 @@ def _scan_impl_locked(progress_cb=None, deep=False, cancel_check=None):
         folder = os.path.dirname(full_path)
         existing_row = existing_map.get(full_path)
         video_id = None
+        record_state = False
+        signature = _file_signature(full_path)
+        unchanged = bool(
+            existing_row
+            and signature
+            and abs(float(existing_row['mtime'] or 0.0) - signature[0]) < 0.001
+            and int(existing_row['size'] or 0) == signature[1]
+        )
+
+        if unchanged:
+            # The file was already validated, converted and catalogued.
+            # Only a moved folder or an outdated intro detector still needs work.
+            if existing_row['folder'] != folder:
+                _update_video_folder(existing_row['id'], folder)
+            is_video = os.path.splitext(full_path)[1].lower() in VIDEO_EXTENSIONS
+            if (deep and is_video
+                    and existing_row['intro_version'] != DETECTOR_VERSION):
+                try:
+                    _analyze_intro(existing_row['id'], full_path,
+                                   existing_row['duration'], force=True)
+                except Exception as e:
+                    print(f"[scan] intro analysis error for {filename}: {e}")
+            if progress_cb and (i % 5 == 0 or i == total):
+                progress_cb(i, total, filename)
+            continue
 
         try:
             is_video = os.path.splitext(full_path)[1].lower() in VIDEO_EXTENSIONS
@@ -416,6 +450,7 @@ def _scan_impl_locked(progress_cb=None, deep=False, cancel_check=None):
             if existing_row:
                 # --- Существующая запись ---
                 video_id = existing_row['id']
+                record_state = True
                 if existing_row['folder'] != folder:
                     _update_video_folder(video_id, folder)
 
@@ -440,6 +475,7 @@ def _scan_impl_locked(progress_cb=None, deep=False, cancel_check=None):
                             existing_map.pop(full_path, None)
                         else:
                             print(f"[scan] convert FAILED: {msg}")
+                            record_state = False
                     elif need_meta:
                         info = get_media_info(full_path)
                         if info:
@@ -484,6 +520,7 @@ def _scan_impl_locked(progress_cb=None, deep=False, cancel_check=None):
                             print(f"[scan] convert FAILED (will retry later): "
                                   f"{msg}")
 
+                    current_sig = _file_signature(full_path) or (0.0, size)
                     video_id = add_video(
                         lib_id, filename, full_path,
                         duration=info['duration'],
@@ -495,7 +532,9 @@ def _scan_impl_locked(progress_cb=None, deep=False, cancel_check=None):
                         fps=info['fps'],
                         mode=lib_mode,
                         folder=folder,
+                        mtime=current_sig[0],
                     )
+                    record_state = bool(video_id)
                 else:
                     print(f"[scan] Failed to read: {filename}")
         except Exception as e:
@@ -506,9 +545,17 @@ def _scan_impl_locked(progress_cb=None, deep=False, cancel_check=None):
             try:
                 row = get_video_by_id(video_id)
                 _analyze_intro(video_id, full_path,
-                               (row or {}).get('duration', 0))
+                               (row or {}).get('duration', 0), force=True)
             except Exception as e:
                 print(f"[scan] intro analysis error for {filename}: {e}")
+
+        if record_state and video_id:
+            saved_sig = _file_signature(full_path)
+            if saved_sig:
+                try:
+                    update_video_scan_state(video_id, saved_sig[0], saved_sig[1])
+                except Exception as e:
+                    print(f"[scan] could not save file signature: {e}")
 
         if progress_cb and (i % 5 == 0 or i == total):
             message = filename
@@ -546,21 +593,34 @@ def scan_libraries(progress_cb=None, deep=False):
 
 def scan_libraries_async(task_id, deep=False):
     global SCAN_IN_PROGRESS
+    mode = 'deep' if deep else 'fast'
+    initial_message = ('Initializing deep intro analysis...' if deep
+                       else 'Initializing...')
     with SCAN_LOCK:
         if SCAN_IN_PROGRESS:
             SCAN_TASKS[task_id] = {
                 'status': 'error', 'progress': 0, 'total': 0,
                 'processed': 0, 'message': 'Scan already in progress',
             }
+            task_registry.create(
+                task_id, 'library_scan', status='error', progress=0,
+                message='Scan already in progress', mode=mode,
+            )
             return False
         SCAN_IN_PROGRESS = True
         SCAN_TASKS[task_id] = {
             'status': 'scanning', 'progress': 0, 'total': 0,
-            'processed': 0,
-            'message': 'Initializing deep intro analysis...' if deep
-                       else 'Initializing...',
+            'processed': 0, 'message': initial_message,
             'deep': bool(deep),
         }
+
+    task_registry.create(
+        task_id, 'library_scan', status='scanning', progress=0,
+        message=initial_message, mode=mode,
+        payload={'deep': bool(deep)},
+    )
+    task_registry.register_cancel_handler(
+        task_id, lambda: _set_scan_cancel_flags(task_id))
 
     def _cb(processed, total, message):
         with SCAN_LOCK:
@@ -572,6 +632,20 @@ def scan_libraries_async(task_id, deep=False):
             t['progress'] = int((processed / total) * 100) if total > 0 else 0
             if t.get('status') != 'cancelling':
                 t['message'] = message
+            registry_message = t.get('message') or message
+        task_registry.update(
+            task_id, processed=processed, total=total,
+            progress=t['progress'], message=registry_message,
+        )
+
+    def _finish(status, message, progress=None):
+        with SCAN_LOCK:
+            t = SCAN_TASKS.get(task_id) or {}
+        task_registry.update(
+            task_id, status=status, message=message,
+            progress=progress if progress is not None else t.get('progress', 0),
+            processed=t.get('processed', 0), total=t.get('total', 0),
+        )
 
     def _worker():
         global SCAN_IN_PROGRESS
@@ -586,22 +660,30 @@ def scan_libraries_async(task_id, deep=False):
                     t['status'] = 'complete'
                     t['progress'] = 100
                     t['message'] = f"Done. {t.get('processed', 0)} files processed."
+            _finish('complete', (SCAN_TASKS.get(task_id) or {}).get('message', 'Done.'), 100)
         except ScanCancelled:
             print("[scan] aborted by user")
+            message = None
             with SCAN_LOCK:
                 t = SCAN_TASKS.get(task_id)
                 if t:
                     t['status'] = 'cancelled'
                     t['message'] = (f"Aborted. {t.get('processed', 0)} "
                                     f"of {t.get('total', 0)} files processed.")
+                    message = t['message']
+            _finish('cancelled', message or 'Aborted.')
         except Exception as e:
             print(f"[scan] worker error: {e}")
+            message = None
             with SCAN_LOCK:
                 t = SCAN_TASKS.get(task_id)
                 if t:
                     t['status'] = 'error'
                     t['message'] = f"Error: {str(e)[:300]}"
+                    message = t['message']
+            _finish('error', message or f'Error: {str(e)[:300]}')
         finally:
+            task_registry.unregister_cancel_handler(task_id)
             with SCAN_LOCK:
                 SCAN_IN_PROGRESS = False
 

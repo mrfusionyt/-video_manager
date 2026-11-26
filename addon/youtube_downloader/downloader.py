@@ -9,6 +9,7 @@ import subprocess
 from datetime import datetime
 
 from helpers.subprocess_utils import hidden_process_kwargs
+import task_registry
 
 
 TASKS = {}
@@ -143,6 +144,19 @@ def create_task(url, mode, save_dir):
             'result_files': [],
         }
 
+    # The shared registry is a mirror of this local cache: a failure here
+    # must never prevent the download itself from starting.
+    try:
+        task_registry.create(
+            task_id, 'youtube_download', status='starting',
+            message='Initializing...', mode=mode,
+            payload={'url': url, 'mode': mode, 'save_dir': save_dir},
+        )
+        task_registry.register_cancel_handler(
+            task_id, lambda: _cancel_internal(task_id))
+    except Exception as e:
+        print(f"[youtube] registry create error for {task_id}: {e}")
+
     thread = threading.Thread(target=_run_download, args=(task_id,), daemon=True)
     thread.start()
     return task_id
@@ -213,7 +227,8 @@ def get_state(task_id):
         }
 
 
-def request_cancel(task_id):
+def _cancel_internal(task_id):
+    """Local cancellation logic shared by the HTTP route and the registry."""
     with _lock:
         t = TASKS.get(task_id)
         if not t:
@@ -230,12 +245,84 @@ def request_cancel(task_id):
         return 'ok'
 
 
+def request_cancel(task_id):
+    """Cancel adapter: the shared registry decides, local worker is signalled."""
+    with _lock:
+        t = TASKS.get(task_id)
+        if not t:
+            return 'not_found'
+        if t['status'] in ('complete', 'error', 'cancelled'):
+            return 'already_done'
+
+    try:
+        result = task_registry.request_cancel(task_id)
+    except Exception:
+        result = None
+
+    if result == 'already_done':
+        return 'already_done'
+    if result == 'ok':
+        # The registry normally calls the handler itself; this is a safety
+        # net for tasks without a registered handler.
+        with _lock:
+            needs_local = not TASKS[task_id].get('cancel_requested')
+        if needs_local:
+            _cancel_internal(task_id)
+        return 'ok'
+    # No registry row (legacy task): keep the old local behaviour.
+    return _cancel_internal(task_id)
+
+
+_REGISTRY_TERMINAL = (
+    'complete', 'completed', 'done', 'finished',
+    'error', 'failed', 'cancelled', 'canceled', 'aborted',
+)
+
+
+def _sync_registry(task_id, status=None, message=None, final=False):
+    """Mirror the local task snapshot into the shared registry, safely."""
+    try:
+        with _lock:
+            t = TASKS.get(task_id)
+            if not t:
+                return
+            local_status = str(status or t.get('status') or 'running')
+            progress = int(t.get('progress_percent') or 0)
+            if final and local_status == 'complete':
+                progress = 100
+            fields = {
+                'status': local_status,
+                'progress': progress,
+                'processed': int(t.get('items_done') or 0),
+                'total': int(t.get('items_total') or 0),
+                'current': t.get('current_video') or '',
+            }
+            if (local_status not in _REGISTRY_TERMINAL
+                    and t.get('cancel_requested')):
+                fields['status'] = 'cancelling'
+            if message is not None:
+                fields['message'] = message
+            if final:
+                fields['result'] = {'files': len(t.get('result_files') or [])}
+        task_registry.update(task_id, **fields)
+    except Exception as e:
+        print(f"[youtube] registry sync error for {task_id}: {e}")
+    finally:
+        if final:
+            try:
+                task_registry.unregister_cancel_handler(task_id)
+            except Exception:
+                pass
+
+
 def clear_all_tasks():
+    # Only the local UI cache is cleared; registry rows are persistent.
     with _lock:
         TASKS.clear()
 
 
 def delete_task(task_id):
+    # Only the local UI cache is cleared; registry rows are persistent.
     with _lock:
         TASKS.pop(task_id, None)
 
@@ -289,6 +376,9 @@ def _parse_line(task_id, line):
         t = TASKS.get(task_id)
         if not t:
             return
+        old_progress = int(t.get('progress_percent') or 0)
+        old_items = (t.get('items_done'), t.get('items_total'))
+        old_current = t.get('current_video')
 
         m = _PROGRESS_RE.search(line)
         if m:
@@ -323,6 +413,17 @@ def _parse_line(task_id, line):
             t['current_video'] = os.path.basename(path)
             t['progress_percent'] = 100.0
             _register_file(t, path)
+
+        # One registry write per integer percent / item / current video change,
+        # never per output chunk.
+        changed = (
+            int(t.get('progress_percent') or 0) != old_progress
+            or (t.get('items_done'), t.get('items_total')) != old_items
+            or t.get('current_video') != old_current
+        )
+
+    if changed:
+        _sync_registry(task_id)
 
 
 def _scan_new_files(task_id):
@@ -609,10 +710,13 @@ def _run_download(task_id):
         with _lock:
             TASKS[task_id]['status'] = 'error'
             TASKS[task_id]['finished_at'] = datetime.now().isoformat(timespec='seconds')
+        _sync_registry(task_id, status='error',
+                       message=f'Cannot create save dir: {e}', final=True)
         return
 
     with _lock:
         TASKS[task_id]['status'] = 'running'
+    _sync_registry(task_id, status='running', message='Detecting channel name...')
     _append_log(task_id, '▶️ Detecting channel name…')
 
     save_dir = _apply_channel_folder(task_id, url, mode, base_save_dir)
@@ -659,6 +763,8 @@ def _run_download(task_id):
             with _lock:
                 TASKS[task_id]['status'] = 'cancelled'
                 TASKS[task_id]['finished_at'] = datetime.now().isoformat(timespec='seconds')
+            _sync_registry(task_id, status='cancelled',
+                           message='Cancelled by user.', final=True)
             return
 
         if proc.returncode != 0:
@@ -666,17 +772,23 @@ def _run_download(task_id):
             with _lock:
                 TASKS[task_id]['status'] = 'error'
                 TASKS[task_id]['finished_at'] = datetime.now().isoformat(timespec='seconds')
+            _sync_registry(task_id, status='error',
+                           message=f'yt-dlp exited with code {proc.returncode}',
+                           final=True)
         else:
             _append_log(task_id, '✅ Download finished successfully.')
             with _lock:
                 TASKS[task_id]['status'] = 'complete'
                 TASKS[task_id]['finished_at'] = datetime.now().isoformat(timespec='seconds')
                 TASKS[task_id]['progress_percent'] = 100.0
+            _sync_registry(task_id, status='complete',
+                           message='Download finished successfully.', final=True)
     except Exception as e:
         _append_log(task_id, f'❌ Error: {e}')
         with _lock:
             TASKS[task_id]['status'] = 'error'
             TASKS[task_id]['finished_at'] = datetime.now().isoformat(timespec='seconds')
+        _sync_registry(task_id, status='error', message=f'Error: {e}', final=True)
     finally:
         with _lock:
             if task_id in TASKS:
@@ -692,6 +804,8 @@ def _run_channel_shorts(task_id, url, save_dir):
         with _lock:
             TASKS[task_id]['status'] = 'error'
             TASKS[task_id]['finished_at'] = datetime.now().isoformat(timespec='seconds')
+        _sync_registry(task_id, status='error', message='No shorts URLs found.',
+                       final=True)
         return
 
     total = len(urls)
@@ -699,6 +813,7 @@ def _run_channel_shorts(task_id, url, save_dir):
     with _lock:
         TASKS[task_id]['items_total'] = total
         TASKS[task_id]['items_done'] = 0
+    _sync_registry(task_id, message=f'Found {total} shorts')
 
     with _lock:
         folder_set = bool(TASKS[task_id].get('channel_folder'))
@@ -721,14 +836,21 @@ def _run_channel_shorts(task_id, url, save_dir):
 
     for idx, video_url in enumerate(urls, start=1):
         with _lock:
-            if TASKS[task_id].get('cancel_requested'):
-                _append_log(task_id, f'⏹️ Cancelled at {idx-1}/{total}')
+            cancelled = bool(TASKS[task_id].get('cancel_requested'))
+            if cancelled:
                 TASKS[task_id]['status'] = 'cancelled'
                 TASKS[task_id]['finished_at'] = datetime.now().isoformat(timespec='seconds')
-                return
-            TASKS[task_id]['items_done'] = idx - 1
-            TASKS[task_id]['progress_percent'] = 0.0
+            else:
+                TASKS[task_id]['items_done'] = idx - 1
+                TASKS[task_id]['progress_percent'] = 0.0
 
+        if cancelled:
+            _append_log(task_id, f'⏹️ Cancelled at {idx-1}/{total}')
+            _sync_registry(task_id, status='cancelled',
+                           message=f'Cancelled at {idx-1}/{total}', final=True)
+            return
+
+        _sync_registry(task_id)
         _append_log(task_id, f'▶️ [{idx}/{total}] {video_url}')
 
         cmd = _build_command_single(video_url, save_dir)
@@ -770,11 +892,13 @@ def _run_channel_shorts(task_id, url, save_dir):
         pass
 
     with _lock:
-        if TASKS[task_id].get('cancel_requested'):
-            TASKS[task_id]['status'] = 'cancelled'
-        else:
-            TASKS[task_id]['status'] = 'complete'
+        final_status = ('cancelled' if TASKS[task_id].get('cancel_requested')
+                        else 'complete')
+        TASKS[task_id]['status'] = final_status
+        if final_status == 'complete':
             TASKS[task_id]['progress_percent'] = 100.0
         TASKS[task_id]['finished_at'] = datetime.now().isoformat(timespec='seconds')
 
+    _sync_registry(task_id, status=final_status,
+                   message=f'Finished. Total: {total}', final=True)
     _append_log(task_id, f'✅ Finished. Total: {total}')

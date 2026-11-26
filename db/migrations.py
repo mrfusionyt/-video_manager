@@ -86,6 +86,8 @@ def init_db():
         cursor.execute("ALTER TABLE videos ADD COLUMN intro_reason TEXT DEFAULT ''")
     if 'intro_version' not in columns:
         cursor.execute("ALTER TABLE videos ADD COLUMN intro_version INTEGER DEFAULT 0")
+    if 'mtime' not in columns:
+        cursor.execute("ALTER TABLE videos ADD COLUMN mtime REAL DEFAULT 0.0")
 
     # --- Новая колонка folder ---
     if 'folder' not in columns:
@@ -201,6 +203,29 @@ def init_db():
     columns = [col['name'] for col in cursor.fetchall()]
     if 'cover_video_id' not in columns:
         cursor.execute("ALTER TABLE playlists ADD COLUMN cover_video_id INTEGER REFERENCES videos(id) ON DELETE SET NULL")
+
+    # --- Единый реестр фоновых задач ---
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS tasks (
+            id TEXT PRIMARY KEY,
+            kind TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'running',
+            progress INTEGER NOT NULL DEFAULT 0,
+            processed INTEGER NOT NULL DEFAULT 0,
+            total INTEGER NOT NULL DEFAULT 0,
+            message TEXT DEFAULT '',
+            current TEXT DEFAULT '',
+            mode TEXT DEFAULT '',
+            cancel_requested INTEGER NOT NULL DEFAULT 0,
+            payload TEXT,
+            result TEXT,
+            created_at TEXT,
+            updated_at TEXT,
+            finished_at TEXT
+        )
+    ''')
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_tasks_updated ON tasks(updated_at DESC)")
 
     # --- Индексы ---
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_videos_mode ON videos(mode)")

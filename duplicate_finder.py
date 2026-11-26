@@ -18,6 +18,7 @@ r"""
 import os
 import json
 import base64
+import hashlib
 import struct
 import shutil
 import sqlite3
@@ -26,6 +27,8 @@ import subprocess
 import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
+import task_registry
 
 import numpy as np
 import cv2
@@ -172,6 +175,15 @@ def _init_db():
         )
     """)
     c.execute("""
+        CREATE TABLE IF NOT EXISTS byte_hash (
+            path TEXT PRIMARY KEY,
+            size INTEGER,
+            mtime REAL,
+            partial TEXT,
+            full TEXT
+        )
+    """)
+    c.execute("""
         CREATE TABLE IF NOT EXISTS ignored_pairs (
             path_a TEXT NOT NULL,
             path_b TEXT NOT NULL,
@@ -188,6 +200,132 @@ def _init_db():
     c.execute("CREATE INDEX IF NOT EXISTS idx_ignored_a ON ignored_pairs(path_a)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_ignored_b ON ignored_pairs(path_b)")
     conn.commit()
+
+
+# ===================================================================
+#               Трёхступенчатый поиск байтовых копий
+#        размер → partial hash (начало+конец) → полный hash
+# ===================================================================
+BYTE_HASH_CHUNK = 1024 * 1024
+
+
+def _partial_byte_hash(path, size):
+    """First and last megabyte: cheap enough for every file."""
+    digest = hashlib.sha256()
+    with open(path, 'rb') as f:
+        digest.update(f.read(BYTE_HASH_CHUNK))
+        if size > BYTE_HASH_CHUNK * 2:
+            f.seek(-BYTE_HASH_CHUNK, os.SEEK_END)
+            digest.update(f.read(BYTE_HASH_CHUNK))
+    return digest.hexdigest()
+
+
+def _full_byte_hash(path):
+    digest = hashlib.sha256()
+    with open(path, 'rb') as f:
+        for chunk in iter(lambda: f.read(BYTE_HASH_CHUNK * 8), b''):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _byte_hash_cached(path, size, mtime, full=False):
+    conn = _get_conn()
+    c = conn.cursor()
+    row = c.execute(
+        "SELECT size, mtime, partial, full FROM byte_hash WHERE path = ?",
+        (path,)).fetchone()
+    if (row and row['size'] == size and row['mtime'] == mtime
+            and row['partial'] and (not full or row['full'])):
+        return row['full'] if full else row['partial']
+    if full:
+        value = _full_byte_hash(path)
+        c.execute(
+            "UPDATE byte_hash SET full = ?, mtime = ?, size = ? WHERE path = ?",
+            (value, mtime, size, path))
+    else:
+        value = _partial_byte_hash(path, size)
+        c.execute(
+            "INSERT OR REPLACE INTO byte_hash (path, size, mtime, partial, full) "
+            "VALUES (?, ?, ?, ?, NULL)", (path, size, mtime, value))
+    conn.commit()
+    return value
+
+
+def _byte_exact_matches(task_id, paths, item_by_path, index,
+                        is_ignored, union, check_cancel):
+    """Find identical byte-for-byte files with a cheap two-stage filter.
+
+    Perceptual/audio matches are never removed — this stage only ADDS pairs,
+    so transcoded duplicates still end up in the same groups.
+    """
+    by_size = defaultdict(list)
+    for p in paths:
+        item = item_by_path.get(p) or {}
+        try:
+            size = int(item.get('size') or 0)
+        except (TypeError, ValueError):
+            size = 0
+        if size > 0:
+            by_size[size].append(p)
+    size_candidates = [v for v in by_size.values() if len(v) > 1]
+    total = sum(len(v) for v in size_candidates)
+    print(f"[dup] byte stage: {len(size_candidates)} size buckets, "
+          f"{total} files")
+    if not total:
+        return {}
+
+    _set_progress(task_id, 36, 0, total, 'Checking exact copies...')
+    partial_buckets = defaultdict(list)
+    done = 0
+    for size, group in by_size.items():
+        if len(group) < 2:
+            continue
+        for path in group:
+            check_cancel()
+            try:
+                mtime = os.path.getmtime(path)
+                partial = _byte_hash_cached(path, size, mtime)
+                partial_buckets[(size, partial)].append((path, mtime))
+            except OSError as e:
+                print(f"[dup] byte hash skipped {path}: {e}", flush=True)
+            done += 1
+            if done % 100 == 0:
+                _set_progress(task_id, 37, done, total,
+                              f'Checking exact copies {done}/{total}')
+
+    _set_progress(task_id, 38, done, total, 'Comparing exact copies...')
+    matches = {}
+    for (_size, _partial), entries in partial_buckets.items():
+        if len(entries) < 2:
+            continue
+        full_buckets = defaultdict(list)
+        for path, mtime in entries:
+            check_cancel()
+            try:
+                full = _byte_hash_cached(path, _size, mtime, full=True)
+                full_buckets[full].append(path)
+            except OSError as e:
+                print(f"[dup] full hash skipped {path}: {e}", flush=True)
+        for same in full_buckets.values():
+            if len(same) < 2:
+                continue
+            for i in range(len(same)):
+                for j in range(i + 1, len(same)):
+                    a, b = same[i], same[j]
+                    ia, ib = index[a], index[b]
+                    if is_ignored(ia, ib):
+                        continue
+                    item_a = item_by_path.get(a) or {}
+                    item_b = item_by_path.get(b) or {}
+                    matches[(ia, ib)] = {
+                        'a_id': item_a.get('id'),
+                        'b_id': item_b.get('id'),
+                        'kind': 'full',
+                        'byte': True,
+                    }
+                    union(ia, ib)
+    print(f"[dup] byte-exact pairs: {len(matches)}")
+    return matches
 
 
 def _get_or_create_file(path, mtime, size, media_type, intro_skip=0.0):
@@ -401,21 +539,19 @@ class DuplicateScanCancelled(Exception):
     """Внутренний сигнал остановки поиска дубликатов пользователем."""
 
 
-def request_duplicate_cancel(task_id):
-    """Запросить остановку поиска дубликатов. Идемпотентно."""
+def _set_duplicate_cancel_flags(task_id):
     with _lock:
         t = scan_progress.get(task_id)
-        if not t:
-            return 'not_found'
-        status = t.get('status')
-        if status in ('complete', 'error', 'cancelled'):
-            return 'already_done'
-        if status == 'cancelling':
-            return 'ok'
+        if not t or t.get('status') in ('complete', 'error', 'cancelled'):
+            return
         t['cancel_requested'] = True
         t['status'] = 'cancelling'
         t['message'] = 'Cancelling...'
-        return 'ok'
+
+
+def request_duplicate_cancel(task_id):
+    """Запросить остановку поиска дубликатов. Идемпотентно."""
+    return task_registry.request_cancel(task_id)
 
 
 def _duplicate_cancel_requested(task_id):
@@ -433,6 +569,10 @@ def _set_progress(task_id, progress, processed, total, message):
     t['total'] = int(total)
     if t.get('status') != 'cancelling':
         t['message'] = message
+    task_registry.update(
+        task_id, progress=t['progress'], processed=t['processed'],
+        total=t['total'], message=t.get('message') or message,
+    )
 
 
 # ===================================================================
@@ -1481,6 +1621,12 @@ def _group_all(task_id, frames_by_path, audio_by_path,
         if ra != rb:
             parent[ra] = rb
 
+    # ---------- БАЙТОВЫЕ КОПИИ (size → partial → full) ----------
+    check_cancel()
+    index = {p: i for i, p in enumerate(paths)}
+    byte_matches = _byte_exact_matches(
+        task_id, paths, item_by_path, index, is_ignored, union, check_cancel)
+
     # ---------- VIDEO ----------
     _set_progress(task_id, 40, 0, 0, 'Preparing video index...')
     hash_objs = _precompute_video_hashes(frames_by_path, paths)
@@ -1590,6 +1736,10 @@ def _group_all(task_id, frames_by_path, audio_by_path,
     for (i, j), res in audio_matches_by_pair.items():
         audio_by_root[find(i)].append((i, j, res))
 
+    byte_by_root = defaultdict(list)
+    for (i, j), res in byte_matches.items():
+        byte_by_root[find(i)].append((i, j, res))
+
     by_root = defaultdict(list)
     for i in range(n):
         by_root[find(i)].append(i)
@@ -1663,6 +1813,16 @@ def _group_all(task_id, frames_by_path, audio_by_path,
                     'skipped_intro_sec': res.get('skipped_intro_sec', 0),
                 })
 
+        byte_list = []
+        for (i, j, res) in byte_by_root.get(root, []):
+            a = item_by_path.get(paths[i])
+            b = item_by_path.get(paths[j])
+            if a and b and a.get('id') is not None and b.get('id') is not None:
+                byte_list.append({
+                    'a_id': a['id'], 'b_id': b['id'],
+                    'kind': 'full', 'byte': True,
+                })
+
         if video_list and audio_list:
             reason = 'video+audio'
         elif video_list:
@@ -1671,6 +1831,8 @@ def _group_all(task_id, frames_by_path, audio_by_path,
             reason = 'image'
         elif audio_list:
             reason = 'audio'
+        elif byte_list:
+            reason = 'bytes'
         else:
             continue
 
@@ -1687,6 +1849,8 @@ def _group_all(task_id, frames_by_path, audio_by_path,
                 kind = 'full'
             elif has_partial:
                 kind = 'partial'
+            elif byte_list:
+                kind = 'full'
             else:
                 kind = 'image'
 
@@ -1698,6 +1862,7 @@ def _group_all(task_id, frames_by_path, audio_by_path,
                 'video': video_list,
                 'audio': audio_list,
                 'image': image_list,
+                'bytes': byte_list,
             },
         })
 
@@ -1716,6 +1881,10 @@ def find_duplicates_async(task_id, filters=None, scan_paths=None, mode='deep'):
     with _lock:
         if scan_in_progress:
             print("[dup] scan already running")
+            task_registry.create(
+                task_id, 'duplicate_scan', status='error', progress=0,
+                message='Duplicate scan already in progress', mode=mode,
+            )
             return False
         scan_in_progress = True
         scan_progress[task_id] = {
@@ -1723,6 +1892,13 @@ def find_duplicates_async(task_id, filters=None, scan_paths=None, mode='deep'):
             'processed': 0, 'message': 'Initializing...',
             'mode': mode,
         }
+    task_registry.create(
+        task_id, 'duplicate_scan', status='scanning', progress=0,
+        message='Initializing...', mode=mode,
+        payload={'filters': filters or [], 'scan_paths': scan_paths or []},
+    )
+    task_registry.register_cancel_handler(
+        task_id, lambda: _set_duplicate_cancel_flags(task_id))
     threading.Thread(target=_find_duplicates_worker,
                      args=(task_id, filters, scan_paths, mode),
                      daemon=True).start()
@@ -1789,6 +1965,10 @@ def _find_duplicates_worker(task_id, filters, scan_paths=None, mode='deep'):
                 'status': 'complete', 'progress': 100,
                 'message': 'No files to scan.',
             })
+            task_registry.update(
+                task_id, status='complete', progress=100,
+                message='No files to scan.', total=0, processed=0,
+            )
             return
 
         _cleanup_db([v['filepath'] for v in all_items])
@@ -1857,6 +2037,11 @@ def _find_duplicates_worker(task_id, filters, scan_paths=None, mode='deep'):
             'status': 'complete', 'progress': 100,
             'message': f'Found {len(groups)} duplicate groups ({mode})',
         })
+        task_registry.update(
+            task_id, status='complete', progress=100,
+            message=f'Found {len(groups)} duplicate groups ({mode})',
+            result={'groups': len(groups), 'mode': mode},
+        )
 
         print(f"[dup] === RESULT: {len(groups)} groups ({mode}) ===")
         for gi, g in enumerate(groups[:5]):
@@ -1866,17 +2051,28 @@ def _find_duplicates_worker(task_id, filters, scan_paths=None, mode='deep'):
 
     except DuplicateScanCancelled:
         print("[dup] aborted by user", flush=True)
-        t = scan_progress.get(task_id)
+        t = scan_progress.get(task_id) or {}
         if t:
             t['status'] = 'cancelled'
             t['message'] = (f"Aborted. {t.get('processed', 0)} "
                             f"of {t.get('total', 0)} files processed.")
+        task_registry.update(
+            task_id, status='cancelled',
+            message=t.get('message') or 'Aborted.',
+            processed=t.get('processed', 0), total=t.get('total', 0),
+        )
     except Exception as e:
         import traceback
         traceback.print_exc()
-        scan_progress[task_id]['status'] = 'error'
-        scan_progress[task_id]['message'] = str(e)
+        t = scan_progress.get(task_id) or {}
+        t['status'] = 'error'
+        t['message'] = str(e)
+        task_registry.update(
+            task_id, status='error', message=t['message'],
+            processed=t.get('processed', 0), total=t.get('total', 0),
+        )
     finally:
+        task_registry.unregister_cancel_handler(task_id)
         with _lock:
             scan_in_progress = False
 
@@ -1903,6 +2099,7 @@ def _rebuild_groups_from_matches(group):
     video_matches = matches.get('video', []) or []
     audio_matches = matches.get('audio', []) or []
     image_matches = matches.get('image', []) or []
+    byte_matches = matches.get('bytes', []) or []
 
     path_by_id = {}
     for f in files:
@@ -1927,6 +2124,7 @@ def _rebuild_groups_from_matches(group):
     used_video_pairs = []
     used_audio_pairs = []
     used_image_pairs = []
+    used_byte_pairs = []
 
     def is_ignored_by_id(a_id, b_id):
         pa = path_by_id.get(a_id, '')
@@ -1950,6 +2148,11 @@ def _rebuild_groups_from_matches(group):
         if a_id in idx and b_id in idx and not is_ignored_by_id(a_id, b_id):
             union(idx[a_id], idx[b_id])
             used_image_pairs.append(m)
+    for m in byte_matches:
+        a_id, b_id = m.get('a_id'), m.get('b_id')
+        if a_id in idx and b_id in idx and not is_ignored_by_id(a_id, b_id):
+            union(idx[a_id], idx[b_id])
+            used_byte_pairs.append(m)
 
     by_root = defaultdict(list)
     for i, vid in enumerate(id_list):
@@ -1967,6 +2170,8 @@ def _rebuild_groups_from_matches(group):
                      if m['a_id'] in vids_set and m['b_id'] in vids_set]
         sub_image = [m for m in used_image_pairs
                      if m['a_id'] in vids_set and m['b_id'] in vids_set]
+        sub_bytes = [m for m in used_byte_pairs
+                     if m['a_id'] in vids_set and m['b_id'] in vids_set]
         if sub_video and sub_audio:
             r = 'video+audio'
         elif sub_video:
@@ -1975,6 +2180,8 @@ def _rebuild_groups_from_matches(group):
             r = 'image'
         elif sub_audio:
             r = 'audio'
+        elif sub_bytes:
+            r = 'bytes'
         else:
             continue
 
@@ -1991,6 +2198,8 @@ def _rebuild_groups_from_matches(group):
                 kind = 'full'
             elif has_partial:
                 kind = 'partial'
+            elif sub_bytes:
+                kind = 'full'
             else:
                 kind = 'image'
 
@@ -2002,6 +2211,7 @@ def _rebuild_groups_from_matches(group):
                 'video': sub_video,
                 'audio': sub_audio,
                 'image': sub_image,
+                'bytes': sub_bytes,
             },
         })
     return result

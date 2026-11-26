@@ -54,7 +54,7 @@ def _attach_quality(videos):
 def add_video(library_id, filename, filepath, duration=0, size=0, added=None,
               rating=0, orientation='horizontal', media_type='video',
               width=0, height=0, codec='', bitrate=0, fps=0.0, mode=1,
-              folder=None):
+              folder=None, mtime=0.0):
     if added is None:
         added = datetime.now().isoformat()
     if folder is None:
@@ -68,11 +68,11 @@ def add_video(library_id, filename, filepath, duration=0, size=0, added=None,
                 INSERT INTO videos (
                     library_id, filename, filepath, folder, duration, size, added,
                     rating, orientation, media_type,
-                    width, height, codec, bitrate, fps, mode
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    width, height, codec, bitrate, fps, mode, mtime
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (library_id, filename, filepath, folder, duration, size, added,
                   rating, orientation, media_type,
-                  width, height, codec, bitrate, fps, mode))
+                  width, height, codec, bitrate, fps, mode, mtime))
             conn.commit()
             return cursor.lastrowid
         except sqlite3.IntegrityError:
@@ -81,13 +81,26 @@ def add_video(library_id, filename, filepath, duration=0, size=0, added=None,
                     library_id = ?, filename = ?, folder = ?, duration = ?,
                     size = ?, added = ?, rating = ?, orientation = ?,
                     media_type = ?, width = ?, height = ?, codec = ?,
-                    bitrate = ?, fps = ?, mode = ?
+                    bitrate = ?, fps = ?, mode = ?, mtime = ?
                 WHERE filepath = ?
             ''', (library_id, filename, folder, duration, size, added,
                   rating, orientation, media_type,
-                  width, height, codec, bitrate, fps, mode, filepath))
+                  width, height, codec, bitrate, fps, mode, mtime, filepath))
             conn.commit()
             return cursor.lastrowid
+    finally:
+        conn.close()
+
+
+def update_video_scan_state(video_id, mtime, size):
+    """Store the file signature used by incremental scans."""
+    conn = get_db_connection()
+    try:
+        conn.execute(
+            "UPDATE videos SET mtime = ?, size = ? WHERE id = ?",
+            (float(mtime or 0.0), int(size or 0), video_id),
+        )
+        conn.commit()
     finally:
         conn.close()
 

@@ -18,6 +18,7 @@ How the release is published (in this order):
 """
 
 import argparse
+import hashlib
 import os
 import re
 import shutil
@@ -108,6 +109,19 @@ def build_zip(version):
     return asset_path, asset_name
 
 
+def build_checksum(asset_path, asset_name):
+    """Publish a .sha256 sidecar so the updater can verify the download."""
+    digest = hashlib.sha256()
+    with open(asset_path, 'rb') as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b''):
+            digest.update(chunk)
+    checksum_path = asset_path + '.sha256'
+    with open(checksum_path, 'w', encoding='ascii', newline='\n') as f:
+        f.write(f'{digest.hexdigest()}  {asset_name}\n')
+    print(f'checksum: {checksum_path} ({digest.hexdigest()})')
+    return checksum_path
+
+
 # ---------------------------------------------------------------- publishing
 def get_token():
     for var in ('GH_TOKEN', 'GITHUB_TOKEN'):
@@ -140,17 +154,19 @@ def find_gh():
     return None
 
 
-def release_via_gh(gh_path, tag, asset_path, notes):
-    cmd = [gh_path, 'release', 'create', tag, asset_path,
-           '--title', f'VideoManager {tag}', '--notes', notes]
+def release_via_gh(gh_path, tag, assets, notes):
+    cmd = [gh_path, 'release', 'create', tag] + [p for p, _ in assets] + [
+        '--title', f'VideoManager {tag}', '--notes', notes]
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode == 0:
         print(result.stdout.strip())
         return True
     print('[gh] create failed, trying upload to an existing release...')
     print(result.stderr.strip())
-    upload = subprocess.run([gh_path, 'release', 'upload', tag, asset_path, '--clobber'],
-                            capture_output=True, text=True)
+    upload = subprocess.run(
+        [gh_path, 'release', 'upload', tag]
+        + [p for p, _ in assets] + ['--clobber'],
+        capture_output=True, text=True)
     if upload.returncode == 0:
         print(upload.stdout.strip())
         return True
@@ -159,7 +175,7 @@ def release_via_gh(gh_path, tag, asset_path, notes):
     return False
 
 
-def release_via_api(user, repo, tag, asset_path, asset_name, notes, token):
+def release_via_api(user, repo, tag, assets, notes, token):
     # Imported here so read_version()/build_zip() work before dependencies are installed.
     import requests
 
@@ -185,38 +201,43 @@ def release_via_api(user, repo, tag, asset_path, asset_name, notes, token):
     else:
         raise RuntimeError(f'cannot read release: {r.status_code} {r.text[:300]}')
 
-    # Replace an asset with the same name, if present.
-    for asset in release.get('assets', []):
-        if asset.get('name') == asset_name:
-            requests.delete(f'{API}/repos/{user}/{repo}/releases/assets/{asset["id"]}',
-                            headers=headers, timeout=20)
-
+    # Replace assets with the same name, if present.
+    existing = {a.get('name'): a.get('id') for a in release.get('assets', [])}
     upload_url = release['upload_url'].split('{')[0]
-    size_mb = os.path.getsize(asset_path) / 1048576
-    print(f'uploading {asset_name} ({size_mb:.1f} MB) — please wait...')
-    with open(asset_path, 'rb') as f:
-        up = requests.post(upload_url,
-                           headers={**headers, 'Content-Type': 'application/zip'},
-                           params={'name': asset_name},
-                           data=f, timeout=(15, 3600))
-    if up.status_code >= 400:
-        raise RuntimeError(f'asset upload failed: {up.status_code} {up.text[:300]}')
-    print(f'asset uploaded: {up.json().get("browser_download_url")}')
+    for path, name in assets:
+        if name in existing:
+            requests.delete(
+                f'{API}/repos/{user}/{repo}/releases/assets/{existing[name]}',
+                headers=headers, timeout=20)
+        size_mb = os.path.getsize(path) / 1048576
+        content_type = 'application/zip' if name.endswith('.zip') else 'text/plain'
+        print(f'uploading {name} ({size_mb:.1f} MB) — please wait...')
+        with open(path, 'rb') as f:
+            up = requests.post(upload_url,
+                               headers={**headers, 'Content-Type': content_type},
+                               params={'name': name},
+                               data=f, timeout=(15, 3600))
+        if up.status_code >= 400:
+            raise RuntimeError(
+                f'asset upload failed ({name}): {up.status_code} {up.text[:300]}')
+        print(f'asset uploaded: {up.json().get("browser_download_url")}')
     return release['html_url']
 
 
-def publish(user, repo, tag, asset_path, asset_name, notes):
+def publish(user, repo, tag, asset_path, asset_name, notes, extra_assets=None):
+    """Publish the zip and optional sidecar files (e.g. the .sha256 checksum)."""
+    assets = [(asset_path, asset_name)] + list(extra_assets or [])
     gh_path = find_gh()
     if gh_path:
         print(f'publishing with GitHub CLI ({gh_path})...')
-        if release_via_gh(gh_path, tag, asset_path, notes):
+        if release_via_gh(gh_path, tag, assets, notes):
             return True
         print('hint: authenticate once with   gh auth login')
 
     token = get_token()
     if token:
         print('publishing with GitHub API token...')
-        url = release_via_api(user, repo, tag, asset_path, asset_name, notes, token)
+        url = release_via_api(user, repo, tag, assets, notes, token)
         print(f'release page: {url}')
         return True
 
@@ -256,11 +277,14 @@ def main():
     print(f'VideoManager {tag}  ({user}/{repo})')
 
     asset_path, asset_name = build_zip(version)
+    checksum_path = build_checksum(asset_path, asset_name)
     if args.no_release:
         return
 
     try:
-        published = publish(user, repo, tag, asset_path, asset_name, notes)
+        published = publish(
+            user, repo, tag, asset_path, asset_name, notes,
+            extra_assets=[(checksum_path, os.path.basename(checksum_path))])
     except Exception as exc:
         print(f'ERROR while publishing: {exc}')
         print(f'Upload manually: https://github.com/{user}/{repo}/releases/new?tag={tag}')

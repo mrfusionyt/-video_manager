@@ -4,6 +4,7 @@
 иконку в системный трей и умеет автообновляться с GitHub.
 """
 import os
+import re
 import sys
 import socket
 import shutil
@@ -13,6 +14,7 @@ import subprocess
 import time
 import zipfile
 import queue
+import hashlib
 import tempfile
 import tkinter as tk
 from tkinter import filedialog, messagebox
@@ -26,6 +28,7 @@ import requests
 from PIL import Image, ImageDraw
 import pystray
 
+import task_registry
 from app import app as flask_app
 from addon.photo_classifier import state as pv_state
 
@@ -33,7 +36,7 @@ from addon.photo_classifier import state as pv_state
 # =====================================================================
 # UPDATE SETTINGS
 # =====================================================================
-CURRENT_VERSION = '1.0.15'
+CURRENT_VERSION = '1.0.16'
 GITHUB_USER = 'mrfusionyt'
 GITHUB_REPO = '-video_manager'
 AUTO_UPDATE_INTERVAL = 3600       # seconds between automatic checks
@@ -74,7 +77,9 @@ update_progress_canvas = None
 update_progress_percent = None
 update_progress_detail = None
 pending_update_url = None
+pending_checksum_url = None
 pending_version = None
+pending_update_deferred = False
 ignored_version = None
 update_in_progress = False
 tray_icon = None
@@ -242,6 +247,70 @@ def safe_extract(zf, dest):
     zf.extractall(dest_root, members=members)
 
 
+def _checksum_url_for(assets, zip_url):
+    """The build publishes <zip>.sha256; older releases simply have none."""
+    zip_name = os.path.basename(zip_url.split('?')[0]).lower()
+    for asset in assets or []:
+        name = str(asset.get('name') or '').lower()
+        url = asset.get('browser_download_url') or ''
+        if name == zip_name + '.sha256' or (
+                name.endswith('.sha256') and 'onedir' in name and url):
+            return url
+    return zip_url + '.sha256'
+
+
+def _sha256_file(path):
+    digest = hashlib.sha256()
+    with open(path, 'rb') as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b''):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _fetch_expected_checksum(url):
+    """Return the 64-hex digest from a .sha256 asset, or None if absent."""
+    try:
+        r = requests.get(url, timeout=(10, 60))
+        if r.status_code == 404:
+            append_log('[update] release has no checksum asset - skipping verification')
+            return None
+        r.raise_for_status()
+        match = re.search(r'[0-9a-fA-F]{64}', r.text or '')
+        if not match:
+            raise RuntimeError('checksum asset is empty or malformed')
+        return match.group(0).lower()
+    except Exception as exc:
+        if '404' in str(exc):
+            return None
+        raise RuntimeError(f'cannot read update checksum: {exc}')
+
+
+def _active_update_blockers():
+    """Active tasks must not be interrupted by an in-place update."""
+    try:
+        return task_registry.has_active_tasks()
+    except Exception as exc:
+        append_log(f'[update] task check failed: {exc}')
+        return False, []
+
+
+def _staging_dir(target_dir):
+    """Stage next to the install folder when possible (same disk volume)."""
+    parent = os.path.dirname(os.path.abspath(target_dir))
+    candidates = [parent, tempfile.gettempdir()]
+    for base in candidates:
+        try:
+            os.makedirs(base, exist_ok=True)
+            probe = os.path.join(base, 'vm_stage_write_test.tmp')
+            with open(probe, 'w', encoding='utf-8') as f:
+                f.write('')
+            os.remove(probe)
+            return os.path.join(base, f'vm_update_stage_{os.getpid()}')
+        except Exception as exc:
+            append_log(f'[update] staging folder {base} is not writable: {exc}')
+    return os.path.join(tempfile.gettempdir(), f'vm_update_stage_{os.getpid()}')
+
+
 def resource_path(rel: str) -> str:
     if hasattr(sys, '_MEIPASS'):
         return os.path.join(sys._MEIPASS, rel)
@@ -325,6 +394,7 @@ def create_tray():
             pystray.MenuItem('Show App', show_window, default=True),
             pystray.MenuItem('Open in Browser', lambda: webbrowser.open(local_url_global)),
             pystray.MenuItem('Restart Server', restart_from_tray),
+            pystray.MenuItem('Set Access Password...', password_from_tray),
             pystray.MenuItem('Exit', tray_quit),
         )
         tray_icon = pystray.Icon('VideoManager', image, 'VideoManager', menu)
@@ -335,7 +405,7 @@ def create_tray():
 
 def check_for_updates(manual=False):
     """Check GitHub once; a newer release is installed automatically."""
-    global ignored_version, update_in_progress
+    global ignored_version, update_in_progress, pending_update_deferred
     if GITHUB_USER == 'YOUR_NICKNAME' or GITHUB_REPO == 'YOUR_REPO':
         return False
     try:
@@ -368,6 +438,7 @@ def check_for_updates(manual=False):
                     if (asset.get('name') or '').lower().endswith('.zip'):
                         download_url = asset['browser_download_url']
                         break
+            checksum_url = _checksum_url_for(data.get('assets', []), download_url or '')
             if not download_url:
                 append_log('[update] release has no .zip asset')
                 return False
@@ -375,10 +446,26 @@ def check_for_updates(manual=False):
                 append_log('[update] newer version is already being installed')
                 return True
             if tk_root:
-                tk_root.after(0, lambda: show_update_indicator(latest_version, download_url))
+                tk_root.after(0, lambda: show_update_indicator(
+                    latest_version, download_url, checksum_url))
+            else:
+                show_update_indicator(latest_version, download_url, checksum_url)
             if getattr(sys, 'frozen', False):
-                append_log(f'[update] auto-installing v{latest_version}')
-                start_update(download_url, latest_version, auto=True)
+                active, blockers = _active_update_blockers()
+                if active:
+                    pending_update_deferred = True
+                    append_log(
+                        f'[update] update to v{latest_version} deferred: '
+                        f'{len(blockers)} active task(s): '
+                        + ', '.join(str(t.get("kind")) for t in blockers[:5]))
+                    set_update_ui(status=f'Update v{latest_version} ready - '
+                                  'waiting for tasks', color='#ffc107',
+                                  btn_text=f'Update to v{latest_version}',
+                                  btn_state=tk.NORMAL, show_btn=True)
+                else:
+                    append_log(f'[update] auto-installing v{latest_version}')
+                    start_update(download_url, latest_version, auto=True,
+                                 checksum_url=checksum_url)
             else:
                 append_log('[update] source run: auto-install needs the compiled .exe')
             return True
@@ -391,9 +478,12 @@ def check_for_updates(manual=False):
 def force_check_update():
     def do_check():
         global ignored_version, pending_update_url, pending_version
+        global pending_checksum_url, pending_update_deferred
         ignored_version = None
         pending_update_url = None
+        pending_checksum_url = None
         pending_version = None
+        pending_update_deferred = False
 
         append_log('[update] manual check started')
         if status_label:
@@ -424,15 +514,35 @@ def update_loop():
         time.sleep(0.1)
     while not quit_requested.is_set():
         check_for_updates(manual=False)
-        for _ in range(AUTO_UPDATE_INTERVAL):
+        for tick in range(AUTO_UPDATE_INTERVAL):
             if quit_requested.is_set():
                 break
+            if tick % 10 == 0:
+                maybe_start_deferred_update()
             time.sleep(1)
 
 
-def show_update_indicator(latest_version, download_url):
-    global pending_update_url, pending_version
+def maybe_start_deferred_update():
+    """Install an update that was postponed because tasks were running."""
+    global pending_update_deferred
+    if not pending_update_deferred or update_in_progress:
+        return
+    if not getattr(sys, 'frozen', False) or not pending_update_url:
+        return
+    active, _ = _active_update_blockers()
+    if active:
+        return
+    pending_update_deferred = False
+    append_log(f'[update] tasks finished, installing v{pending_version}')
+    start_update(pending_update_url, pending_version, auto=True,
+                 checksum_url=pending_checksum_url, force=True)
+
+
+def show_update_indicator(latest_version, download_url, checksum_url=None):
+    """UI + pending state only; deferral is decided by the caller."""
+    global pending_update_url, pending_version, pending_checksum_url
     pending_update_url = download_url
+    pending_checksum_url = checksum_url
     pending_version = latest_version
     append_log(f'[update] new version v{latest_version} available')
     if update_btn and not update_btn.winfo_ismapped():
@@ -447,9 +557,11 @@ def show_update_indicator(latest_version, download_url):
             pass
 
 
-def start_update(download_url, target_version=None, auto=False):
+def start_update(download_url, target_version=None, auto=False,
+                 checksum_url=None, force=False):
     """Download and install in the background; the button stays as a retry."""
     global update_in_progress, pending_update_url, pending_version
+    global pending_checksum_url, pending_update_deferred
     if update_in_progress:
         append_log('[update] install already in progress, skipping')
         return
@@ -458,8 +570,34 @@ def start_update(download_url, target_version=None, auto=False):
             tk_root.after(0, lambda: messagebox.showinfo(
                 'Info', 'Auto-update works only in the compiled .exe.', parent=tk_root))
         return
+    if not force:
+        active, blockers = _active_update_blockers()
+        if active:
+            names = ', '.join(str(t.get('kind')) for t in blockers[:5])
+            if auto:
+                pending_update_deferred = True
+                append_log(f'[update] deferring install: active tasks ({names})')
+                set_update_ui(
+                    status=f'Update v{target_version or "new"} ready - '
+                           'waiting for tasks', color='#ffc107',
+                    btn_state=tk.NORMAL, show_btn=True)
+                return
+            def ask_then_start():
+                ok = messagebox.askyesno(
+                    'Tasks are running',
+                    f'{len(blockers)} background task(s) are still running '
+                    f'({names}). Updating now may interrupt them.\n\n'
+                    'Update anyway?', parent=tk_root)
+                if ok:
+                    start_update(download_url, target_version, auto=False,
+                                 checksum_url=checksum_url, force=True)
+            if tk_root:
+                tk_root.after(0, ask_then_start)
+            return
+    pending_update_deferred = False
     update_in_progress = True
     pending_update_url = download_url
+    pending_checksum_url = checksum_url
     if target_version:
         pending_version = target_version
     ver = target_version or 'new'
@@ -470,13 +608,15 @@ def start_update(download_url, target_version=None, auto=False):
                   show_btn=True, progress=0, progress_state='active',
                   progress_detail=f'Preparing v{ver}...')
     threading.Thread(target=download_and_update,
-                     args=(download_url, ver, auto), daemon=True).start()
+                     args=(download_url, ver, auto, checksum_url),
+                     daemon=True).start()
 
 
 def trigger_update():
     if not pending_update_url:
         return
-    start_update(pending_update_url, pending_version, auto=False)
+    start_update(pending_update_url, pending_version, auto=False,
+                 checksum_url=pending_checksum_url)
 
 
 def _find_payload_root(folder):
@@ -491,15 +631,16 @@ def _find_payload_root(folder):
     return folder
 
 
-def download_and_update(download_url, target_version=None, auto=False):
-    """Download -> extract -> install into C:\\!video_manager -> restart."""
+def download_and_update(download_url, target_version=None, auto=False,
+                        checksum_url=None):
+    """Download -> verify -> extract -> install into C:\\!video_manager -> restart."""
     global update_in_progress
     ver = target_version or 'new'
     try:
         tmp = tempfile.gettempdir()
         zip_path = os.path.join(tmp, 'vm_update.zip')
-        update_dir = os.path.join(tmp, 'vm_update_temp')
         target_dir = resolve_install_dir()
+        update_dir = _staging_dir(target_dir)
         append_log(f'[update] install folder: {target_dir}')
 
         r = requests.get(download_url, stream=True, timeout=(10, 120))
@@ -530,6 +671,18 @@ def download_and_update(download_url, target_version=None, auto=False):
                                   progress=stage, progress_state='active',
                                   progress_detail=f'Downloading v{ver}: {pct}%')
         append_log(f'[update] archive saved ({done // 1048576} MB)')
+        if checksum_url:
+            set_update_ui(status=f'Verifying v{ver}...', progress=84,
+                          progress_state='active',
+                          progress_detail='Checking download checksum...')
+            expected = _fetch_expected_checksum(checksum_url)
+            if expected:
+                actual = _sha256_file(zip_path)
+                append_log(f'[update] sha256 expected={expected} actual={actual}')
+                if actual != expected:
+                    raise RuntimeError(
+                        'checksum mismatch: the downloaded archive is not the '
+                        'one published by the release')
         set_update_ui(status=f'Preparing v{ver}...', progress=86,
                       progress_state='active', progress_detail='Preparing files...')
 
@@ -552,11 +705,19 @@ def download_and_update(download_url, target_version=None, auto=False):
         # Copying over a running exe is impossible on Windows. A detached
         # batch waits for this PID to disappear, closes any remaining
         # instances that still hold the files, copies and relaunches.
+        # Same writable parent as the staging folder (backup/rollback volume).
+        backup_dir = update_dir + '_backup'
         with open(bat_path, 'w', encoding='utf-8') as f:
             f.write(f'''@echo off
 chcp 65001 >nul
 set "LOG={log_path}"
 set "TASKFILE={tmp}\\vm_update_tasks.txt"
+set "TARGET={target_dir}"
+set "SRC={src_root}"
+set "STAGE={update_dir}"
+set "BACKUP={backup_dir}"
+set "EXE={target_exe}"
+set "ZIP={zip_path}"
 echo [%DATE% %TIME%] update to v{ver} started, pid {pid} >> "%LOG%"
 set /a WAITS=0
 :wait_pid
@@ -575,20 +736,46 @@ ping -n 2 127.0.0.1 >nul
 goto wait_pid
 :install
 del "%TASKFILE%" >nul 2>&1
-if not exist "{target_dir}" mkdir "{target_dir}"
+if not exist "%TARGET%" mkdir "%TARGET%"
 echo [%DATE% %TIME%] closing running VideoManager instances >> "%LOG%"
 rem The updating process is gone, but another launcher/service instance may
 rem still hold the destination exe and DLLs. Close all of them before copying.
 taskkill /F /IM VideoManager.exe >> "%LOG%" 2>&1
 ping -n 3 127.0.0.1 >nul
-echo [%DATE% %TIME%] copying to {target_dir} >> "%LOG%"
-robocopy "{src_root}" "{target_dir}" /E /IS /IT /R:5 /W:1 /NFL /NDL /NJH /NJS /NC /NS /NP >> "%LOG%" 2>&1
-echo [%DATE% %TIME%] robocopy exit %ERRORLEVEL% >> "%LOG%"
-rmdir /s /q "{update_dir}" >nul 2>&1
-del "{zip_path}" >nul 2>&1
-echo [%DATE% %TIME%] starting {target_exe} >> "%LOG%"
-start "" "{target_exe}"
+
+rem Keep user data (databases, config, cookies) before overwriting anything.
+if exist "%BACKUP%" rmdir /s /q "%BACKUP%" >nul 2>&1
+echo [%DATE% %TIME%] backing up user data to %BACKUP% >> "%LOG%"
+robocopy "%TARGET%" "%BACKUP%" *.db *.db-wal *.db-shm *.json *.txt /E /R:1 /W:1 /NFL /NDL /NJH /NJS /NC /NS /NP >> "%LOG%" 2>&1
+set "RC=%ERRORLEVEL%"
+if %RC% GEQ 8 goto rollback
+
+echo [%DATE% %TIME%] copying staged build to %TARGET% >> "%LOG%"
+robocopy "%SRC%" "%TARGET%" /E /IS /IT /R:5 /W:1 /NFL /NDL /NJH /NJS /NC /NS /NP >> "%LOG%" 2>&1
+set "RC=%ERRORLEVEL%"
+if %RC% GEQ 8 goto rollback
+if not exist "%EXE%" (
+  echo [%DATE% %TIME%] VideoManager.exe missing after copy, rolling back >> "%LOG%"
+  goto rollback
+)
+
+echo [%DATE% %TIME%] update installed successfully >> "%LOG%"
+rmdir /s /q "%STAGE%" >nul 2>&1
+rmdir /s /q "%BACKUP%" >nul 2>&1
+del "%ZIP%" >nul 2>&1
+echo [%DATE% %TIME%] starting %EXE% >> "%LOG%"
+start "" "%EXE%"
 del "%~f0"
+exit /b 0
+
+:rollback
+echo [%DATE% %TIME%] update failed (rc=%RC%), restoring user data >> "%LOG%"
+robocopy "%BACKUP%" "%TARGET%" *.db *.db-wal *.db-shm *.json *.txt /E /IS /IT /R:1 /W:1 /NFL /NDL /NJH /NJS /NC /NS /NP >> "%LOG%" 2>&1
+echo [%DATE% %TIME%] rollback done, NOT starting the updated build >> "%LOG%"
+rmdir /s /q "%STAGE%" >nul 2>&1
+del "%ZIP%" >nul 2>&1
+del "%~f0"
+exit /b 1
 ''')
         append_log('[update] installing to ' + target_dir + ', app will restart')
         set_update_ui(status=f'Installing v{ver}...', color='#ff596b',
@@ -723,6 +910,83 @@ class RoundedButton(tk.Canvas):
         self.create_rectangle(r,0,w-r,h,fill=color,outline=color); self.create_rectangle(0,r,w,h-r,fill=color,outline=color)
         for x,y in [(r,r),(w-r,r),(r,h-r),(w-r,h-r)]: self.create_oval(x-r,y-r,x+r,y+r,fill=color,outline=color)
         self.create_text(w/2,h/2,text=self.text,fill=self.fg,font=('Segoe UI',9,'bold' if self.primary else 'normal'))
+
+def show_password_dialog():
+    """Styled Tk modal matching the web Security tab."""
+    dialog = tk.Toplevel(tk_root)
+    dialog.title('VideoManager — Access password')
+    dialog.configure(bg='#191a1f')
+    dialog.resizable(False, False)
+    dialog.transient(tk_root)
+    dialog.grab_set()
+    dialog.geometry('400x262')
+    dialog.update_idletasks()
+    x = tk_root.winfo_rootx() + (tk_root.winfo_width() - 400) // 2
+    y = tk_root.winfo_rooty() + (tk_root.winfo_height() - 262) // 2
+    dialog.geometry(f'+{x}+{y}')
+
+    tk.Label(dialog, text='Set access password', bg='#191a1f', fg='#f4f4f5',
+             font=('Segoe UI', 13, 'bold')).pack(anchor='w', padx=20, pady=(18, 4))
+    tk.Label(dialog,
+             text='Required only for LAN / Tailscale clients. This PC stays open.',
+             bg='#191a1f', fg='#aeb0b8', font=('Segoe UI', 9),
+             wraplength=355, justify='left').pack(anchor='w', padx=20)
+
+    def field(label, show=''):
+        tk.Label(dialog, text=label, bg='#191a1f', fg='#9ca3af',
+                 font=('Segoe UI', 9)).pack(anchor='w', padx=20, pady=(10, 2))
+        entry = tk.Entry(dialog, show=show, bg='#1f1f24', fg='#f4f4f5',
+                         insertbackground='#fff', relief='flat', bd=0,
+                         highlightthickness=1, highlightbackground='#3a3a42',
+                         highlightcolor='#dc3545', font=('Segoe UI', 10))
+        entry.pack(fill=tk.X, padx=20, ipady=5)
+        return entry
+
+    pwd = field('New password', '*')
+    confirm = field('Confirm password', '*')
+    result = tk.Label(dialog, text='', bg='#191a1f', fg='#ff9aa4',
+                      font=('Segoe UI', 9), wraplength=355, justify='left')
+    result.pack(anchor='w', padx=20, pady=(8, 0))
+    pwd.focus_set()
+
+    def save():
+        value = pwd.get()
+        if not value:
+            result.config(text='Enter a password first.')
+            return
+        if value != confirm.get():
+            result.config(text='Passwords do not match.')
+            return
+        def post():
+            try:
+                r = requests.post(
+                    local_url_global + '/api/auth/password',
+                    json={'password': value, 'password_confirm': confirm.get()},
+                    timeout=5)
+                data = r.json() if r.ok else {}
+                if r.ok and data.get('success'):
+                    dialog.after(0, lambda: (
+                        result.config(text='Password saved.', fg='#4ade80'),
+                        dialog.after(1200, dialog.destroy)))
+                else:
+                    msg = data.get('error') or f'Server error: {r.status_code}'
+                    dialog.after(0, lambda: result.config(text=msg))
+            except Exception as exc:
+                dialog.after(0, lambda: result.config(text=f'Request failed: {exc}'))
+        threading.Thread(target=post, daemon=True).start()
+
+    bar = tk.Frame(dialog, bg='#191a1f')
+    bar.pack(fill=tk.X, side='bottom', padx=18, pady=14)
+    RoundedButton(bar, 'Cancel', dialog.destroy, False, 92, 34).pack(side='right', padx=(8, 0))
+    RoundedButton(bar, 'Save password', save, True, 130, 34).pack(side='right')
+    dialog.bind('<Escape>', lambda e: dialog.destroy())
+    dialog.bind('<Return>', lambda e: save())
+
+
+def password_from_tray(icon=None, item=None):
+    if tk_root:
+        tk_root.after(0, show_password_dialog)
+
 
 def show_restart_dialog():
     dialog=tk.Toplevel(tk_root); dialog.title('Restart VideoManager'); dialog.configure(bg='#191a1f'); dialog.resizable(False,False); dialog.transient(tk_root); dialog.grab_set()
@@ -878,6 +1142,7 @@ def main():
 
     mk_btn('Check Updates', force_check_update, width=118).pack(side=tk.LEFT, padx=(0, 7))
     mk_btn('Restart Server', show_restart_dialog, width=122).pack(side=tk.LEFT, padx=(0, 7))
+    mk_btn('Password', show_password_dialog, width=100).pack(side=tk.LEFT, padx=(0, 7))
     mk_btn('Open Browser', lambda: webbrowser.open(local_url_global), primary=True, width=118).pack(side=tk.RIGHT)
 
     tk_root.protocol('WM_DELETE_WINDOW', hide_window)

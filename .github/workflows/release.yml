@@ -82,12 +82,17 @@ jobs:
       - name: 'Build onedir with PyInstaller (entry point: launcher.py)'
         run: python -m PyInstaller --noconfirm --clean VideoManager.spec
 
-      - name: Verify exe and pack release zip
+      - name: Verify exe, pack release zip and checksum
+        shell: pwsh
         run: |
           if (-not (Test-Path "dist/VideoManager/VideoManager.exe")) {
             throw "dist/VideoManager/VideoManager.exe is missing"
           }
           python make_release.py --no-release
+          $asset = "VideoManager-v${{ steps.ver.outputs.version }}-win64-onedir.zip"
+          $hash = (Get-FileHash -Algorithm SHA256 -Path $asset).Hash.ToLowerInvariant()
+          "$hash  $asset" | Set-Content -Path "$asset.sha256" -Encoding ascii
+          Write-Host "SHA256 $hash  $asset"
 
       - name: Publish GitHub release
         shell: pwsh
@@ -97,13 +102,16 @@ jobs:
           $tag = '${{ steps.ver.outputs.tag }}'
           $version = '${{ steps.ver.outputs.version }}'
           $asset = "VideoManager-v$version-win64-onedir.zip"
+          $checksum = "$asset.sha256"
           if (-not (Test-Path $asset)) { throw "Release archive $asset not found" }
+          if (-not (Test-Path $checksum)) { throw "Checksum asset $checksum not found" }
+          $assets = @($asset, $checksum)
           gh release view $tag 2>&1 | Out-Null
           if ($LASTEXITCODE -eq 0) {
-            Write-Host "Release $tag already exists - replacing the asset"
-            gh release upload $tag $asset --clobber
+            Write-Host "Release $tag already exists - replacing the assets"
+            gh release upload $tag @assets --clobber
           } else {
-            gh release create $tag $asset --title "VideoManager $tag" --generate-notes
+            gh release create $tag @assets --title "VideoManager $tag" --generate-notes
           }
           if ($LASTEXITCODE -ne 0) { throw "Publishing failed" }
 

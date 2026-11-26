@@ -54,6 +54,11 @@ BAD_EXTENSIONS = {
     '.vob', '.rm', '.rmvb', '.3gp',
 }
 
+# Общий лок конвертации: scanner и фоновая конвертация из views/watch.py
+# сериализуются через него. RLock позволяет вызывателю тоже обернуть
+# convert_video_in_place этим локом без взаимоблокировки.
+CONVERT_LOCK = threading.RLock()
+
 # Точные фатальные маркеры (без ложных срабатываний на warnings)
 _FATAL_MARKERS = (
     'invalid nal unit size',
@@ -346,11 +351,17 @@ def _do_reencode(src, tmp):
 
 def convert_video_in_place(video):
     """
-    Конвертирует видео прямо в его папке.
+    Конвертирует видео прямо в его папке (под общим CONVERT_LOCK).
 
     Возвращает (True, new_video, message) или (False, None, error).
     При любой ошибке оригинал НЕ трогается.
     """
+    with CONVERT_LOCK:
+        return _convert_video_in_place_unlocked(video)
+
+
+def _convert_video_in_place_unlocked(video):
+    """Реализация конвертации; вызывается только под CONVERT_LOCK."""
     src = video['filepath']
     if not os.path.exists(src):
         return False, None, 'file not found'
@@ -483,18 +494,22 @@ def convert_video_in_place(video):
 
 def update_db_after_conversion(video_id, new_video):
     from models import get_db_connection
+    try:
+        mtime = os.stat(new_video['filepath']).st_mtime
+    except OSError:
+        mtime = 0.0
     conn = get_db_connection()
     try:
         cursor = conn.cursor()
         cursor.execute('''
             UPDATE videos SET
-                filename = ?, filepath = ?, folder = ?, size = ?,
+                filename = ?, filepath = ?, folder = ?, size = ?, mtime = ?,
                 duration = ?, width = ?, height = ?, codec = ?,
                 bitrate = ?, fps = ?, orientation = ?
             WHERE id = ?
         ''', (
             new_video['filename'], new_video['filepath'], new_video['folder'],
-            new_video['size'], new_video['duration'], new_video['width'],
+            new_video['size'], mtime, new_video['duration'], new_video['width'],
             new_video['height'], new_video['codec'], new_video['bitrate'],
             new_video['fps'], new_video['orientation'], video_id,
         ))

@@ -8,6 +8,7 @@ from instagrapi import Client
 from . import db
 from . import run_post_download_hook
 from .browser_cookies import reopen_firefox
+import task_registry
 
 TASKS = {}
 _lock = threading.Lock()
@@ -70,14 +71,28 @@ else:
 # ===================================================================
 #                     ОТМЕНА И СТАТУСЫ
 # ===================================================================
-def request_cancel(task_id):
+_REGISTRY_TERMINAL_STATUSES = {
+    'completed': 'complete', 'done': 'complete', 'finished': 'complete',
+    'failed': 'error', 'canceled': 'cancelled', 'aborted': 'cancelled',
+}
+_REGISTRY_TERMINAL = ('complete', 'cancelled', 'error')
+
+
+def _as_registry_status(status):
+    if not status:
+        return status
+    value = str(status).strip().lower()
+    return _REGISTRY_TERMINAL_STATUSES.get(value, value)
+
+
+def _cancel_internal(task_id):
+    """Local cancellation logic shared by the HTTP route and the registry."""
     with _lock:
         if task_id in TASKS:
             ev = TASKS[task_id].get('cancel_event')
             if ev is not None and not ev.is_set():
                 ev.set()
                 TASKS[task_id]['message'] = 'Cancelling...'
-                return 'ok'
             return 'ok'
     task = db.get_task(task_id)
     if not task:
@@ -85,6 +100,24 @@ def request_cancel(task_id):
     if task.get('status') in ('complete', 'error', 'cancelled'):
         return 'already_done'
     return 'lost'
+
+
+def request_cancel(task_id):
+    """Cancel adapter: the shared registry decides, local worker is signalled."""
+    with _lock:
+        in_memory = task_id in TASKS
+    try:
+        result = task_registry.request_cancel(task_id)
+    except Exception:
+        result = None
+    if result in ('ok', 'already_done'):
+        if in_memory:
+            # Normally the registry calls the handler; keep the old behaviour
+            # even if no handler is registered for this task.
+            _cancel_internal(task_id)
+        return result
+    # No registry row (legacy task): preserve ok/lost/not_found contract.
+    return _cancel_internal(task_id)
 
 
 def _is_cancelled(task_id):
@@ -154,6 +187,54 @@ def _set_status(task_id, **kwargs):
             db_fields[key] = kwargs[key]
     if db_fields:
         db.update_task(task_id, **db_fields)
+
+    # Mirror the same fields into the shared registry. A registry failure
+    # must never interrupt the download.
+    registry_fields = {}
+    if 'status' in kwargs:
+        registry_fields['status'] = _as_registry_status(kwargs['status'])
+    for key in ('progress', 'total', 'message', 'current'):
+        if key in kwargs:
+            registry_fields[key] = kwargs[key]
+    if registry_fields:
+        try:
+            if (registry_fields.get('status') not in _REGISTRY_TERMINAL
+                    and task_registry.is_cancel_requested(task_id)):
+                registry_fields['status'] = 'cancelling'
+                registry_fields['message'] = 'Cancelling...'
+            task_registry.update(task_id, **registry_fields)
+        except Exception as e:
+            print(f"[downloader] registry sync error for {task_id}: {e}")
+
+
+def _sync_registry_final(task_id, status, message):
+    """Write the terminal state and result to the shared registry."""
+    registry_status = _as_registry_status(status)
+    try:
+        with _lock:
+            t = dict(TASKS.get(task_id) or {})
+        files = db.get_task_files(task_id)
+        fields = {
+            'status': registry_status,
+            'message': message,
+            'progress': (100 if registry_status == 'complete'
+                         else int(t.get('progress') or 0)),
+            'total': int(t.get('total') or 0),
+            'result': {
+                'files': len(files),
+                'downloaded': sum(1 for f in files if f.get('ok')),
+            },
+        }
+        if t.get('current'):
+            fields['current'] = t['current']
+        task_registry.update(task_id, **fields)
+    except Exception as e:
+        print(f"[downloader] registry finish error for {task_id}: {e}")
+    finally:
+        try:
+            task_registry.unregister_cancel_handler(task_id)
+        except Exception:
+            pass
 
 
 # ===================================================================
@@ -344,6 +425,22 @@ def download_profile(task_id, profile_url, save_dir, cookies=None, media_type='b
             'cancel_event': cancel_event,
         }
 
+    try:
+        task_registry.create(
+            task_id, 'instagram_download', status='starting',
+            message='Initializing...', mode=media_type,
+            payload={
+                'profile': profile_url,
+                'username': profile_name,
+                'media_type': media_type,
+                'save_dir': save_dir,
+            },
+        )
+        task_registry.register_cancel_handler(
+            task_id, lambda: _cancel_internal(task_id))
+    except Exception as e:
+        print(f"[downloader] registry create error for {task_id}: {e}")
+
     def finish(status, message):
         with _lock:
             if task_id in TASKS:
@@ -352,6 +449,7 @@ def download_profile(task_id, profile_url, save_dir, cookies=None, media_type='b
                 if status == 'complete':
                     TASKS[task_id]['progress'] = 100
         db.complete_task(task_id, status, message)
+        _sync_registry_final(task_id, status, message)
         if status == 'complete':
             run_post_download_hook()
 

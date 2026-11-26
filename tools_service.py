@@ -17,6 +17,7 @@ import subprocess
 import uuid
 import time
 
+import task_registry
 from helpers.subprocess_utils import hidden_process_kwargs
 
 
@@ -211,18 +212,34 @@ def new_task(name):
             'result': None,
             'started_at': time.time(),
         }
+    task_registry.create(
+        tid, f'tools_{name}', status='running', message='Initializing...',
+        payload={'name': name, 'started_at': time.time()},
+    )
     return tid
 
 
 def update_task(tid, **kwargs):
     with TASK_LOCK:
         t = TASKS.get(tid)
-        if not t:
-            return
-        t.update(kwargs)
+        if t:
+            t.update(kwargs)
+    fields = {k: v for k, v in kwargs.items()
+              if k in ('status', 'progress', 'processed', 'total',
+                       'message', 'current', 'result')}
+    task_registry.update(tid, **fields)
 
 
 def get_task(tid):
+    task = task_registry.get(tid)
+    if task:
+        payload = task.get('payload') or {}
+        if isinstance(payload, dict):
+            if 'name' in payload:
+                task['name'] = payload['name']
+            if 'started_at' in payload:
+                task['started_at'] = payload['started_at']
+        return task
     with TASK_LOCK:
         t = TASKS.get(tid)
         return dict(t) if t else None

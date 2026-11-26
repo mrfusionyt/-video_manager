@@ -4,6 +4,7 @@
 """
 import os
 import json
+import secrets
 from models import CONFIG_PATH
 
 
@@ -12,7 +13,9 @@ def load_config():
         'last_folder': '',
         'dark_mode': True,
         'threshold': 0,
-        'static_ip': ''
+        'static_ip': '',
+        'auth_hash': '',
+        'session_key': '',
     }
     try:
         with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
@@ -31,6 +34,16 @@ def save_config(config):
             json.dump(config, f, indent=2, ensure_ascii=False)
     except Exception as e:
         print(f"Warning: Could not save config: {e}")
+
+
+def ensure_session_key():
+    """Persistent random Flask secret: survives updates, unknown to sources."""
+    key = app_config.get('session_key')
+    if not key:
+        key = secrets.token_hex(32)
+        app_config['session_key'] = key
+        save_config(app_config)
+    return key
 
 
 # Singleton. Вьюхи мутируют эту переменную — изменения общие.

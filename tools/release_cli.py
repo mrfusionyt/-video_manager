@@ -221,6 +221,7 @@ def main():
         build_exe(fast=args.fast)
 
     asset_path, asset_name = mr.build_zip(version)
+    checksum_path = mr.build_checksum(asset_path, asset_name)
 
     published = False
     release_url = ''
@@ -232,8 +233,10 @@ def main():
             log('[!] publishing skipped - archive is ready for a manual upload')
         else:
             try:
-                published = mr.publish(user, repo, tag, asset_path, asset_name,
-                                       args.notes or f'VideoManager {tag}')
+                published = mr.publish(
+                    user, repo, tag, asset_path, asset_name,
+                    args.notes or f'VideoManager {tag}',
+                    extra_assets=[(checksum_path, os.path.basename(checksum_path))])
                 if published:
                     release_url = f'https://github.com/{user}/{repo}/releases/tag/{tag}'
             except Exception as exc:

@@ -229,6 +229,118 @@
             </button>
         </div>
     </div>
+
+{% elif tab == 'security' %}
+    <style>
+    .security-status { display: inline-flex; align-items: center; gap: 8px; padding: 7px 12px; border-radius: 999px;
+        font-size: .82rem; border: 1px solid var(--border); background: var(--bg-surface); color: var(--text-muted); }
+    .security-status i { width: 8px; height: 8px; border-radius: 50%; background: #6b7280; }
+    .security-status.on i { background: var(--green, #22c55e); box-shadow: 0 0 0 3px rgba(34,197,94,.15); }
+    .security-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
+    .security-note { margin-top: 14px; color: var(--text-muted); font-size: .82rem; line-height: 1.55; }
+    .security-saved { margin-top: 12px; color: var(--green, #22c55e); font-size: .84rem; }
+    .auth-modal { position: fixed; inset: 0; z-index: 1080; display: none; align-items: center; justify-content: center;
+        background: rgba(0,0,0,.72); padding: 16px; backdrop-filter: blur(5px); }
+    .auth-modal.show { display: flex; }
+    .auth-modal-dialog { width: 420px; max-width: 100%; background: var(--bg-surface); border: 1px solid var(--border-strong);
+        border-radius: 14px; box-shadow: var(--shadow-modal); overflow: hidden; }
+    .auth-modal-header { display: flex; align-items: center; justify-content: space-between; padding: 16px 18px 12px; }
+    .auth-modal-title { margin: 0; font-size: 1.05rem; color: var(--text-primary); }
+    .auth-modal-close { background: none; border: 0; color: var(--text-muted); font-size: 1.2rem; cursor: pointer; }
+    .auth-modal-close:hover { color: #fff; }
+    .auth-modal-body { padding: 4px 18px 8px; }
+    .auth-modal-body label { display: block; margin: 10px 0 6px; color: var(--text-muted); font-size: .82rem; }
+    .auth-modal-body input { width: 100%; padding: 11px 12px; border-radius: 9px; background: var(--bg-elevated, #141417);
+        border: 1px solid var(--border); color: var(--text-primary); font-size: .9rem; outline: none; }
+    .auth-modal-body input:focus { border-color: var(--red); box-shadow: 0 0 0 3px rgba(220,53,69,.16); }
+    .auth-modal-footer { display: flex; justify-content: flex-end; gap: 8px; padding: 10px 18px 18px; }
+    </style>
+    <div class="settings-section">
+        <h5>Password protection</h5>
+        <p class="text-muted small">
+            When enabled, anyone connecting over LAN or Tailscale must enter the password.
+            Access from this PC stays open, so the desktop launcher can still restart the server.
+        </p>
+        <div class="security-status {{ 'on' if password_enabled else '' }}">
+            <i></i>{{ 'Enabled' if password_enabled else 'Disabled' }}
+        </div>
+        {% if saved %}<div class="security-saved">Password settings saved.</div>{% endif %}
+        <div class="security-actions">
+            <button type="button" class="btn-restart" id="openPasswordModal">Change password</button>
+            {% if password_enabled %}
+            <button type="button" class="btn-outline-red" id="disablePasswordBtn">Disable protection</button>
+            {% endif %}
+        </div>
+        <div class="security-note">
+            Sessions are tied to the current password hash — changing it signs out every remote browser.
+            The secret used to sign session cookies is stored outside the install folder and survives updates.
+        </div>
+    </div>
+
+    <div class="auth-modal" id="passwordModal" tabindex="-1" aria-hidden="true">
+        <div class="auth-modal-dialog">
+            <form method="post">
+                <input type="hidden" name="action" value="set_password">
+                <input type="hidden" name="tab" value="security">
+                <input type="hidden" name="profile" value="{{ current_profile }}">
+                <div class="auth-modal-header">
+                    <h3 class="auth-modal-title">Set access password</h3>
+                    <button type="button" class="auth-modal-close" data-close-auth aria-label="Close">✕</button>
+                </div>
+                <div class="auth-modal-body">
+                    <label for="newPassword">New password</label>
+                    <input id="newPassword" name="password" type="password" autocomplete="new-password" required>
+                    <label for="confirmPassword">Confirm password</label>
+                    <input id="confirmPassword" name="password_confirm" type="password" autocomplete="new-password" required>
+                </div>
+                <div class="auth-modal-footer">
+                    <button type="button" class="btn-outline-red" data-close-auth>Cancel</button>
+                    <button type="submit" class="btn-restart btn-restart-confirm"><span class="btn-restart-label">Save password</span></button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <form method="post" id="disablePasswordForm" style="display:none;">
+        <input type="hidden" name="action" value="disable_password">
+        <input type="hidden" name="tab" value="security">
+        <input type="hidden" name="profile" value="{{ current_profile }}">
+    </form>
+    <script>
+    document.addEventListener('DOMContentLoaded', function () {
+        const modal = document.getElementById('passwordModal');
+        const openBtn = document.getElementById('openPasswordModal');
+        const disableBtn = document.getElementById('disablePasswordBtn');
+        if (openBtn) openBtn.addEventListener('click', function () {
+            modal.classList.add('show');
+            const field = document.getElementById('newPassword');
+            if (field) field.focus();
+        });
+        if (modal) {
+            modal.querySelectorAll('[data-close-auth]').forEach(function (btn) {
+                btn.addEventListener('click', function () { modal.classList.remove('show'); });
+            });
+            modal.addEventListener('click', function (e) {
+                if (e.target === modal) modal.classList.remove('show');
+            });
+        }
+        document.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape' && modal && modal.classList.contains('show')) {
+                modal.classList.remove('show');
+            }
+        });
+        if (disableBtn) disableBtn.addEventListener('click', function () {
+            if (window.VMDialog && VMDialog.confirm) {
+                VMDialog.confirm('Disable password protection? Remote clients will be able to connect without a password.',
+                                 'Disable protection', 'warning').then(function (ok) {
+                    if (ok) document.getElementById('disablePasswordForm').submit();
+                });
+            } else if (confirm('Disable password protection?')) {
+                document.getElementById('disablePasswordForm').submit();
+            }
+        });
+    });
+    </script>
 {% endif %}
 
 <!-- МОДАЛКА ПОДТВЕРЖДЕНИЯ ПЕРЕЗАПУСКА СЕРВЕРА -->

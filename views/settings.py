@@ -37,6 +37,7 @@ from scanner import (
     request_scan_cancel,
 )
 from config import app_config, save_config
+from .auth import auth_enabled, set_password, disable_password
 from helpers.profiles import get_current_profile, profile_to_mode
 from helpers.subprocess_utils import hidden_process_kwargs
 from duplicate_finder import (
@@ -263,6 +264,26 @@ def register(app):
                 app_config['static_ip'] = ip
                 save_config(app_config)
 
+            elif action == 'set_password':
+                password = request.form.get('password', '')
+                confirm = request.form.get('password_confirm', '')
+                if not password:
+                    return redirect(url_for('settings', tab='security',
+                                            profile=current_profile,
+                                            error='Enter a password first.'))
+                if password != confirm:
+                    return redirect(url_for('settings', tab='security',
+                                            profile=current_profile,
+                                            error='Passwords do not match.'))
+                set_password(password)
+                return redirect(url_for('settings', tab='security',
+                                        profile=current_profile, saved='1'))
+
+            elif action == 'disable_password':
+                disable_password()
+                return redirect(url_for('settings', tab='security',
+                                        profile=current_profile, saved='1'))
+
             elif action == 'start_duplicate_scan':
                 filters = request.form.getlist('media_types')
                 if not filters:
@@ -329,6 +350,8 @@ def register(app):
                                tab=tab,
                                task_id=task_id,
                                error=request.args.get('error'),
+                               saved=request.args.get('saved'),
+                               password_enabled=auth_enabled(),
                                scan_running=is_scan_in_progress())
 
     # ================================================================

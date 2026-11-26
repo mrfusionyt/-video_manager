@@ -1,17 +1,29 @@
 # -*- mode: python ; coding: utf-8 -*-
+import os
 from PyInstaller.utils.hooks import collect_all
+
+BASE = os.path.dirname(os.path.abspath(__file__))
+# Unused helper shipped with some dev setups; ~44 MB of dead weight in onedir.
+EXCLUDE_DOP_NAMES = {'bgutil-pot.exe'}
 
 datas = [
     ('templates', 'templates'),
     ('static', 'static'),
     ('image', 'image'),
-    ('_dop', '_dop'),
     ('addon/youtube_downloader/templates', 'addon/youtube_downloader/templates'),
     ('addon/instagram_downloader/templates', 'addon/instagram_downloader/templates'),
     ('addon/photo_classifier/templates', 'addon/photo_classifier/templates'),
     ('addon/FileTransferServer/templates', 'addon/FileTransferServer/templates'),
     ('addon/FileTransferServer/static', 'addon/FileTransferServer/static'),
 ]
+for root, dirs, files in os.walk(os.path.join(BASE, '_dop')):
+    dirs[:] = [d for d in dirs if d != '__pycache__']
+    rel_root = os.path.relpath(root, BASE)
+    for name in files:
+        if name in EXCLUDE_DOP_NAMES:
+            continue
+        datas.append((os.path.join(root, name), rel_root))
+
 binaries = []
 hiddenimports = ['flask', 'flask.json', 'flask.json.provider', 'werkzeug.security',
                  'werkzeug.utils', 'jinja2', 'sqlite3']

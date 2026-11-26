@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% from '_vm_progress.html' import vm_progress %}
+
+{% block title %}Tasks{% endblock %}
+
+{% block content %}
+<div class="settings-section">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h4>Background tasks</h4>
+        <button type="button" class="btn-nav" id="refreshTasks"><span class="btn-nav-label">Refresh</span></button>
+    </div>
+    <p class="text-muted small">
+        All scans, searches, downloads, uploads and conversions share this registry.
+        Task state is stored in the database, so interrupted tasks are visible after a restart.
+    </p>
+
+    {% if not tasks %}
+    <div class="vm-inline-message">No tasks recorded yet.</div>
+    {% endif %}
+
+    <div class="row g-3 mt-2">
+        {% for task in tasks %}
+        <div class="col-12 col-xl-6">
+            <div class="settings-section h-100" data-task-id="{{ task.id }}">
+                <div class="d-flex justify-content-between align-items-start gap-2 mb-2">
+                    <div>
+                        <strong>{{ task.kind }}</strong>
+                        <div class="text-muted small">{{ task.id }}</div>
+                    </div>
+                    <span class="badge" data-task-status>{{ task.status }}</span>
+                </div>
+                {{ vm_progress('taskProgress' ~ loop.index, task.kind) }}
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const initial = {{ tasks|tojson }};
+    const terminal = new Set(['complete', 'completed', 'done', 'finished', 'error', 'failed', 'cancelled', 'canceled', 'aborted', 'not_found']);
+    const byId = {};
+    initial.forEach(function (t) { byId[t.id] = t; });
+
+    document.querySelectorAll('[data-task-id]').forEach(function (card) {
+        const id = card.dataset.taskId;
+        const state = byId[id] || { status: 'not_found', progress: 0, processed: 0, total: 0, message: '' };
+        const container = card.querySelector('.vm-progress');
+        const badge = card.querySelector('[data-task-status]');
+        if (!container || !window.VMProgress) return;
+
+        VMProgress.reset(container);
+        VMProgress.apply(container, state);
+        container.style.display = 'block';
+        if (badge) badge.textContent = state.status || '';
+
+        const options = {
+            url: '/tasks/' + encodeURIComponent(id) + '/events',
+            onComplete: function (s) { if (badge) badge.textContent = s.status || 'complete'; },
+            onError: function (s) { if (badge) badge.textContent = s.status || 'error'; },
+            onCancelled: function (s) { if (badge) badge.textContent = s.status || 'cancelled'; },
+            onNotFound: function () { if (badge) badge.textContent = 'not_found'; }
+        };
+        if (!terminal.has(String(state.status || '').toLowerCase())) {
+            options.abortUrl = '/tasks/__task__/cancel';
+            options.taskId = id;
+        }
+        VMProgress.monitor(container, options);
+    });
+
+    const refresh = document.getElementById('refreshTasks');
+    if (refresh) refresh.addEventListener('click', function () { window.location.reload(); });
+});
+</script>
+{% endblock %}

@@ -28,8 +28,9 @@ from models import (
 )
 from artists import init_artists_db, get_all_artists
 from scanner import scan_libraries
-from config import app_config, DARK_MODE, MODE_LABELS
+from config import app_config, DARK_MODE, MODE_LABELS, ensure_session_key
 from helpers.profiles import get_current_profile, profile_to_mode
+from task_registry import mark_stale_on_startup
 from helpers.pagination import paginate_range
 from addon.instagram_downloader import instagram_bp, set_post_download_hook
 from addon.youtube_downloader import youtube_bp
@@ -44,7 +45,7 @@ app = Flask(
     static_folder=resource_path("static"),
     static_url_path="/static",
 )
-app.secret_key = 'change-me-to-a-random-secret-key'
+app.secret_key = ensure_session_key()
 app.config["BASE_DIR"] = BASE_DIR
 app.config["IMAGE_DIR"] = resource_path("image")
 app.config["DOP_DIR"] = resource_path("_dop")
@@ -54,6 +55,7 @@ os.environ["PATH"] = app.config["DOP_DIR"] + os.pathsep + os.environ.get("PATH",
 app.jinja_env.globals['paginate_range'] = paginate_range
 
 init_db()
+mark_stale_on_startup()
 init_artists_db()
 
 app.register_blueprint(instagram_bp)
@@ -124,6 +126,7 @@ def inject_globals():
         {'id': 'libraries', 'label': 'Libraries'},
         {'id': 'categories', 'label': 'Categories'},
         {'id': 'network', 'label': 'Network'},
+        {'id': 'security', 'label': 'Security'},
         {'id': 'stats', 'label': 'Stats'},
     ]
 
