@@ -10,7 +10,7 @@ android {
         applicationId 'com.videomanager.phone'
         minSdk 24
         targetSdk 36
-        versionCode 119
+        versionCode 120
         versionName '1.0.19'
     }
 
