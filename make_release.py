@@ -26,8 +26,6 @@ import sys
 import time
 import zipfile
 
-import requests
-
 BASE = os.path.dirname(os.path.abspath(__file__))
 DIST_DIR = os.path.join(BASE, 'dist', 'VideoManager')
 API = 'https://api.github.com'
@@ -162,6 +160,9 @@ def release_via_gh(gh_path, tag, asset_path, notes):
 
 
 def release_via_api(user, repo, tag, asset_path, asset_name, notes, token):
+    # Imported here so read_version()/build_zip() work before dependencies are installed.
+    import requests
+
     headers = {
         'Authorization': f'Bearer {token}',
         'Accept': 'application/vnd.github+json',

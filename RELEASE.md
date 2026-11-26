@@ -189,6 +189,7 @@ python make_release.py
 | `git push failed` | авторизуйтесь: `gh auth login` или Credential Manager; проверьте `git push -u origin HEAD` |
 | `tag v1.0.1 already exists` | если тег есть только локально, `release.bat` сам передвинет его на новый коммит; если он уже на GitHub — `--force-tag` или новая версия |
 | `Tag version ... does not match CURRENT_VERSION` | батник должен менять версию; при ручном теге обновите `launcher.py` |
+| `Resolve version: No module named 'requests'` | зависимости теперь ставятся до проверки версии; повторите запуск workflow/тег |
 | Actions: `ffmpeg.exe not found` | упал `tools/fetch_dop.py`; проверьте лог шага и доступ к URL (или задайте `DOP_*_URL`) |
 | `pyinstaller : Имя не распознано` | используйте `python -m PyInstaller ...`, `build.bat` или облачную сборку |
 | `No package found matching input criteria` | неверный id: нужно `winget install --id GitHub.cli -e` (только локальный путь) |

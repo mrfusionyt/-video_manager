@@ -41,6 +41,11 @@ jobs:
           python-version: '3.12'
           cache: pip
 
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
       - name: Resolve version
         id: ver
         shell: pwsh
@@ -62,11 +67,6 @@ jobs:
           "version=$version" >> $env:GITHUB_OUTPUT
           "tag=$tag" >> $env:GITHUB_OUTPUT
           Write-Host "Target: $tag"
-
-      - name: Install Python dependencies
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt
 
       - name: Download helper binaries (_dop)
         run: python tools/fetch_dop.py
