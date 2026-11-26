@@ -180,6 +180,7 @@ python make_release.py --no-release
 | `pyinstaller : Имя не распознано` | используй `python -m PyInstaller ...` или `build.bat` |
 | `gh : Имя не распознано` | перезапусти терминал; для облачного пути `gh` не нужен вообще |
 | Actions падает на `Resolve version` | зависимости теперь ставятся до проверки версии; повторите запуск workflow |
+| `remote: invalid credentials` при push | OAuth `gho_*` не годится как bearer; используется Credential Manager, при необходимости `gh auth setup-git` |
 | `No package found matching input criteria` | id пакета — `GitHub.cli`, не `GitHub.cli.GitHubCLI` |
 | Релиз есть, но обновление не видно | проверь тег, `CURRENT_VERSION` и имя zip-ассета (`onedir`) |
 | Обновление не установилось | смотри `%TEMP%\vm_update.log` |

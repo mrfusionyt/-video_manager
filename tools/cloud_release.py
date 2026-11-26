@@ -50,37 +50,33 @@ def git(args, capture=True, check=False, env=None):
     return result
 
 
-def gh_token():
-    """Return a gh auth token if gh is installed and logged in."""
-    gh = mr.find_gh()
-    if gh:
-        token = subprocess.run([gh, 'auth', 'token'], capture_output=True,
-                               text=True, encoding='utf-8', errors='replace')
-        if token.returncode == 0 and (token.stdout or '').strip():
-            return token.stdout.strip()
-    return None
+def git_token():
+    """PAT from env/.gh_token. gh's gho_* token is NOT valid as an HTTP bearer for git."""
+    return mr.get_token()
 
 
 def ensure_auth():
-    """Use an existing gh token, or offer to log in right here."""
+    """Return a PAT for git, or None to use the git credential manager."""
+    token = git_token()
+    if token:
+        return token
+
     gh = mr.find_gh()
-    token = gh_token()
-    if token or not gh:
-        return token
-    status = subprocess.run([gh, 'auth', 'status'], capture_output=True,
-                            text=True, encoding='utf-8', errors='replace')
-    if status.returncode == 0:
-        return token
-    log('[!] GitHub CLI is installed but not logged in.')
-    try:
-        answer = input('    Log in with gh auth login now? [Y/n] ').strip().lower()
-    except EOFError:
-        answer = 'n'
-    if answer in ('', 'y', 'yes', 'д', 'да'):
-        log('[*] starting gh auth login - follow the prompts...')
-        if subprocess.run([gh, 'auth', 'login']).returncode == 0:
-            token = gh_token()
-    return token
+    if gh:
+        status = subprocess.run([gh, 'auth', 'status'], capture_output=True,
+                                text=True, encoding='utf-8', errors='replace')
+        if status.returncode == 0:
+            return None  # plain git push uses the credential manager / gh setup-git
+        log('[!] GitHub CLI is installed but not logged in.')
+        try:
+            answer = input('    Log in with gh auth login now? [Y/n] ').strip().lower()
+        except EOFError:
+            answer = 'n'
+        if answer in ('', 'y', 'yes', 'д', 'да'):
+            log('[*] starting gh auth login - follow the prompts...')
+            subprocess.run([gh, 'auth', 'login'])
+            return git_token()
+    return None
 
 
 def push_args(extra, token):
@@ -159,7 +155,7 @@ def main():
         return 0
 
     token = ensure_auth()
-    log(f'[*] auth   : {"gh token" if token else "git credential manager"}')
+    log(f'[*] auth   : {"PAT/token" if token else "git credential manager"}')
 
     if args.version:
         set_version(args.version)

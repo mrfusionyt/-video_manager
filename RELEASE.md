@@ -187,6 +187,7 @@ python make_release.py
 | Ошибка | Причина / решение |
 |--------|-------------------|
 | `git push failed` | авторизуйтесь: `gh auth login` или Credential Manager; проверьте `git push -u origin HEAD` |
+| `remote: invalid credentials` при push | `release.bat` не шлёт OAuth `gho_*` как bearer; используется Credential Manager. При необходимости `gh auth setup-git` |
 | `tag v1.0.1 already exists` | если тег есть только локально, `release.bat` сам передвинет его на новый коммит; если он уже на GitHub — `--force-tag` или новая версия |
 | `Tag version ... does not match CURRENT_VERSION` | батник должен менять версию; при ручном теге обновите `launcher.py` |
 | `Resolve version: No module named 'requests'` | зависимости теперь ставятся до проверки версии; повторите запуск workflow/тег |
