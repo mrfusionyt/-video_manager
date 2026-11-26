@@ -21,13 +21,13 @@ android {
 
     signingConfigs {
         release {
-            def password = System.getenv('VM_KEYSTORE_PASSWORD') ?: ''
-            def alias = System.getenv('VM_KEY_ALIAS') ?: ''
-            def keyPassword = System.getenv('VM_KEY_PASSWORD') ?: ''
+            def storePass = System.getenv('VM_KEYSTORE_PASSWORD') ?: ''
+            def keyAliasName = System.getenv('VM_KEY_ALIAS') ?: ''
+            def keyPass = System.getenv('VM_KEY_PASSWORD') ?: ''
             storeFile file('release.jks')
-            storePassword password
-            keyAlias alias
-            keyPassword keyPassword
+            storePassword storePass
+            keyAlias keyAliasName
+            keyPassword keyPass
         }
     }
 
