@@ -44,7 +44,7 @@
 </head>
 <body>
 {% set NO_SIDEBAR = (request.endpoint == 'editor_page') %}
-{% set ADMIN_PAGES = ('settings', 'tools_page', 'duplicates_page') %}
+{% set ADMIN_PAGES = ('settings', 'tools_page', 'duplicates_page', 'file_transfer.index') %}
 {% set PHOTO_PAGES = ('photos_page', 'photo_view', 'photo_edit') %}
 {% set PHOTO_ACTIVE = (request.endpoint in PHOTO_PAGES) %}
 
@@ -105,6 +105,12 @@
                         <a class="nav-link {% if request.endpoint == 'photo_classifier.index' %}active{% endif %}"
                            href="{{ url_for('photo_classifier.index') }}">
                             PhotoClassifier
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.endpoint == 'file_transfer.index' %}active{% endif %}"
+                           href="{{ url_for('file_transfer.index') }}">
+                            File Transfer
                         </a>
                     </li>
                     <li class="nav-item">
@@ -289,6 +295,12 @@
                 <li>
                     <a href="{{ url_for('photo_classifier.index') }}">
                         <span>PhotoClassifier</span>
+                    </a>
+                </li>
+                <li>
+                    <a href="{{ url_for('file_transfer.index') }}"
+                       class="{% if request.endpoint == 'file_transfer.index' %}active{% endif %}">
+                        <span>File Transfer</span>
                     </a>
                 </li>
                 <li>
@@ -481,6 +493,12 @@
                     <a href="{{ url_for('youtube.index') }}">
                         <img src="{{ url_for('serve_image', filename='youtube.png') }}" alt="YouTube" class="drawer-icon">
                         <span>YouTube Downloader</span>
+                    </a>
+                </li>
+                <li>
+                    <a href="{{ url_for('file_transfer.index') }}"
+                       class="{% if request.endpoint == 'file_transfer.index' %}active{% endif %}">
+                        <span>File Transfer</span>
                     </a>
                 </li>
                 <li class="drawer-divider"></li>

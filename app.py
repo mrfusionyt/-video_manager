@@ -34,6 +34,7 @@ from helpers.pagination import paginate_range
 from addon.instagram_downloader import instagram_bp, set_post_download_hook
 from addon.youtube_downloader import youtube_bp
 from addon.photo_classifier import photo_classifier_bp
+from addon.FileTransferServer import file_transfer_bp
 from views import register_all
 
 
@@ -58,6 +59,7 @@ init_artists_db()
 app.register_blueprint(instagram_bp)
 app.register_blueprint(youtube_bp)
 app.register_blueprint(photo_classifier_bp)
+app.register_blueprint(file_transfer_bp)
 
 set_post_download_hook(scan_libraries)
 register_all(app)

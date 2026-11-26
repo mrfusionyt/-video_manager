@@ -9,6 +9,8 @@ datas = [
     ('addon/youtube_downloader/templates', 'addon/youtube_downloader/templates'),
     ('addon/instagram_downloader/templates', 'addon/instagram_downloader/templates'),
     ('addon/photo_classifier/templates', 'addon/photo_classifier/templates'),
+    ('addon/FileTransferServer/templates', 'addon/FileTransferServer/templates'),
+    ('addon/FileTransferServer/static', 'addon/FileTransferServer/static'),
 ]
 binaries = []
 hiddenimports = ['flask', 'flask.json', 'flask.json.provider', 'werkzeug.security',

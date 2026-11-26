@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#10151d">
+  <title>Transfer</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="app-shell">
+  <header class="topbar">
+    <div class="brandmark">↗</div>
+    <div class="brandtext"><strong>Transfer</strong><span>Private file drop</span></div>
+    <div class="secure-pill"><span class="pulse"></span> Secure</div>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="eyebrow">FILE TRANSFER</div>
+      <h1>Отправить<br><span>на сервер</span></h1>
+      <p class="hero-note">Выбери файлы или целую папку — они появятся на твоём компьютере.</p>
+    </section>
+
+    <section class="panel upload-panel">
+      <div class="panel-heading">
+        <div><span class="section-kicker">01 / ДОБАВИТЬ</span><h2>Что отправляем?</h2></div>
+        <div class="round-icon">＋</div>
+      </div>
+      <div class="pick-grid">
+        <label class="pick-card" for="fileInput">
+          <span class="pick-icon icon-file">▤</span>
+          <span class="pick-title">Файлы</span>
+          <span class="pick-sub">Фото, видео, документы</span>
+          <span class="pick-arrow">↗</span>
+          <input id="fileInput" type="file" multiple>
+        </label>
+        <label class="pick-card" for="folderInput">
+          <span class="pick-icon icon-folder">▱</span>
+          <span class="pick-title">Папка</span>
+          <span class="pick-sub">Отправить содержимое</span>
+          <span class="pick-arrow">↗</span>
+          <input id="folderInput" type="file" multiple webkitdirectory>
+        </label>
+      </div>
+      <div class="selection" id="selectionCard">
+        <div class="selection-icon">▧</div>
+        <div class="selection-info"><strong id="selectedTitle">Ничего не выбрано</strong><span id="selectedDetail">Добавь файлы или папку выше</span></div>
+        <button id="clearBtn" class="icon-button" type="button" title="Очистить выбор" aria-label="Очистить">×</button>
+      </div>
+      <button id="uploadBtn" class="primary-btn" disabled><span>Отправить файлы</span><span class="btn-arrow">↗</span></button>
+      <div id="uploadStatus" class="status"></div>
+    </section>
+
+    <section class="panel destination-panel">
+      <div class="panel-heading">
+        <div><span class="section-kicker">02 / МЕСТО</span><h2>Куда сохранять</h2></div>
+        <div class="round-icon">⌁</div>
+      </div>
+      <label class="field-label" for="destination">Путь на компьютере-сервере</label>
+      <div class="path-field"><span class="path-symbol">⌂</span><input id="destination" type="text" placeholder="D:\Incoming"><button id="saveConfig" type="button">Сохранить</button></div>
+      <div class="hint"><span class="hint-dot"></span><span>Путь относится к дискам компьютера, на котором запущен сервер.</span></div>
+      <div id="configStatus" class="status"></div>
+    </section>
+
+    <section class="panel history-panel">
+      <div class="panel-heading">
+        <div><span class="section-kicker">03 / ИСТОРИЯ</span><h2>Последние файлы</h2></div>
+        <button id="refreshBtn" class="refresh-btn" type="button"><span>↻</span> Обновить</button>
+      </div>
+      <div id="historyStatus" class="history-status">Загрузка списка…</div>
+      <div id="historyBody" class="history-list"></div>
+    </section>
+  </main>
+  <footer><span class="footer-mark">↗</span><span>Private transfer · Tailscale</span></footer>
+</div>
+<script src="/static/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,441 @@
+/* File Transfer addon — same palette and rhythm as the rest of VideoManager. */
+.ft-page {
+    max-width: 980px;
+    margin: 0 auto;
+    padding-bottom: 2rem;
+}
+
+.ft-hero {
+    padding: 4px 2px 20px;
+}
+
+.ft-kicker,
+.ft-section-kicker {
+    color: var(--red);
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+}
+
+.ft-hero h1 {
+    margin: 10px 0 10px;
+    color: var(--text-primary);
+    font-size: clamp(2rem, 4.5vw, 3rem);
+    font-weight: 700;
+    line-height: 1.05;
+    letter-spacing: -0.04em;
+}
+
+.ft-hero h1 span {
+    color: var(--red);
+}
+
+.ft-hero-note {
+    max-width: 560px;
+    margin: 0;
+    color: var(--text-muted);
+    font-size: 0.9rem;
+    line-height: 1.6;
+}
+
+.ft-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 14px;
+    padding: 6px 12px;
+    border: 1px solid rgba(220, 53, 69, 0.32);
+    border-radius: 999px;
+    background: rgba(220, 53, 69, 0.10);
+    color: #f0b8be;
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+}
+
+.ft-pulse {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--red);
+    box-shadow: 0 0 8px rgba(220, 53, 69, 0.7);
+}
+
+.ft-panel {
+    margin-bottom: 16px;
+    padding: 20px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--bg-surface);
+    box-shadow: var(--shadow-card);
+}
+
+.ft-panel-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 18px;
+}
+
+.ft-panel-head h2 {
+    margin: 6px 0 0;
+    color: var(--text-primary);
+    font-size: 1.15rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+}
+
+.ft-round-icon {
+    width: 34px;
+    height: 34px;
+    flex: 0 0 34px;
+    display: grid;
+    place-items: center;
+    border: 1px solid var(--border-strong);
+    border-radius: 9px;
+    background: var(--bg-elevated);
+    color: var(--red);
+    font-size: 1.15rem;
+}
+
+.ft-pick-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+}
+
+.ft-pick-card {
+    position: relative;
+    display: flex;
+    min-height: 140px;
+    flex-direction: column;
+    padding: 16px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    background: var(--bg-elevated);
+    cursor: pointer;
+    transition: background 0.18s ease, border-color 0.18s ease, transform 0.18s ease;
+}
+
+.ft-pick-card:hover {
+    border-color: rgba(220, 53, 69, 0.55);
+    background: rgba(220, 53, 69, 0.10);
+}
+
+.ft-pick-card:active {
+    transform: scale(0.99);
+}
+
+.ft-hidden-input {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+    pointer-events: none;
+}
+
+.ft-pick-icon {
+    width: 38px;
+    height: 38px;
+    margin-bottom: 14px;
+    display: grid;
+    place-items: center;
+    border-radius: 9px;
+    background: rgba(220, 53, 69, 0.14);
+    color: #f08f99;
+    font-size: 1.3rem;
+}
+
+.ft-pick-title {
+    color: var(--text-primary);
+    font-size: 0.95rem;
+    font-weight: 600;
+}
+
+.ft-pick-sub {
+    margin-top: 5px;
+    color: var(--text-muted);
+    font-size: 0.75rem;
+}
+
+.ft-pick-arrow {
+    position: absolute;
+    top: 15px;
+    right: 15px;
+    color: var(--text-muted);
+    font-size: 1rem;
+}
+
+.ft-selection {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-height: 64px;
+    margin: 13px 0;
+    padding: 11px 12px;
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    background: var(--bg-app);
+}
+
+.ft-selection-icon {
+    width: 36px;
+    height: 36px;
+    flex: 0 0 36px;
+    display: grid;
+    place-items: center;
+    border-radius: 8px;
+    background: var(--bg-elevated);
+    color: var(--red);
+    font-size: 1rem;
+}
+
+.ft-selection-info {
+    display: flex;
+    min-width: 0;
+    flex: 1;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.ft-selection-info strong {
+    color: var(--text-primary);
+    font-size: 0.82rem;
+    overflow-wrap: anywhere;
+}
+
+.ft-selection-info span {
+    color: var(--text-muted);
+    font-size: 0.75rem;
+}
+
+.ft-icon-btn {
+    width: 30px;
+    height: 30px;
+    flex: 0 0 30px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg-elevated);
+    color: var(--text-secondary);
+    font-size: 1.2rem;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.ft-icon-btn:hover {
+    border-color: var(--red);
+    color: #fff;
+}
+
+.ft-upload-btn {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 9px;
+    padding: 12px 16px;
+    font-size: 0.9rem;
+}
+
+.ft-upload-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+.ft-btn-arrow {
+    font-size: 1.05rem;
+}
+
+.ft-field-label {
+    display: block;
+    margin-bottom: 8px;
+    color: var(--text-muted);
+    font-size: 0.75rem;
+}
+
+.ft-path-field {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 5px 5px 12px;
+    border: 1px solid var(--border-strong);
+    border-radius: 9px;
+    background: var(--bg-app);
+}
+
+.ft-path-field input {
+    min-width: 0;
+    flex: 1;
+    border: 0 !important;
+    box-shadow: none !important;
+}
+
+.ft-path-symbol {
+    color: var(--red);
+    font-size: 1.1rem;
+}
+
+.ft-path-field .btn-add {
+    white-space: nowrap;
+}
+
+.ft-hint {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin-top: 11px;
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    line-height: 1.5;
+}
+
+.ft-hint-dot {
+    width: 5px;
+    height: 5px;
+    flex: 0 0 5px;
+    margin-top: 5px;
+    border-radius: 50%;
+    background: var(--text-muted);
+}
+
+.ft-options {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+    margin-top: 18px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border);
+}
+
+.ft-check {
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+    cursor: pointer;
+}
+
+.ft-check input {
+    accent-color: var(--red);
+}
+
+.ft-status {
+    margin-top: 10px;
+    color: var(--text-muted);
+    font-size: 0.78rem;
+    line-height: 1.5;
+    white-space: pre-wrap;
+}
+
+.ft-status.ok {
+    color: #69d38a;
+}
+
+.ft-status.error {
+    color: #ff6b77;
+}
+
+.ft-refresh-btn {
+    padding: 8px 12px;
+    font-size: 0.78rem;
+}
+
+.ft-refresh-btn span {
+    margin-right: 4px;
+    font-size: 0.95rem;
+}
+
+.ft-history-status {
+    margin-bottom: 10px;
+    color: var(--text-muted);
+    font-size: 0.75rem;
+}
+
+.ft-history-list {
+    display: flex;
+    max-height: 420px;
+    flex-direction: column;
+    gap: 8px;
+    overflow-y: auto;
+    padding-right: 4px;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-strong) var(--bg-app);
+}
+
+.ft-history-item {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    min-width: 0;
+    padding: 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg-app);
+}
+
+.ft-file-badge {
+    width: 36px;
+    height: 36px;
+    flex: 0 0 36px;
+    display: grid;
+    place-items: center;
+    border-radius: 8px;
+    background: var(--bg-elevated);
+    color: #d9a4aa;
+    font-size: 1rem;
+}
+
+.ft-file-meta {
+    display: flex;
+    min-width: 0;
+    flex: 1;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.ft-file-name {
+    color: var(--text-primary);
+    font-size: 0.8rem;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+}
+
+.ft-file-path {
+    color: var(--text-muted);
+    font-size: 0.7rem;
+    overflow-wrap: anywhere;
+}
+
+.ft-file-size {
+    color: var(--text-secondary);
+    font-size: 0.7rem;
+    white-space: nowrap;
+}
+
+.ft-empty {
+    padding: 24px 12px;
+    border: 1px dashed var(--border-strong);
+    border-radius: 9px;
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    line-height: 1.6;
+    text-align: center;
+}
+
+@media (max-width: 700px) {
+    .ft-panel {
+        padding: 16px;
+    }
+    .ft-pick-grid,
+    .ft-options {
+        grid-template-columns: 1fr;
+    }
+    .ft-pick-card {
+        min-height: 125px;
+    }
+}

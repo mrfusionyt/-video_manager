@@ -87,7 +87,7 @@
             <a href="{{ url_for('watch', video_id=(request.view_args or {}).get('video_id', 0), profile=current_profile) }}" class="btn-nav" title="Back">
                 <span class="btn-nav-label">Back</span>
             </a>
-        {% elif request.endpoint in ('settings', 'edit_video', 'artist_view', 'tools_page', 'duplicates_page') %}
+        {% elif request.endpoint in ('settings', 'edit_video', 'artist_view', 'tools_page', 'duplicates_page', 'file_transfer.index') %}
             <a href="{{ url_for('index', profile=current_profile) }}" class="btn-nav" title="Back">
                 <span class="btn-nav-label">Back</span>
             </a>
