@@ -2,7 +2,8 @@
 import os
 from PyInstaller.utils.hooks import collect_all
 
-BASE = os.path.dirname(os.path.abspath(__file__))
+# PyInstaller exec()s the spec with SPECPATH, not __file__.
+BASE = os.path.abspath(globals().get('SPECPATH') or os.getcwd())
 # Unused helper shipped with some dev setups; ~44 MB of dead weight in onedir.
 EXCLUDE_DOP_NAMES = {'bgutil-pot.exe'}
 
