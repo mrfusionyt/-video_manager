@@ -33,7 +33,7 @@ from addon.photo_classifier import state as pv_state
 # =====================================================================
 # UPDATE SETTINGS
 # =====================================================================
-CURRENT_VERSION = '1.0.12'
+CURRENT_VERSION = '1.0.13'
 GITHUB_USER = 'mrfusionyt'
 GITHUB_REPO = '-video_manager'
 AUTO_UPDATE_INTERVAL = 3600       # seconds between automatic checks
