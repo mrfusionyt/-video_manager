@@ -30,6 +30,7 @@ from db.categories import (
 
 from db.videos import (
     add_video,
+    update_video_intro,
     delete_video,
     get_all_videos,
     get_video_by_id,
@@ -66,7 +67,8 @@ __all__ = [
     'get_libraries', 'add_library', 'delete_library',
     'get_categories', 'add_category', 'delete_category', 'delete_all_categories',
     'get_video_categories', 'update_video_categories',
-    'add_video', 'delete_video', 'get_all_videos', 'get_video_by_id',
+    'add_video', 'update_video_intro', 'delete_video',
+    'get_all_videos', 'get_video_by_id',
     'update_rating', 'rename_video', 'query_videos_paged', 'count_videos',
     'get_stats', 'get_folders', 'get_videos_by_folder',
     'get_playlists', 'count_playlists', 'create_playlist', 'delete_playlist',

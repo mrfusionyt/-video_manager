@@ -71,8 +71,11 @@
                             try {
                                 var dur = vid.duration;
                                 if (!dur || isNaN(dur)) return;
-                                var target = PREVIEW_SEEK_SECONDS;
-                                if (dur < PREVIEW_SEEK_SECONDS * 2) target = dur / 2;
+                                var intro = parseFloat(v.intro_end || '0') || 0;
+                                if (intro <= 0 && dur >= 300) intro = 60;
+                                if (dur > 0) intro = Math.min(intro, dur * 0.25);
+                                var target = Math.max(PREVIEW_SEEK_SECONDS, intro + 2);
+                                if (target >= dur - 0.5) target = dur / 2;
                                 vid.currentTime = target;
                             } catch (e) {}
                         }, { once: true });

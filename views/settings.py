@@ -219,7 +219,9 @@ def register(app):
                 # Do not block the POST with a full scan: start it in the
                 # background so the same progress bar used by Scan shows up.
                 new_task_id = str(uuid.uuid4())
-                started = scan_libraries_async(new_task_id)
+                deep_scan = (request.form.get('deep_scan') == '1'
+                             or request.form.get('action') == 'deep_scan')
+                started = scan_libraries_async(new_task_id, deep=deep_scan)
                 if started:
                     return redirect(url_for('settings', tab='libraries',
                                             task_id=new_task_id,
@@ -237,6 +239,17 @@ def register(app):
             elif action == 'scan':
                 new_task_id = str(uuid.uuid4())
                 started = scan_libraries_async(new_task_id)
+                if not started:
+                    return redirect(url_for('settings', tab='libraries',
+                                            profile=current_profile))
+                return redirect(url_for('settings',
+                                        tab='libraries',
+                                        task_id=new_task_id,
+                                        profile=current_profile))
+
+            elif action == 'deep_scan':
+                new_task_id = str(uuid.uuid4())
+                started = scan_libraries_async(new_task_id, deep=True)
                 if not started:
                     return redirect(url_for('settings', tab='libraries',
                                             profile=current_profile))

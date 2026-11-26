@@ -92,6 +92,28 @@ def add_video(library_id, filename, filepath, duration=0, size=0, added=None,
         conn.close()
 
 
+def update_video_intro(video_id, intro_end, confidence=0.0,
+                       reason='', version=0):
+    """Persist deep-scan intro metadata and return the previous intro_end."""
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT intro_end FROM videos WHERE id = ?", (video_id,))
+        row = cursor.fetchone()
+        previous = float(row['intro_end'] or 0.0) if row else 0.0
+        cursor.execute("""
+            UPDATE videos SET
+                intro_end = ?, intro_confidence = ?, intro_reason = ?,
+                intro_version = ?
+            WHERE id = ?
+        """, (float(intro_end or 0.0), float(confidence or 0.0),
+              str(reason or '')[:300], int(version), video_id))
+        conn.commit()
+        return previous
+    finally:
+        conn.close()
+
+
 def delete_video(video_id):
     try:
         from .thumbnails import delete_thumbnail

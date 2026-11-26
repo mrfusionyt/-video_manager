@@ -31,6 +31,16 @@
     // массив card в порядке активации
     var activeQueue = [];
 
+    function introSkipFor(v) {
+        var detected = parseFloat(v.dataset.introSkip || '0') || 0;
+        var declared = parseFloat(v.dataset.videoDuration || '0') || 0;
+        var duration = v.duration || declared;
+        if (detected <= 0 && duration >= 300) detected = 60;
+        if (duration > 0) detected = Math.min(detected, duration * 0.25);
+        if (detected <= 0) return 0;
+        return detected + 2;
+    }
+
     /* ---------- Управление отрезками воспроизведения ---------- */
     function stopSegments(v) {
         var id = intervals.get(v);
@@ -59,9 +69,11 @@
             return;
         }
 
-        var seg = duration / SEGMENTS;
+        var start = introSkipFor(v);
+        var span = Math.max(0.5, duration - start);
+        var seg = span / SEGMENTS;
         var points = [];
-        for (var i = 0; i < SEGMENTS; i++) points.push(i * seg);
+        for (var i = 0; i < SEGMENTS; i++) points.push(start + i * seg);
 
         var cur = 0;
         function next() {
@@ -98,6 +110,8 @@
         v.setAttribute('muted', '');
         v.preload = 'auto';
         v.src = src;
+        v.dataset.introSkip = img.getAttribute('data-intro-skip') || '0';
+        v.dataset.videoDuration = img.getAttribute('data-duration') || '0';
 
         img.parentNode.appendChild(v);
         cardVideos.set(card, v);

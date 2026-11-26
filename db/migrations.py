@@ -78,6 +78,14 @@ def init_db():
         cursor.execute("ALTER TABLE videos ADD COLUMN bitrate INTEGER DEFAULT 0")
     if 'fps' not in columns:
         cursor.execute("ALTER TABLE videos ADD COLUMN fps REAL DEFAULT 0.0")
+    if 'intro_end' not in columns:
+        cursor.execute("ALTER TABLE videos ADD COLUMN intro_end REAL DEFAULT 0.0")
+    if 'intro_confidence' not in columns:
+        cursor.execute("ALTER TABLE videos ADD COLUMN intro_confidence REAL DEFAULT 0.0")
+    if 'intro_reason' not in columns:
+        cursor.execute("ALTER TABLE videos ADD COLUMN intro_reason TEXT DEFAULT ''")
+    if 'intro_version' not in columns:
+        cursor.execute("ALTER TABLE videos ADD COLUMN intro_version INTEGER DEFAULT 0")
 
     # --- Новая колонка folder ---
     if 'folder' not in columns:

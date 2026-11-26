@@ -35,6 +35,16 @@
     var activeQueue = [];              // card[] — в порядке активации
     var registered  = new WeakSet();   // уже подписанные карточки
 
+    function introSkipFor(v) {
+        var detected = parseFloat(v.dataset.introSkip || '0') || 0;
+        var declared = parseFloat(v.dataset.duration || '0') || 0;
+        var duration = v.duration || declared;
+        if (detected <= 0 && duration >= 300) detected = 60;
+        if (duration > 0) detected = Math.min(detected, duration * 0.25);
+        if (detected <= 0) return 0;
+        return detected + 2;
+    }
+
     /* --- 4. Запуск / остановка анимации одного видео --- */
     function startPreview(v) {
         if (!v || intervals.has(v)) return;
@@ -57,9 +67,11 @@
             return;
         }
 
-        var seg = duration / SEGMENTS;
+        var start = introSkipFor(v);
+        var span = Math.max(0.5, duration - start);
+        var seg = span / SEGMENTS;
         var points = [];
-        for (var i = 0; i < SEGMENTS; i++) points.push(i * seg);
+        for (var i = 0; i < SEGMENTS; i++) points.push(start + i * seg);
 
         var cur = 0;
         function next() {
@@ -84,7 +96,8 @@
             if (id !== 'loop') clearInterval(id);
             intervals.delete(v);
         }
-        try { v.currentTime = 0; } catch (e) {}
+        var rest = introSkipFor(v);
+        try { v.currentTime = rest; } catch (e) {}
         try { v.pause(); } catch (e) {}
     }
 

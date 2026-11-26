@@ -29,7 +29,9 @@
                          alt="{{ artist.name }}"
                          loading="lazy"
                          decoding="async"
-                         data-video-src="{{ url_for('video_file', video_id=artist.preview.id) }}">
+                         data-video-src="{{ url_for('video_file', video_id=artist.preview.id) }}"
+                          data-intro-skip="{{ artist.preview.intro_end or 0 }}"
+                          data-duration="{{ artist.preview.duration or 0 }}">
                 {% else %}
                     <img src="{{ url_for('video_file', video_id=artist.preview.id) }}"
                          alt="{{ artist.name }}" class="preview">

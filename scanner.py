@@ -16,8 +16,11 @@ import json
 import threading
 
 from helpers.subprocess_utils import hidden_process_kwargs
+from helpers.intro_detector import DETECTOR_VERSION, detect_intro_end
+from db.thumbnails import delete_thumbnail
 from models import (
-    get_libraries, add_video, get_db_connection, delete_video, get_video_by_id,
+    get_libraries, add_video, update_video_intro,
+    get_db_connection, delete_video, get_video_by_id,
 )
 from converter import (
     needs_conversion, convert_video_in_place, update_db_after_conversion,
@@ -232,7 +235,38 @@ def _is_temp_file(filename):
     return False
 
 
-def _scan_impl(progress_cb=None):
+def _analyze_intro(video_id, filepath, duration=0):
+    """Deep-scan one video and persist its intro boundary."""
+    if not video_id or not filepath or not os.path.exists(filepath):
+        return False
+
+    conn = get_db_connection()
+    try:
+        row = conn.execute(
+            "SELECT intro_version FROM videos WHERE id = ?", (video_id,)
+        ).fetchone()
+    finally:
+        conn.close()
+    if row and int(row['intro_version'] or 0) == DETECTOR_VERSION:
+        return False
+
+    info = detect_intro_end(filepath, duration)
+    previous = update_video_intro(
+        video_id,
+        info.get('end', 0.0),
+        info.get('confidence', 0.0),
+        info.get('reason', ''),
+        DETECTOR_VERSION,
+    )
+    if abs(float(previous or 0.0) - float(info.get('end') or 0.0)) >= 0.5:
+        delete_thumbnail(video_id)
+    print(f"[scan] intro {os.path.basename(filepath)}: "
+          f"{info.get('end', 0.0):.1f}s "
+          f"(confidence {info.get('confidence', 0.0):.2f})")
+    return True
+
+
+def _scan_impl(progress_cb=None, deep=False):
     _load_scan_cache()
     _load_probe_cache()
 
@@ -243,12 +277,12 @@ def _scan_impl(progress_cb=None):
             progress_cb(0, 0, 'Another scan is running')
         return
     try:
-        _scan_impl_locked(progress_cb)
+        _scan_impl_locked(progress_cb, deep=deep)
     finally:
         _RUN_LOCK.release()
 
 
-def _scan_impl_locked(progress_cb=None):
+def _scan_impl_locked(progress_cb=None, deep=False):
     libraries = get_libraries()
     if not libraries:
         print("No libraries to scan.")
@@ -302,6 +336,7 @@ def _scan_impl_locked(progress_cb=None):
         found_paths.add(full_path)
         folder = os.path.dirname(full_path)
         existing_row = existing_map.get(full_path)
+        video_id = None
 
         try:
             is_video = os.path.splitext(full_path)[1].lower() in VIDEO_EXTENSIONS
@@ -362,10 +397,12 @@ def _scan_impl_locked(progress_cb=None):
                         ok, new_video, msg = convert_video_in_place(vid_obj)
                         if ok:
                             update_db_after_conversion(video_id, new_video)
-                            found_paths.discard(full_path)
-                            found_paths.add(new_video['filepath'])
+                            old_path = full_path
+                            full_path = new_video['filepath']
+                            found_paths.discard(old_path)
+                            found_paths.add(full_path)
+                            existing_map.pop(old_path, None)
                             existing_map.pop(full_path, None)
-                            existing_map.pop(new_video['filepath'], None)
                         else:
                             print(f"[scan] convert FAILED: {msg}")
                     elif need_meta:
@@ -412,7 +449,7 @@ def _scan_impl_locked(progress_cb=None):
                             print(f"[scan] convert FAILED (will retry later): "
                                   f"{msg}")
 
-                    add_video(
+                    video_id = add_video(
                         lib_id, filename, full_path,
                         duration=info['duration'],
                         size=size,
@@ -429,8 +466,19 @@ def _scan_impl_locked(progress_cb=None):
         except Exception as e:
             print(f"[scan] Error processing {filename}: {e}")
 
+        if deep and video_id and os.path.splitext(full_path)[1].lower() in VIDEO_EXTENSIONS:
+            try:
+                row = get_video_by_id(video_id)
+                _analyze_intro(video_id, full_path,
+                               (row or {}).get('duration', 0))
+            except Exception as e:
+                print(f"[scan] intro analysis error for {filename}: {e}")
+
         if progress_cb and (i % 5 == 0 or i == total):
-            progress_cb(i, total, filename)
+            message = filename
+            if deep:
+                message = f'Analyzing intros: {filename}'
+            progress_cb(i, total, message)
 
     for filepath, row in existing_map.items():
         if os.path.normpath(filepath) not in found_paths:
@@ -454,11 +502,11 @@ def _scan_impl_locked(progress_cb=None):
     print("[scan] Scan complete.")
 
 
-def scan_libraries(progress_cb=None):
-    _scan_impl(progress_cb=progress_cb)
+def scan_libraries(progress_cb=None, deep=False):
+    _scan_impl(progress_cb=progress_cb, deep=deep)
 
 
-def scan_libraries_async(task_id):
+def scan_libraries_async(task_id, deep=False):
     global SCAN_IN_PROGRESS
     with SCAN_LOCK:
         if SCAN_IN_PROGRESS:
@@ -470,7 +518,10 @@ def scan_libraries_async(task_id):
         SCAN_IN_PROGRESS = True
         SCAN_TASKS[task_id] = {
             'status': 'scanning', 'progress': 0, 'total': 0,
-            'processed': 0, 'message': 'Initializing...',
+            'processed': 0,
+            'message': 'Initializing deep intro analysis...' if deep
+                       else 'Initializing...',
+            'deep': bool(deep),
         }
 
     def _cb(processed, total, message):
@@ -486,7 +537,7 @@ def scan_libraries_async(task_id):
     def _worker():
         global SCAN_IN_PROGRESS
         try:
-            _scan_impl(progress_cb=_cb)
+            _scan_impl(progress_cb=_cb, deep=deep)
             with SCAN_LOCK:
                 t = SCAN_TASKS.get(task_id)
                 if t:

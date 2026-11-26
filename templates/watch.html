@@ -217,7 +217,9 @@
                      onclick="window.location.href='/watch/{{ rec.id }}?profile={{ current_profile }}'">
                     <div class="card recommendation-card h-100">
                         <div class="video-wrapper-square">
-                            <video muted playsinline preload="metadata" data-video-id="{{ rec.id }}">
+                            <video muted playsinline preload="metadata" data-video-id="{{ rec.id }}"
+                                   data-intro-skip="{{ rec.intro_end or 0 }}"
+                                   data-duration="{{ rec.duration or 0 }}">
                                 <source src="{{ url_for('video_file', video_id=rec.id) }}" type="video/mp4">
                             </video>
                         </div>

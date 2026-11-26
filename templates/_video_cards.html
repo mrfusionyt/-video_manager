@@ -9,7 +9,9 @@
                  alt="{{ video.filename }}"
                  loading="lazy"
                  decoding="async"
-                 data-video-src="{{ url_for('video_file', video_id=video.id) }}">
+                 data-video-src="{{ url_for('video_file', video_id=video.id) }}"
+                  data-intro-skip="{{ video.intro_end or 0 }}"
+                  data-duration="{{ video.duration or 0 }}">
             {% if video.quality_tag %}
                 <span class="quality-badge quality-{{ video.quality_tag }}"
                       title="{% if video.quality_tag == '4k' %}4K / UHD{% else %}Low resolution{% endif %}">

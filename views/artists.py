@@ -174,6 +174,7 @@ def register(app):
                     'id': v['id'],
                     'filename': v['filename'],
                     'duration': v.get('duration', 0),
+                    'intro_end': v.get('intro_end', 0),
                 })
         return jsonify({'videos': videos})
 

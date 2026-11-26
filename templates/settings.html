@@ -12,6 +12,9 @@
                 <input type="hidden" name="profile" value="{{ current_profile }}">
                 <input type="text" name="path" id="libraryPath" class="form-control form-control-dark" placeholder="Enter full path to video folder (e.g., C:\Users\...)" value="">
                 <button type="button" class="btn-paste" id="pasteBtn">Paste</button>
+                <label class="vm-inline-check" style="display:inline-flex;align-items:center;gap:4px;white-space:nowrap;" title="Analyze video intros and skip studio splashes in duplicates and previews">
+                    <input type="checkbox" name="deep_scan" value="1"> Deep scan
+                </label>
                 <button type="submit" class="btn-add" id="addLibraryBtn">Add</button>
             </form>
             <div id="libraryMessage" class="vm-inline-message" style="display:none;"></div>
@@ -20,6 +23,13 @@
                 <input type="hidden" name="profile" value="{{ current_profile }}">
                 <button type="submit" class="btn-add" id="scanBtn" {% if scan_running %}disabled{% endif %}>
                     {% if scan_running %}Scanning…{% else %}Scan{% endif %}
+                </button>
+            </form>
+            <form method="post" class="scan-form" id="deepScanForm">
+                <input type="hidden" name="action" value="deep_scan">
+                <input type="hidden" name="profile" value="{{ current_profile }}">
+                <button type="submit" class="btn-add" id="deepScanBtn" {% if scan_running %}disabled{% endif %}>
+                    {% if scan_running %}Scanning…{% else %}Deep scan{% endif %}
                 </button>
             </form>
         </div>
@@ -417,11 +427,29 @@
         const taskId = urlParams.get('task_id');
         const scanBtn = document.getElementById('scanBtn');
         const scanForm = document.getElementById('scanForm');
+        const deepScanBtn = document.getElementById('deepScanBtn');
+        const deepScanForm = document.getElementById('deepScanForm');
         const progressContainer = document.getElementById('scanProgressContainer');
+
+        function disableScanButtons() {
+            [scanBtn, deepScanBtn].forEach(function(btn) {
+                if (btn) { btn.disabled = true; btn.textContent = 'Scanning…'; }
+            });
+        }
+        function enableScanButtons() {
+            if (scanBtn) { scanBtn.disabled = false; scanBtn.textContent = 'Scan'; }
+            if (deepScanBtn) { deepScanBtn.disabled = false; deepScanBtn.textContent = 'Deep scan'; }
+        }
 
         if (scanForm) {
             scanForm.addEventListener('submit', function() {
-                if (scanBtn) { scanBtn.disabled = true; scanBtn.textContent = 'Scanning…'; }
+                disableScanButtons();
+                if (window.VMProgress) VMProgress.reset(progressContainer);
+            });
+        }
+        if (deepScanForm) {
+            deepScanForm.addEventListener('submit', function() {
+                disableScanButtons();
                 if (window.VMProgress) VMProgress.reset(progressContainer);
             });
         }
@@ -437,10 +465,7 @@
                     }, 1000);
                 },
                 onError: function(data) {
-                    if (scanBtn) {
-                        scanBtn.disabled = false;
-                        scanBtn.textContent = 'Scan';
-                    }
+                    enableScanButtons();
                 },
                 onNotFound: function() {
                     const text = document.getElementById('scanProgressText');
@@ -449,7 +474,7 @@
                 onConnectionError: function() {
                     const text = document.getElementById('scanProgressText');
                     if (text) text.textContent = 'Connection lost. Refresh the page.';
-                    if (scanBtn) { scanBtn.disabled = false; scanBtn.textContent = 'Scan'; }
+                    enableScanButtons();
                 }
             });
         }

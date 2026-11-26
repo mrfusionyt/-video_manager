@@ -31,7 +31,9 @@
                      alt="{{ v.filename }}"
                      loading="lazy"
                      decoding="async"
-                     data-video-src="{{ url_for('video_file', video_id=v.id) }}">
+                     data-video-src="{{ url_for('video_file', video_id=v.id) }}"
+                      data-intro-skip="{{ v.intro_end or 0 }}"
+                      data-duration="{{ v.duration or 0 }}">
             {% else %}
                 <img src="{{ url_for('video_file', video_id=v.id) }}" alt="{{ v.filename }}">
             {% endif %}

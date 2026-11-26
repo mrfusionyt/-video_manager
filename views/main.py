@@ -389,7 +389,8 @@ def register(app):
             path = get_thumbnail_path(video_id)
         else:
             ok = generate_thumbnail(video_id, video['filepath'],
-                                    video.get('duration', 0))
+                                    video.get('duration', 0),
+                                    video.get('intro_end', 0))
             if not ok:
                 return _thumbnail_placeholder()
             path = get_thumbnail_path(video_id)
@@ -439,7 +440,10 @@ def register(app):
         covers = load_folder_covers()
         current_cover_id = covers.get(folder_path)
 
-        videos_list = [{'id': v['id'], 'filename': v['filename']} for v in videos]
+        videos_list = [{
+            'id': v['id'], 'filename': v['filename'],
+            'intro_end': v.get('intro_end', 0), 'duration': v.get('duration', 0),
+        } for v in videos]
         return jsonify({
             'videos': videos_list,
             'current_cover': current_cover_id

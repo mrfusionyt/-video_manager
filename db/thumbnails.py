@@ -9,6 +9,7 @@ import os
 import subprocess
 
 from helpers.subprocess_utils import hidden_process_kwargs
+from helpers.intro_detector import preview_skip_seconds
 from .connection import APP_DATA_DIR
 
 
@@ -86,7 +87,7 @@ def _run_ffmpeg(cmd, video_id, timeout=30):
     return False, err_tail
 
 
-def generate_thumbnail(video_id, filepath, duration=0):
+def generate_thumbnail(video_id, filepath, duration=0, intro_end=0):
     """
     Генерирует JPEG-превью для видео. Возвращает True при успехе.
 
@@ -110,8 +111,14 @@ def generate_thumbnail(video_id, filepath, duration=0):
     except OSError:
         pass
 
-    # Точка захвата: 10% от длительности (1..10 сек)
-    if duration and duration > 3:
+    # Точка захвата: сразу после заставки, если она обнаружена.
+    preview_skip = preview_skip_seconds({
+        'intro_end': intro_end, 'duration': duration})
+    if preview_skip > 0:
+        target_seconds = preview_skip
+        if duration and duration > preview_skip + 2:
+            target_seconds = min(duration - 1, preview_skip)
+    elif duration and duration > 3:
         target_seconds = min(max(duration * 0.1, 1), 10)
     else:
         target_seconds = 1.0
@@ -189,7 +196,8 @@ def generate_all_missing(get_all_videos_fn):
     for v in videos:
         if has_thumbnail(v['id']):
             continue
-        if generate_thumbnail(v['id'], v['filepath'], v.get('duration', 0)):
+        if generate_thumbnail(v['id'], v['filepath'], v.get('duration', 0),
+                              v.get('intro_end', 0)):
             generated += 1
     return generated, total
 

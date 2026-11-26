@@ -35,6 +35,7 @@ import imagehash
 from models import get_all_videos, get_db_connection, get_video_by_id, delete_video
 from converter import move_to_broken
 from helpers.subprocess_utils import hidden_process_kwargs
+from helpers.intro_detector import intro_skip_seconds
 
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -73,8 +74,8 @@ IMAGE_MIH_MAX_PAIRS = 50_000_000
 
 # ---------- Audio ----------
 AUDIO_SKIP_INTRO_SEC   = 30.0
-AUDIO_SKIP_VARIANTS    = (30.0, 0.0)
 AUDIO_SUBPRINT_PER_SEC = 1.0 / 0.1234
+VIDEO_OUTRO_RATIO      = 0.05
 AUDIO_FPCALC_MAX_LENGTH = 1800
 
 AUDIO_FULL_MIN_RUN_SEC    = 30.0
@@ -179,28 +180,41 @@ def _init_db():
             PRIMARY KEY (path_a, path_b)
         )
     """)
+    c.execute("PRAGMA table_info(files)")
+    file_columns = [r[1] for r in c.fetchall()]
+    if 'intro_skip' not in file_columns:
+        c.execute("ALTER TABLE files ADD COLUMN intro_skip REAL DEFAULT 0.0")
     c.execute("CREATE INDEX IF NOT EXISTS idx_files_path ON files(path)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_ignored_a ON ignored_pairs(path_a)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_ignored_b ON ignored_pairs(path_b)")
     conn.commit()
 
 
-def _get_or_create_file(path, mtime, size, media_type):
+def _get_or_create_file(path, mtime, size, media_type, intro_skip=0.0):
     conn = _get_conn()
     c = conn.cursor()
-    c.execute("SELECT id, mtime, size FROM files WHERE path = ?", (path,))
+    c.execute("SELECT id, mtime, size, intro_skip FROM files WHERE path = ?", (path,))
     row = c.fetchone()
     if row is None:
         c.execute(
-            "INSERT INTO files(path, mtime, size, media_type) VALUES (?, ?, ?, ?)",
-            (path, mtime, size, media_type),
+            "INSERT INTO files(path, mtime, size, media_type, intro_skip) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (path, mtime, size, media_type, float(intro_skip or 0.0)),
         )
         conn.commit()
         return c.lastrowid, False
-    if row['mtime'] != mtime or row['size'] != size:
+    changed = (row['mtime'] != mtime or row['size'] != size or
+               abs(float(row['intro_skip'] or 0.0) -
+                   float(intro_skip or 0.0)) >= 0.5)
+    if changed:
+        # Frame positions depend on the intro boundary; cached hashes are stale.
+        if abs(float(row['intro_skip'] or 0.0) -
+               float(intro_skip or 0.0)) >= 0.5:
+            c.execute("DELETE FROM video_frames WHERE file_id = ?", (row['id'],))
         c.execute(
-            "UPDATE files SET mtime = ?, size = ?, media_type = ? WHERE id = ?",
-            (mtime, size, media_type, row['id']),
+            "UPDATE files SET mtime = ?, size = ?, media_type = ?, "
+            "intro_skip = ? WHERE id = ?",
+            (mtime, size, media_type, float(intro_skip or 0.0), row['id']),
         )
         conn.commit()
         return row['id'], False
@@ -477,8 +491,21 @@ def _hash_image(pil_img):
     ]
 
 
-def _process_video_frames(video_path):
-    raw = _extract_frames(video_path, KEYFRAME_POSITIONS)
+def _content_positions(duration, skip_seconds):
+    """Map relative KEYFRAME_POSITIONS onto the content after the intro."""
+    duration = float(duration or 0.0)
+    skip_seconds = float(skip_seconds or 0.0)
+    if duration <= 0:
+        return list(KEYFRAME_POSITIONS)
+    start = min(skip_seconds / duration, 0.4)
+    end = max(start + 0.2, 1.0 - VIDEO_OUTRO_RATIO)
+    return [round(start + pos * (end - start), 4)
+            for pos in KEYFRAME_POSITIONS]
+
+
+def _process_video_frames(video_path, skip_seconds=0.0, duration=0.0):
+    positions = _content_positions(duration, skip_seconds)
+    raw = _extract_frames(video_path, positions)
     out = []
     for pos, frame in raw:
         try:
@@ -495,7 +522,8 @@ def _process_video_frames(video_path):
                 ret, frame = cap.read()
                 if ret:
                     pil = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-                    out = [{'position': 0.5, 'hashes': _hash_image(pil)}]
+                    out = [{'position': positions[len(positions) // 2],
+                            'hashes': _hash_image(pil)}]
             finally:
                 cap.release()
     return out
@@ -613,16 +641,21 @@ def _fft_has_correlation(a, b):
     return ratio >= AUDIO_FFT_PEAK_STD_RATIO, ratio
 
 
-def _find_audio_match_skip(a_raw, b_raw, skip_intro_sec=AUDIO_SKIP_INTRO_SEC):
-    if not a_raw or not b_raw:
+def _find_audio_match_skip(a_raw, b_raw, skip_a=AUDIO_SKIP_INTRO_SEC,
+                           skip_b=None):
+    if a_raw is None or b_raw is None or len(a_raw) == 0 or len(b_raw) == 0:
         return None
     a = np.asarray(a_raw, dtype=np.uint32)
     b = np.asarray(b_raw, dtype=np.uint32)
+    if skip_b is None:
+        skip_b = skip_a
 
-    skip_steps = int(skip_intro_sec * AUDIO_SUBPRINT_PER_SEC)
-    if skip_steps > 0:
-        a = a[skip_steps:]
-        b = b[skip_steps:]
+    skip_a_steps = int(skip_a * AUDIO_SUBPRINT_PER_SEC)
+    skip_b_steps = int(skip_b * AUDIO_SUBPRINT_PER_SEC)
+    if skip_a_steps > 0:
+        a = a[skip_a_steps:]
+    if skip_b_steps > 0:
+        b = b[skip_b_steps:]
     if len(a) < 40 or len(b) < 40:
         return None
     if _is_silence_like(a) or _is_silence_like(b):
@@ -688,11 +721,13 @@ def _find_audio_match_skip(a_raw, b_raw, skip_intro_sec=AUDIO_SKIP_INTRO_SEC):
                 'run_steps': int(run_len),
                 'run_sec': run_sec,
                 'kind': kind,
-                'start_a_sec': float(skip_intro_sec +
+                'start_a_sec': float(skip_a +
                                      start_a_step / AUDIO_SUBPRINT_PER_SEC),
-                'start_b_sec': float(skip_intro_sec +
+                'start_b_sec': float(skip_b +
                                      start_b_step / AUDIO_SUBPRINT_PER_SEC),
-                'skipped_intro_sec': float(skip_intro_sec),
+                'skipped_intro_sec': float(max(skip_a, skip_b)),
+                'skipped_a_sec': float(skip_a),
+                'skipped_b_sec': float(skip_b),
                 'fft_ratio': round(float(ratio), 2),
             }
 
@@ -706,24 +741,14 @@ def _find_audio_match_skip(a_raw, b_raw, skip_intro_sec=AUDIO_SKIP_INTRO_SEC):
     return best_match
 
 
-def _find_audio_match(a_raw, b_raw):
-    """Try both intro offsets; return the strongest match found."""
-    best = None
-    for skip_sec in AUDIO_SKIP_VARIANTS:
-        try:
-            candidate = _find_audio_match_skip(a_raw, b_raw, skip_sec)
-        except Exception as e:
-            print(f"[dup] audio match skip={skip_sec:g} failed: {e}", flush=True)
-            continue
-        if not candidate:
-            continue
-        rank = (0 if candidate.get('kind') == 'full' else 1,
-                -float(candidate.get('run_sec') or 0))
-        best_rank = (0 if best and best.get('kind') == 'full' else 1,
-                     -float(best.get('run_sec') or 0)) if best else (2, 0)
-        if rank < best_rank:
-            best = candidate
-    return best
+def _find_audio_match(a_raw, b_raw, skip_a=AUDIO_SKIP_INTRO_SEC,
+                      skip_b=None):
+    """Compare audio after each file's intro boundary."""
+    try:
+        return _find_audio_match_skip(a_raw, b_raw, skip_a, skip_b)
+    except Exception as e:
+        print(f"[dup] audio match failed: {e}", flush=True)
+        return None
 
 
 # ===================================================================
@@ -750,8 +775,9 @@ def _process_media(item, include_audio=True):
         item['media_type'] = 'video'
 
     print(f"[dup]   [START] {filename}", flush=True)
+    intro_skip = intro_skip_seconds(item)
     file_id, is_fresh = _get_or_create_file(
-        path, st.st_mtime, st.st_size, media_type)
+        path, st.st_mtime, st.st_size, media_type, intro_skip)
 
     if is_fresh:
         frames = _load_video_frames(file_id)
@@ -783,7 +809,8 @@ def _process_media(item, include_audio=True):
         frames = _process_image_frames(path)
         audio_fp = None
     else:
-        frames = _process_video_frames(path)
+        frames = _process_video_frames(
+            path, intro_skip, item.get('duration', 0))
         print(f"[dup]   [FRAMES OK] {filename}", flush=True)
         if include_audio:
             audio_fp = _extract_audio_fingerprint(path)
@@ -1327,7 +1354,8 @@ def _video_candidates(paths, hash_objs, image_path_set, mode='fast'):
 # ===================================================================
 #                     Audio LSH
 # ===================================================================
-def _audio_lsh_candidates(paths, audio_by_path, image_path_set):
+def _audio_lsh_candidates(paths, audio_by_path, image_path_set,
+                          skip_by_path=None):
     n = len(paths)
     mask = (1 << AUDIO_LSH_BAND_BITS) - 1
     bucket = defaultdict(list)
@@ -1339,23 +1367,25 @@ def _audio_lsh_candidates(paths, audio_by_path, image_path_set):
         if not fp:
             continue
         arr_all = np.asarray(fp, dtype=np.uint32)
-        for skip_sec in AUDIO_SKIP_VARIANTS:
-            skip_steps = int(skip_sec * AUDIO_SUBPRINT_PER_SEC)
-            arr = arr_all[skip_steps:] if skip_steps > 0 else arr_all
-            if len(arr) < 40:
-                continue
-            if _is_silence_like(arr):
-                continue
-            for band in range(AUDIO_LSH_BANDS):
-                shift = band * AUDIO_LSH_BAND_BITS
-                band_vals = (arr >> np.uint32(shift)) & np.uint32(mask)
-                seen = {}
-                for pos, bv in enumerate(band_vals):
-                    bv_i = int(bv)
-                    if bv_i not in seen:
-                        seen[bv_i] = pos
-                for bv_i, pos in seen.items():
-                    bucket[(skip_sec, band, bv_i)].append((i, pos))
+        skip_sec = float((skip_by_path or {}).get(paths[i],
+                                                  AUDIO_SKIP_INTRO_SEC) or 0.0)
+        skip_steps = int(skip_sec * AUDIO_SUBPRINT_PER_SEC)
+        arr = arr_all[skip_steps:] if skip_steps > 0 else arr_all
+        if len(arr) < 40:
+            continue
+        if _is_silence_like(arr):
+            continue
+        for band in range(AUDIO_LSH_BANDS):
+            shift = band * AUDIO_LSH_BAND_BITS
+            band_vals = (arr >> np.uint32(shift)) & np.uint32(mask)
+            seen = {}
+            for pos, bv in enumerate(band_vals):
+                bv_i = int(bv)
+                if bv_i not in seen:
+                    # Store original timeline position for cross-intro pairs.
+                    seen[bv_i] = pos + skip_steps
+            for bv_i, pos in seen.items():
+                bucket[(band, bv_i)].append((i, pos))
 
     pair_hits = defaultdict(int)
     for _, items in bucket.items():
@@ -1389,10 +1419,13 @@ def _group_all(task_id, frames_by_path, audio_by_path,
     print(f"[dup] files with frames: {n}")
 
     image_path_set = set()
+    skip_by_path = {}
     for p in paths:
         item = item_by_path.get(p) or {}
         if _is_image_item(item):
             image_path_set.add(p)
+        else:
+            skip_by_path[p] = intro_skip_seconds(item)
 
     n_images = len(image_path_set)
     n_videos = n - n_images
@@ -1473,7 +1506,7 @@ def _group_all(task_id, frames_by_path, audio_by_path,
     if mode == 'deep':
         _set_progress(task_id, 65, 0, 0, 'Building audio LSH index...')
         audio_pairs_all = _audio_lsh_candidates(
-            paths, audio_by_path, image_path_set)
+            paths, audio_by_path, image_path_set, skip_by_path)
         print(f"[dup] audio candidates (LSH raw): {len(audio_pairs_all)}")
 
         audio_pairs = {p for p in audio_pairs_all if not is_ignored(p[0], p[1])}
@@ -1488,7 +1521,9 @@ def _group_all(task_id, frames_by_path, audio_by_path,
                 futures = [
                     ex.submit(_find_audio_match,
                               audio_by_path[paths[i]],
-                              audio_by_path[paths[j]])
+                              audio_by_path[paths[j]],
+                              skip_by_path.get(paths[i], AUDIO_SKIP_INTRO_SEC),
+                              skip_by_path.get(paths[j], AUDIO_SKIP_INTRO_SEC))
                     for (i, j) in pairs_list
                 ]
                 for fut, (i, j) in zip(futures, pairs_list):

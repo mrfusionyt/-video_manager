@@ -69,7 +69,9 @@
                          alt="{{ folder.name }}"
                          loading="lazy"
                          decoding="async"
-                         data-video-src="{{ url_for('video_file', video_id=preview.id) }}">
+                         data-video-src="{{ url_for('video_file', video_id=preview.id) }}"
+                          data-intro-skip="{{ preview.intro_end or 0 }}"
+                          data-duration="{{ preview.duration or 0 }}">
                 {% elif ext in ['jpg', 'jpeg', 'png', 'bmp', 'gif', 'tiff', 'webp'] %}
                     <img src="{{ url_for('video_file', video_id=preview.id) }}" alt="{{ folder.name }}">
                 {% else %}

@@ -29,7 +29,9 @@
                      alt="{{ video.filename }}"
                      loading="lazy"
                      decoding="async"
-                     data-video-src="{{ url_for('video_file', video_id=video.id) }}">
+                     data-video-src="{{ url_for('video_file', video_id=video.id) }}"
+                      data-intro-skip="{{ video.intro_end or 0 }}"
+                      data-duration="{{ video.duration or 0 }}">
             </div>
             <div class="card-body">
                 <h5 class="card-title" title="{{ video.filename }}">
