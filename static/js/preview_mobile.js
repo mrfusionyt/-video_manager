@@ -36,13 +36,20 @@
     var registered  = new WeakSet();   // уже подписанные карточки
 
     function introSkipFor(v) {
+        var custom = parseFloat(v.dataset.previewAt || '0') || 0;
+        if (custom > 0) return custom;
+
         var detected = parseFloat(v.dataset.introSkip || '0') || 0;
         var declared = parseFloat(v.dataset.duration || '0') || 0;
         var duration = v.duration || declared;
-        if (detected <= 0 && duration >= 300) detected = 60;
-        if (duration > 0) detected = Math.min(detected, duration * 0.25);
-        if (detected <= 0) return 0;
-        return detected + 2;
+
+        if (duration > 0 && duration <= 62) {
+            return Math.min(Math.max(duration * 0.25, 0), Math.max(0, duration - 1));
+        }
+        var start = 60;
+        if (detected > 0) start = Math.max(start, detected + 2);
+        if (duration > 0) start = Math.min(start, duration - 1);
+        return start;
     }
 
     /* --- 4. Запуск / остановка анимации одного видео --- */

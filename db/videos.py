@@ -127,10 +127,41 @@ def update_video_intro(video_id, intro_end, confidence=0.0,
         conn.close()
 
 
+def set_video_preview(video_id, preview_at):
+    """Set an individually chosen preview frame (0 = automatic)."""
+    value = 0.0
+    if preview_at:
+        try:
+            value = max(0.0, float(preview_at))
+        except (TypeError, ValueError):
+            value = 0.0
+
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE videos SET preview_at = ? WHERE id = ?",
+            (value, video_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    # The cached JPEG and all candidate frames no longer match the choice.
+    try:
+        from .thumbnails import delete_thumbnail, delete_preview_frames
+        delete_thumbnail(video_id)
+        delete_preview_frames(video_id)
+    except Exception:
+        pass
+    return value
+
+
 def delete_video(video_id):
     try:
-        from .thumbnails import delete_thumbnail
+        from .thumbnails import delete_thumbnail, delete_preview_frames
         delete_thumbnail(video_id)
+        delete_preview_frames(video_id)
     except Exception:
         pass
 

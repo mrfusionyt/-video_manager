@@ -2,7 +2,10 @@
 import os
 from datetime import datetime
 from .connection import get_db_connection
-from .thumbnails import ensure_dir as ensure_thumbnails_dir
+from .thumbnails import (
+    ensure_dir as ensure_thumbnails_dir,
+    clear_all_thumbnails,
+)
 
 
 def init_db():
@@ -50,6 +53,7 @@ def init_db():
             bitrate INTEGER DEFAULT 0,
             fps REAL DEFAULT 0.0,
             mode INTEGER DEFAULT 1,
+            preview_at REAL DEFAULT 0.0,
             FOREIGN KEY (library_id) REFERENCES libraries (id) ON DELETE CASCADE
         )
     ''')
@@ -88,6 +92,14 @@ def init_db():
         cursor.execute("ALTER TABLE videos ADD COLUMN intro_version INTEGER DEFAULT 0")
     if 'mtime' not in columns:
         cursor.execute("ALTER TABLE videos ADD COLUMN mtime REAL DEFAULT 0.0")
+    if 'preview_at' not in columns:
+        cursor.execute("ALTER TABLE videos ADD COLUMN preview_at REAL DEFAULT 0.0")
+        # Old cached JPEGs were taken at 1-10 seconds. Drop them once so every
+        # video lazily regenerates its main preview from the 1:00 point.
+        try:
+            clear_all_thumbnails()
+        except Exception as e:
+            print(f"[init_db] cannot reset legacy thumbnails: {e}")
 
     # --- Новая колонка folder ---
     if 'folder' not in columns:

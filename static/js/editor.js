@@ -381,7 +381,7 @@
         if (state.thumbs[clip.video_id]) return state.thumbs[clip.video_id];
         var img = new Image();
         img.onload = function () { renderCanvas(); };
-        img.src = '/thumbnail/' + clip.video_id;
+        img.src = '/thumbnail/' + clip.video_id + '?v=2';
         state.thumbs[clip.video_id] = img;
         return img;
     }
@@ -1777,7 +1777,7 @@
             item.className = 'picker-item' + (pickerSelectedId === v.id ? ' active' : '');
             item.dataset.videoId = v.id;
             var img = document.createElement('img');
-            img.src = '/thumbnail/' + v.id;
+            img.src = '/thumbnail/' + v.id + '?v=2';
             img.loading = 'lazy'; img.alt = '';
             item.appendChild(img);
             var nm = document.createElement('div');

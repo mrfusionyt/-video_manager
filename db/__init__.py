@@ -59,7 +59,15 @@ from .thumbnails import (
     get_thumbnail_path,
     generate_all_missing,
     clear_all_thumbnails,
+    generate_preview_frame,
+    get_preview_frame_path,
+    has_preview_frame,
+    delete_preview_frames,
+    preview_candidate_times,
+    choose_preview_seconds,
+    PREVIEW_START_SEC,
     THUMBNAILS_DIR,
+    CANDIDATES_DIR,
 )
 
 __all__ = [
@@ -77,5 +85,8 @@ __all__ = [
     'set_playlist_cover', 'get_playlist_cover',
     'generate_thumbnail', 'has_thumbnail', 'delete_thumbnail',
     'get_thumbnail_path', 'generate_all_missing', 'clear_all_thumbnails',
-    'THUMBNAILS_DIR',
+    'generate_preview_frame', 'get_preview_frame_path', 'has_preview_frame',
+    'delete_preview_frames', 'preview_candidate_times',
+    'choose_preview_seconds', 'PREVIEW_START_SEC',
+    'THUMBNAILS_DIR', 'CANDIDATES_DIR',
 ]

@@ -27,7 +27,7 @@
             {% set ext = v.filename.split('.')[-1].lower() %}
             {% if ext in ['mp4', 'mov', 'webm', 'mkv', 'm4v'] %}
                 <img class="video-thumbnail"
-                     src="{{ url_for('thumbnail', video_id=v.id) }}"
+                     src="{{ url_for('thumbnail', video_id=v.id, v=2) }}"
                      alt="{{ v.filename }}"
                      loading="lazy"
                      decoding="async"
@@ -75,7 +75,7 @@
                     <div class="avail-item" data-video-id="{{ v.id }}">
                         {% set ext = v.filename.split('.')[-1].lower() %}
                         {% if ext in ['mp4', 'mov', 'webm', 'mkv', 'm4v'] %}
-                            <img src="{{ url_for('thumbnail', video_id=v.id) }}"
+                            <img src="{{ url_for('thumbnail', video_id=v.id, v=2) }}"
                                  alt=""
                                  loading="lazy"
                                  style="width:100%; height:100%; object-fit:cover; display:block;">

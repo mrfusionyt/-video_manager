@@ -13,6 +13,30 @@
 {% set cat_list = all_photo_categories if is_photo else all_categories %}
 
 <div class="edit-container">
+    {% if not is_photo %}
+    <div class="video-edit-preview">
+        <div class="video-edit-preview-frame">
+            <img src="{{ url_for('thumbnail', video_id=video.id, v=2) }}" alt="Current preview">
+        </div>
+        <div class="video-edit-preview-info">
+            <h5 class="mt-0">Main preview</h5>
+            <p class="text-muted small mb-2">
+                Current:
+                {% if video.preview_at %}
+                    custom frame at {{ (video.preview_at // 60)|int }}:{{ '%02d' % (video.preview_at % 60)|int }}
+                {% else %}
+                    automatic (starts at 1:00)
+                {% endif %}
+            </p>
+            <button type="button" class="btn-add preview-pick-btn-static"
+                    title="Set preview"
+                    data-video-id="{{ video.id }}"
+                    data-video-name="{{ video.filename }}">
+                Choose preview frame
+            </button>
+        </div>
+    </div>
+    {% endif %}
     <form method="post">
         <div class="category-grid">
             {% for cat in cat_list %}

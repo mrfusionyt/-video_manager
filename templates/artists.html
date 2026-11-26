@@ -25,7 +25,7 @@
                 {% set ext = artist.preview.filename.split('.')[-1].lower() %}
                 {% if ext in ['mp4', 'mov', 'webm', 'mkv', 'm4v'] %}
                     <img class="preview video-thumbnail"
-                         src="{{ url_for('thumbnail', video_id=artist.preview.id) }}"
+                         src="{{ url_for('thumbnail', video_id=artist.preview.id, v=2) }}"
                          alt="{{ artist.name }}"
                          loading="lazy"
                          decoding="async"

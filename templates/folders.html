@@ -49,7 +49,7 @@
                 {% set ext = preview.filename.split('.')[-1].lower() %}
                 {% if ext in ['mp4', 'avi', 'mkv', 'mov', 'wmv', 'flv', 'webm', 'm4v'] %}
                     <img class="video-thumbnail"
-                         src="{{ url_for('thumbnail', video_id=preview.id) }}"
+                         src="{{ url_for('thumbnail', video_id=preview.id, v=2) }}"
                          alt="{{ folder.name }}"
                          loading="lazy"
                          decoding="async"

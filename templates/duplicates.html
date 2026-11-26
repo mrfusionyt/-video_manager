@@ -151,7 +151,7 @@
                                 <a href="{{ url_for('watch', video_id=video.id, profile=current_profile) }}"
                                    target="_blank">
                                     <img class="duplicate-preview"
-                                         src="{{ url_for('thumbnail', video_id=video.id) }}"
+                                         src="{{ url_for('thumbnail', video_id=video.id, v=2) }}"
                                          alt="{{ video.filename }}" loading="lazy">
                                 </a>
                             {% elif ext in ['jpg','jpeg','png','bmp','gif','tiff','webp'] %}

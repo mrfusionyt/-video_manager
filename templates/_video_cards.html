@@ -5,13 +5,20 @@
     <div class="card h-100">
         <div class="video-wrapper">
             <img class="video-thumbnail"
-                 src="{{ url_for('thumbnail', video_id=video.id) }}"
+                 src="{{ url_for('thumbnail', video_id=video.id, v=2) }}"
                  alt="{{ video.filename }}"
                  loading="lazy"
                  decoding="async"
                  data-video-src="{{ url_for('video_file', video_id=video.id) }}"
                   data-intro-skip="{{ video.intro_end or 0 }}"
-                  data-duration="{{ video.duration or 0 }}">
+                  data-duration="{{ video.duration or 0 }}"
+                   data-preview-at="{{ video.preview_at or 0 }}">
+            <button type="button" class="preview-pick-btn"
+                    title="Set preview"
+                    data-video-id="{{ video.id }}"
+                    data-video-name="{{ video.filename }}">
+                <img src="{{ url_for('serve_image', filename='pencil.png') }}" alt="Set preview">
+            </button>
             {% if video.quality_tag %}
                 <span class="quality-badge quality-{{ video.quality_tag }}"
                       title="{% if video.quality_tag == '4k' %}4K / UHD{% else %}Low resolution{% endif %}">

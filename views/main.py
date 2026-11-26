@@ -16,6 +16,7 @@ from models import (
     get_folders,
     get_videos_by_folder,
     query_videos_paged,
+    set_video_preview,
 )
 from scanner import scan_libraries
 from config import (
@@ -31,7 +32,12 @@ from db.thumbnails import (
     has_thumbnail,
     get_thumbnail_path,
     generate_thumbnail,
+    generate_preview_frame,
+    get_preview_frame_path,
+    preview_candidate_times,
+    choose_preview_seconds,
 )
+from helpers.intro_detector import probe_duration
 
 # Top-level artists.py — для назначения артистов из папок
 from artists import (
@@ -377,8 +383,21 @@ def register(app):
             '</svg>'
         )
         resp = Response(svg, mimetype='image/svg+xml')
-        resp.headers['Cache-Control'] = 'public, max-age=604800, immutable'
+        resp.headers['Cache-Control'] = 'no-cache'
         return resp
+
+    def _preview_duration(video):
+        duration = 0.0
+        try:
+            duration = float(video.get('duration') or 0.0)
+        except (TypeError, ValueError):
+            duration = 0.0
+        if duration <= 0 and video.get('filepath') and os.path.exists(video['filepath']):
+            try:
+                duration = float(probe_duration(video['filepath'], fallback=0.0) or 0.0)
+            except Exception:
+                duration = 0.0
+        return duration
 
     @app.route('/thumbnail/<int:video_id>')
     def thumbnail(video_id):
@@ -390,16 +409,127 @@ def register(app):
         else:
             ok = generate_thumbnail(video_id, video['filepath'],
                                     video.get('duration', 0),
-                                    video.get('intro_end', 0))
+                                    video.get('intro_end', 0),
+                                    video.get('preview_at', 0))
             if not ok:
                 return _thumbnail_placeholder()
             path = get_thumbnail_path(video_id)
         try:
+            # The JPEG is replaced when a user picks another frame, so browsers
+            # must revalidate instead of serving the old immutable copy.
             resp = send_file(path, mimetype='image/jpeg', conditional=True)
-            resp.headers['Cache-Control'] = 'public, max-age=604800, immutable'
+            resp.headers['Cache-Control'] = 'no-cache'
             return resp
         except Exception:
             return _thumbnail_placeholder()
+
+    @app.route('/api/video/<int:video_id>/preview_candidates')
+    def preview_candidates(video_id):
+        """Frames offered in the per-video 'Set preview' picker."""
+        video = get_video_by_id(video_id)
+        if not video:
+            return jsonify({'success': False, 'error': 'Video not found'}), 404
+        if video.get('media_type') == 'image':
+            return jsonify({
+                'success': False,
+                'error': 'Custom preview frames are available for videos only.',
+            }), 400
+
+        duration = _preview_duration(video)
+        times = preview_candidate_times(duration)
+        auto_time = choose_preview_seconds(duration, video.get('intro_end', 0), 0)
+        preview_at = 0.0
+        try:
+            preview_at = float(video.get('preview_at') or 0.0)
+        except (TypeError, ValueError):
+            preview_at = 0.0
+
+        candidates = []
+        for seconds in times:
+            whole = int(round(seconds))
+            candidates.append({
+                'time': whole,
+                'label': f'{whole // 60}:{whole % 60:02d}',
+                'url': url_for('preview_frame', video_id=video_id, t=whole),
+            })
+        return jsonify({
+            'success': True,
+            'video_id': video_id,
+            'filename': video.get('filename', ''),
+            'duration': duration,
+            'preview_at': preview_at,
+            'auto_time': auto_time,
+            'auto_url': url_for('preview_frame', video_id=video_id,
+                                t=int(round(auto_time))),
+            'thumb_url': url_for('thumbnail', video_id=video_id, v=2),
+            'candidates': candidates,
+        })
+
+    @app.route('/api/video/<int:video_id>/preview_frame')
+    def preview_frame(video_id):
+        """Single candidate JPEG, cached by timestamp and source mtime."""
+        video = get_video_by_id(video_id)
+        if not video or not video.get('filepath'):
+            return _thumbnail_placeholder()
+        try:
+            seconds = float(request.args.get('t', 0) or 0)
+        except (TypeError, ValueError):
+            seconds = 0.0
+        if seconds <= 0:
+            return _thumbnail_placeholder()
+
+        duration = _preview_duration(video)
+        target = choose_preview_seconds(duration=duration, preview_at=seconds)
+        try:
+            ok = generate_preview_frame(video_id, video['filepath'], target, duration)
+        except Exception as e:
+            print(f"[preview] frame error for {video_id}: {e}")
+            ok = False
+        if not ok:
+            return _thumbnail_placeholder()
+        try:
+            resp = send_file(
+                get_preview_frame_path(video_id, target, video['filepath']),
+                mimetype='image/jpeg', conditional=True)
+            resp.headers['Cache-Control'] = 'public, max-age=300'
+            return resp
+        except Exception:
+            return _thumbnail_placeholder()
+
+    @app.route('/api/video/<int:video_id>/set_preview', methods=['POST'])
+    def set_preview(video_id):
+        """Persist the frame chosen in the web picker for this video only."""
+        video = get_video_by_id(video_id)
+        if not video:
+            return jsonify({'success': False, 'error': 'Video not found'}), 404
+        if video.get('media_type') == 'image':
+            return jsonify({
+                'success': False,
+                'error': 'Custom preview frames are available for videos only.',
+            }), 400
+
+        data = request.get_json(silent=True) or request.form
+        raw = data.get('preview_at', 0)
+        if isinstance(raw, str) and raw.strip().lower() in ('', 'auto', 'reset', 'none'):
+            seconds = 0.0
+        else:
+            try:
+                seconds = float(raw or 0)
+            except (TypeError, ValueError):
+                return jsonify({'success': False, 'error': 'Invalid preview time'}), 400
+        if seconds < 0:
+            return jsonify({'success': False, 'error': 'Invalid preview time'}), 400
+
+        duration = _preview_duration(video)
+        if seconds > 0 and duration > 0 and seconds >= duration:
+            seconds = max(1.0, duration - 1.0)
+
+        saved = set_video_preview(video_id, seconds)
+        return jsonify({
+            'success': True,
+            'preview_at': saved,
+            'thumbnail_url': url_for('thumbnail', video_id=video_id, v=2),
+        })
 
     # ================================================================
     #                       FOLDERS
