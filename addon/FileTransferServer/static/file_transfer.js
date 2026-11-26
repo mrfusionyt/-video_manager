@@ -15,8 +15,19 @@
     let folderEdited = false;
     let runToken = 0;
     let lastSample = { bytes: 0, time: 0, speed: 0 };
+    let lastDomUpdate = 0;
+    let lastRenderedStatus = '';
+    const DOM_UPDATE_MS = 150;
 
     const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+    function timingsEnabled() {
+        try {
+            return localStorage.getItem('vm_ft_timings') === '1';
+        } catch (_) {
+            return false;
+        }
+    }
 
     function fmtBytes(n) {
         if (!n) return '0 B';
@@ -271,6 +282,11 @@
         lastSample.bytes = bytes;
         lastSample.time = now;
 
+        const statusChanged = status.status !== lastRenderedStatus;
+        lastRenderedStatus = status.status;
+        if (!statusChanged && now - lastDomUpdate < DOM_UPDATE_MS) return;
+        lastDomUpdate = now;
+
         $('progressBar').style.width = percent + '%';
         $('progressPercent').textContent = percent + '%';
         $('progressSpeed').textContent = status.status === 'uploading'
@@ -294,6 +310,7 @@
     /* --- Chunked upload --- */
 
     async function sendChunk(jobId, fileIndex, chunkIndex, blob) {
+        const started = performance.now();
         const response = await fetch(jobUrl(FT_API.jobChunk, jobId), {
             method: 'POST',
             headers: {
@@ -302,16 +319,41 @@
             },
             body: blob,
         });
+        const networkMs = performance.now() - started;
         let data = {};
         try {
             data = await response.json();
         } catch (_) {
             /* ignore */
         }
+        if (timingsEnabled()) {
+            console.log(`[FT] chunk ${fileIndex}:${chunkIndex} network=${Math.round(networkMs)}ms ` +
+                `parse=${Math.round(performance.now() - started - networkMs)}ms`);
+        }
         if (!response.ok) {
-            throw new Error(data.error || `${response.status} ${response.statusText}`);
+            const error = new Error(data.error || `${response.status} ${response.statusText}`);
+            error.status = response.status;
+            throw error;
         }
         return data;
+    }
+
+    function matchingLocalFile(fileState) {
+        const file = chosenFiles[fileState.index];
+        return file && file.name === fileState.name && file.size === fileState.size ? file : null;
+    }
+
+    function applyChunkResult(state, fileState, result, sentBytes) {
+        const received = Number(result.received);
+        const chunks = Number(result.chunks_received);
+        fileState.received = Number.isFinite(received) ? received : fileState.received + sentBytes;
+        fileState.chunks_received = Number.isFinite(chunks) ? chunks : fileState.chunks_received + 1;
+        if (result.file_status) fileState.status = result.file_status;
+        if (result.status) state.status = result.status;
+
+        const total = Number(result.received_bytes);
+        state.received_bytes = Number.isFinite(total) ? total : Number(state.received_bytes || 0) + sentBytes;
+        if (Number.isFinite(Number(result.percent))) state.percent = Number(result.percent);
     }
 
     async function finishJob(status, silentRestore) {
@@ -379,45 +421,68 @@
         setStatus($('uploadStatus'), 'Upload cancelled.', 'error');
     }
 
-    async function runJob(job) {
+    async function sessionExpired() {
+        activeJob = null;
+        localStorage.removeItem(LS_JOB);
+        hideProgress();
+        setStatus($('uploadStatus'), 'Upload session expired on the server.', 'error');
+    }
+
+    async function runJob(job, initialState) {
         const token = ++runToken;
-        while (token === runToken && activeJob && activeJob.id === job.id) {
-            let status;
+        let state = initialState;
+        if (!state) {
             try {
-                status = await api(jobUrl(FT_API.jobStatus, job.id));
+                state = await api(jobUrl(FT_API.jobStatus, job.id));
             } catch (e) {
                 if (e.status === 404) {
-                    activeJob = null;
-                    localStorage.removeItem(LS_JOB);
-                    hideProgress();
-                    setStatus($('uploadStatus'), 'Upload session expired on the server.', 'error');
+                    await sessionExpired();
                     return;
                 }
                 setStatus($('uploadStatus'), 'Connection lost: ' + e.message, 'error');
                 await delay(1000);
-                continue;
             }
+            if (!state) return;
+        }
+        resetSpeed(state.received_bytes);
 
-            updateProgress(status);
-            if (status.status !== 'uploading') {
-                await finishJob(status);
+        while (token === runToken && activeJob && activeJob.id === job.id) {
+            updateProgress(state);
+            if (state.status !== 'uploading') {
+                await finishJob(state);
                 return;
             }
 
-            const next = status.files.find(f =>
+            // The chunk response already carries the new counters: no GET /status
+            // round trip is needed before every chunk any more.
+            const next = state.files.find(f =>
                 (f.status === 'pending' || f.status === 'uploading') && f.received < f.size);
             if (!next) {
                 await delay(250);
+                try {
+                    state = await api(jobUrl(FT_API.jobStatus, job.id));
+                } catch (e) {
+                    if (e.status === 404) {
+                        await sessionExpired();
+                        return;
+                    }
+                }
                 continue;
             }
 
-            let blob = null;
-            try {
-                blob = await dbGet(`${job.id}:${next.index}`);
-            } catch (_) {
-                /* fall back to files chosen in this tab */
+            const blobStarted = performance.now();
+            let blob = matchingLocalFile(next);
+            let source = blob ? 'memory' : 'indexeddb';
+            if (!blob) {
+                try {
+                    blob = await dbGet(`${job.id}:${next.index}`);
+                } catch (_) {
+                    /* no stored copy — the file is gone */
+                }
             }
-            if (!blob && chosenFiles[next.index]) blob = chosenFiles[next.index];
+            if (timingsEnabled()) {
+                console.log(`[FT] blob ${next.index}: ${source}, ${Math.round(performance.now() - blobStarted)}ms`);
+            }
             if (!blob) {
                 setStatus($('uploadStatus'),
                     'Selected files are no longer available in this browser. Please select them again.',
@@ -426,16 +491,36 @@
                 return;
             }
 
-            const from = next.chunks_received * job.chunk_size;
+            const chunkSize = Number(state.chunk_size) || job.chunk_size;
+            const from = next.chunks_received * chunkSize;
             if (from >= blob.size) {
                 await delay(200);
                 continue;
             }
-            const to = Math.min(from + job.chunk_size, blob.size);
+            const to = Math.min(from + chunkSize, blob.size);
             try {
-                await sendChunk(job.id, next.index, next.chunks_received, blob.slice(from, to));
+                const result = await sendChunk(job.id, next.index, next.chunks_received, blob.slice(from, to));
+                applyChunkResult(state, next, result, to - from);
+                if (state.status !== 'uploading') {
+                    try {
+                        state = await api(jobUrl(FT_API.jobStatus, job.id));
+                    } catch (_) {
+                        /* the light response still holds the final counters */
+                    }
+                }
             } catch (e) {
+                if (e.status === 404) {
+                    await sessionExpired();
+                    return;
+                }
                 setStatus($('uploadStatus'), 'Retrying: ' + e.message, 'error');
+                if (e.status === 409) {
+                    try {
+                        state = await api(jobUrl(FT_API.jobStatus, job.id));
+                    } catch (_) {
+                        /* keep the local counters and retry */
+                    }
+                }
                 await delay(900);
             }
         }
@@ -487,7 +572,7 @@
             if (status.status !== 'uploading') {
                 await finishJob(status);
             } else {
-                runJob(job);
+                runJob(job, status);
             }
         } catch (e) {
             setStatus($('uploadStatus'), 'Could not start upload: ' + e.message, 'error');
@@ -526,7 +611,7 @@
             showProgress();
             updateProgress(status);
             setStatus($('uploadStatus'), 'Upload resumed in the background.');
-            runJob(job);
+            runJob(job, status);
         } catch (e) {
             if (e.status === 404) {
                 localStorage.removeItem(LS_JOB);

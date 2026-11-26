@@ -21,7 +21,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from flask import jsonify, render_template, request
+from flask import current_app, jsonify, render_template, request
 
 from db.connection import APP_DATA_DIR
 
@@ -46,12 +46,14 @@ DEFAULTS = {
 
 _INVALID_CHARS = re.compile(r'[<>:"|?*\x00-\x1f]')
 _COLLISION_MODES = ('rename', 'overwrite', 'skip')
-CHUNK_SIZE = 1024 * 1024
+CHUNK_SIZE = 8 * 1024 * 1024
 MAX_CHUNK_SIZE = 8 * 1024 * 1024
 JOB_TTL_SECONDS = 24 * 60 * 60
 MAX_FILES_PER_JOB = 5000
+JOB_SAVE_INTERVAL = 2.0
 
 _jobs = {}
+_job_save_times = {}
 _jobs_lock = threading.RLock()
 
 
@@ -188,6 +190,15 @@ def save_job(job):
     os.replace(tmp, path)
 
 
+def maybe_save_job(job, force=False):
+    """Persist state, but not on every chunk: the JSON grows with file count."""
+    job_id = job['id']
+    now = time.time()
+    if force or now - _job_save_times.get(job_id, 0) >= JOB_SAVE_INTERVAL:
+        save_job(job)
+        _job_save_times[job_id] = now
+
+
 def cleanup_jobs():
     """Drop finished/abandoned jobs older than one day."""
     now = time.time()
@@ -195,6 +206,7 @@ def cleanup_jobs():
         for job_id, job in list(_jobs.items()):
             if now - job['updated'] > JOB_TTL_SECONDS:
                 _jobs.pop(job_id, None)
+                _job_save_times.pop(job_id, None)
                 shutil.rmtree(job['dir'], ignore_errors=True)
         try:
             for entry in os.scandir(JOBS_DIR):
@@ -247,6 +259,7 @@ def job_payload(job):
         'job_id': job['id'],
         'status': job['status'],
         'folder': job.get('folder') or '',
+        'chunk_size': CHUNK_SIZE,
         'total_bytes': total,
         'received_bytes': received,
         'percent': min(100, round(received * 100 / total)) if total else 100,
@@ -256,6 +269,24 @@ def job_payload(job):
         'errors': job['errors'],
         'started': _iso(job['started']),
         'updated': _iso(job['updated']),
+    }
+
+
+def chunk_payload(job, file_state):
+    """Small response for a single accepted chunk (no full file list)."""
+    total = int(job['total_bytes'])
+    received = sum(int(f['received']) for f in job['files'])
+    return {
+        'job_id': job['id'],
+        'status': job['status'],
+        'chunk_size': CHUNK_SIZE,
+        'file_index': file_state['index'],
+        'file_status': file_state['status'],
+        'received': int(file_state['received']),
+        'chunks_received': int(file_state['chunks_received']),
+        'received_bytes': received,
+        'total_bytes': total,
+        'percent': min(100, round(received * 100 / total)) if total else 100,
     }
 
 
@@ -305,14 +336,15 @@ def finalize_job(job):
 
     job['status'] = 'completed'
     job['updated'] = time.time()
-    save_job(job)
+    maybe_save_job(job, force=True)
 
 
 def maybe_finalize(job):
     for f in job['files']:
         if f['accept'] and f['status'] not in ('done', 'error', 'skipped'):
-            return
+            return False
     finalize_job(job)
+    return True
 
 
 @file_transfer_bp.route('/')
@@ -466,7 +498,7 @@ def start_upload():
     with _jobs_lock:
         _jobs[job_id] = job
         maybe_finalize(job)
-        save_job(job)
+        maybe_save_job(job, force=True)
         payload = job_payload(job)
 
     return jsonify({
@@ -478,28 +510,43 @@ def start_upload():
 
 @file_transfer_bp.route('/api/upload/<job_id>/chunk', methods=['POST'])
 def upload_chunk(job_id):
-    job = get_job(job_id)
-    if job is None:
+    if get_job(job_id) is None:
         return jsonify({'error': 'Upload job not found'}), 404
 
+    index_raw = request.headers.get('X-File-Index')
+    chunk_raw = request.headers.get('X-Chunk-Index')
+    if index_raw is None or chunk_raw is None:
+        index_raw = request.form.get('index', -1)
+        chunk_raw = request.form.get('chunk', -1)
+    try:
+        index = int(index_raw)
+        chunk_index = int(chunk_raw)
+    except (TypeError, ValueError):
+        return jsonify({'error': 'Invalid chunk index'}), 400
+
+    # Reading an 8 MiB body over WiFi can take a second. Do it before taking
+    # the global lock so /status, /cancel and other jobs are not blocked.
+    content_length = request.content_length
+    if content_length is not None and content_length > MAX_CHUNK_SIZE:
+        return jsonify({'error': 'Chunk is too large'}), 413
+    read_started = time.perf_counter()
+    data = request.get_data()
+    read_ms = (time.perf_counter() - read_started) * 1000
+    if not data:
+        return jsonify({'error': 'Empty chunk'}), 400
+    if len(data) > MAX_CHUNK_SIZE:
+        return jsonify({'error': 'Chunk is too large'}), 413
+
     with _jobs_lock:
+        job = get_job(job_id)
+        if job is None:
+            return jsonify({'error': 'Upload job not found'}), 404
+        # The job may have been cancelled while the body was still arriving.
         if job['status'] != 'uploading':
             return jsonify({
                 'error': 'Upload job is not active',
                 'status': job['status'],
             }), 409
-
-        index_raw = request.headers.get('X-File-Index')
-        chunk_raw = request.headers.get('X-Chunk-Index')
-        if index_raw is None or chunk_raw is None:
-            index_raw = request.form.get('index', -1)
-            chunk_raw = request.form.get('chunk', -1)
-        try:
-            index = int(index_raw)
-            chunk_index = int(chunk_raw)
-        except (TypeError, ValueError):
-            return jsonify({'error': 'Invalid chunk index'}), 400
-
         if index < 0 or index >= len(job['files']):
             return jsonify({'error': 'Invalid file index'}), 400
         file_state = job['files'][index]
@@ -507,33 +554,36 @@ def upload_chunk(job_id):
             return jsonify({'error': 'This file is not being uploaded'}), 409
 
         if chunk_index < file_state['chunks_received']:
-            return jsonify(job_payload(job))  # already received after a refresh
+            return jsonify(chunk_payload(job, file_state))  # already received after a refresh
         if chunk_index != file_state['chunks_received']:
             return jsonify({'error': 'Chunk out of order'}), 409
-
-        data = request.get_data()
-        if not data:
-            return jsonify({'error': 'Empty chunk'}), 400
-        if len(data) > MAX_CHUNK_SIZE:
-            return jsonify({'error': 'Chunk is too large'}), 413
         if file_state['received'] + len(data) > file_state['size']:
             return jsonify({'error': 'Chunk exceeds the declared file size'}), 400
 
+        write_started = time.perf_counter()
         try:
             with open(file_state['temp'], 'ab') as out:
                 out.write(data)
         except OSError as e:
             return jsonify({'error': f'Cannot save chunk: {e}'}), 500
+        write_ms = (time.perf_counter() - write_started) * 1000
 
+        file_done = file_state['received'] + len(data) >= file_state['size']
         file_state['received'] += len(data)
         file_state['chunks_received'] += 1
         job['updated'] = time.time()
-        if file_state['received'] >= file_state['size']:
+        if file_done:
             file_state['status'] = 'done'
 
-        maybe_finalize(job)
-        save_job(job)
-        return jsonify(job_payload(job))
+        save_started = time.perf_counter()
+        finalized = maybe_finalize(job)
+        maybe_save_job(job, force=finalized or file_done)
+        save_ms = (time.perf_counter() - save_started) * 1000
+        current_app.logger.debug(
+            '[transfer] job=%s file=%s chunk=%s bytes=%d read=%.0fms write=%.0fms persist=%.0fms',
+            job_id, index, chunk_index, len(data), read_ms, write_ms, save_ms,
+        )
+        return jsonify(chunk_payload(job, file_state))
 
 
 @file_transfer_bp.route('/api/upload/<job_id>/status')
@@ -561,7 +611,7 @@ def cancel_upload(job_id):
                         Path(f['temp']).unlink(missing_ok=True)
                     except OSError:
                         pass
-            save_job(job)
+            maybe_save_job(job, force=True)
         return jsonify(job_payload(job))
 
 
