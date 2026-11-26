@@ -7,6 +7,8 @@
 """
 import os
 import subprocess
+
+from helpers.subprocess_utils import hidden_process_kwargs
 from .connection import APP_DATA_DIR
 
 
@@ -37,16 +39,8 @@ def _get_ffmpeg_path():
 
 
 def _subprocess_kwargs():
-    """Общие параметры для subprocess.run.
-
-    encoding + errors критично важны на Windows: без них Python
-    читает вывод как cp1252 и падает на кириллических путях.
-    """
-    return dict(
-        capture_output=True,
-        encoding='utf-8',
-        errors='replace',
-    )
+    """Общие параметры для subprocess.run без мигающего терминала."""
+    return hidden_process_kwargs(capture_output=True)
 
 
 def ensure_dir():

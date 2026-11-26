@@ -32,6 +32,7 @@ from flask import render_template, request, jsonify, abort
 
 from models import get_video_by_id, get_all_videos, get_db_connection
 from helpers.profiles import get_current_profile
+from helpers.subprocess_utils import hidden_process_kwargs
 
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -47,7 +48,7 @@ print(f"[editor] FFPROBE = {FFPROBE}")
 
 
 def _sp_kwargs():
-    return dict(capture_output=True, encoding='utf-8', errors='replace')
+    return hidden_process_kwargs(capture_output=True)
 
 
 def probe_video(path):

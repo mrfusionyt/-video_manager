@@ -24,6 +24,8 @@ import threading
 import time
 from datetime import datetime
 
+from helpers.subprocess_utils import hidden_process_kwargs
+
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 FFMPEG_PATH = os.path.join(BASE_DIR, '_dop', 'ffmpeg.exe')
@@ -106,11 +108,7 @@ def _save_probe_cache():
 
 
 def _subprocess_kwargs():
-    return dict(
-        capture_output=True,
-        encoding='utf-8',
-        errors='replace',
-    )
+    return hidden_process_kwargs(capture_output=True)
 
 
 def _probe_full(filepath):

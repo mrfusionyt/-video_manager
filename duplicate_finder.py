@@ -34,6 +34,7 @@ import imagehash
 
 from models import get_all_videos, get_db_connection, get_video_by_id, delete_video
 from converter import move_to_broken
+from helpers.subprocess_utils import hidden_process_kwargs
 
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -541,8 +542,7 @@ def _extract_audio_fingerprint(filepath):
         r = subprocess.run(
             [FPCALC_PATH, '-raw', '-json',
              '-length', str(AUDIO_FPCALC_MAX_LENGTH), filepath],
-            capture_output=True, text=True, timeout=180,
-            encoding='utf-8', errors='replace',
+            **hidden_process_kwargs(capture_output=True, text=True, timeout=180),
         )
         if r.returncode != 0 or not r.stdout:
             return None

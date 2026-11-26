@@ -42,6 +42,7 @@ from scanner import (
 )
 from config import app_config, save_config
 from helpers.profiles import get_current_profile, profile_to_mode
+from helpers.subprocess_utils import hidden_process_kwargs
 from duplicate_finder import (
     find_duplicates_async,
     get_duplicate_groups,
@@ -101,17 +102,17 @@ def _spawn_restart():
             os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         )
 
-        kwargs = {
-            \'close_fds\': True,
-            \'stdin\': subprocess.DEVNULL,
-            \'stdout\': subprocess.DEVNULL,
-            \'stderr\': subprocess.DEVNULL,
-            \'cwd\': base_dir,
-        }
+        kwargs = hidden_process_kwargs(
+            close_fds=True,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            cwd=base_dir,
+        )
         if sys.platform == \'win32\':
             DETACHED_PROCESS = 0x00000008
             CREATE_NEW_PROCESS_GROUP = 0x00000200
-            kwargs[\'creationflags\'] = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+            kwargs[\'creationflags\'] |= DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
 
         proc = subprocess.Popen(cmd, **kwargs)
         print(f"[restart] new process spawned pid={proc.pid} cmd={cmd}")

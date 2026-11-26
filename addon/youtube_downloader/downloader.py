@@ -8,6 +8,8 @@ import threading
 import subprocess
 from datetime import datetime
 
+from helpers.subprocess_utils import hidden_process_kwargs
+
 
 TASKS = {}
 _lock = threading.Lock()
@@ -424,9 +426,10 @@ def _try_get_channel_name(url):
     ]
     try:
         result = subprocess.run(
-            cmd, capture_output=True, text=True,
-            encoding='utf-8', errors='replace',
-            env=_sp_env(), timeout=120,
+            cmd, **hidden_process_kwargs(
+                capture_output=True, text=True,
+                env=_sp_env(), timeout=120,
+            ),
         )
     except subprocess.TimeoutExpired:
         print(f"[youtube] channel name: timeout for {url}")
@@ -516,9 +519,10 @@ def _collect_shorts_urls(channel_url):
     print(f"[youtube] collecting shorts: {' '.join(cmd)}")
     try:
         result = subprocess.run(
-            cmd, capture_output=True, text=True,
-            encoding='utf-8', errors='replace',
-            env=_sp_env(), timeout=180,
+            cmd, **hidden_process_kwargs(
+                capture_output=True, text=True,
+                env=_sp_env(), timeout=180,
+            ),
         )
     except subprocess.TimeoutExpired:
         print("[youtube] shorts collection timed out")
@@ -632,9 +636,10 @@ def _run_download(task_id):
 
     try:
         proc = subprocess.Popen(
-            cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            text=True, encoding='utf-8', errors='replace',
-            bufsize=1, cwd=save_dir, env=_sp_env(),
+            cmd, **hidden_process_kwargs(
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                text=True, bufsize=1, cwd=save_dir, env=_sp_env(),
+            ),
         )
         with _lock:
             TASKS[task_id]['process'] = proc
@@ -739,9 +744,10 @@ def _run_channel_shorts(task_id, url, save_dir):
         cmd = _build_command_single(video_url, save_dir)
         try:
             proc = subprocess.Popen(
-                cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                text=True, encoding='utf-8', errors='replace',
-                bufsize=1, cwd=save_dir, env=_sp_env(),
+                cmd, **hidden_process_kwargs(
+                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                    text=True, bufsize=1, cwd=save_dir, env=_sp_env(),
+                ),
             )
             with _lock:
                 TASKS[task_id]['process'] = proc

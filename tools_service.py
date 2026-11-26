@@ -17,6 +17,8 @@ import subprocess
 import uuid
 import time
 
+from helpers.subprocess_utils import hidden_process_kwargs
+
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 FFMPEG = os.path.join(BASE_DIR, '_dop', 'ffmpeg.exe')
@@ -45,11 +47,7 @@ TASK_LOCK = threading.Lock()
 
 
 def _subprocess_kwargs():
-    return dict(
-        capture_output=True,
-        encoding='utf-8',
-        errors='replace',
-    )
+    return hidden_process_kwargs(capture_output=True)
 
 
 # ===================================================================

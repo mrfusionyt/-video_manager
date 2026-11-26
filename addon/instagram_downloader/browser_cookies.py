@@ -6,6 +6,8 @@ import sqlite3
 import tempfile
 import subprocess
 
+from helpers.subprocess_utils import hidden_process_kwargs
+
 
 # ===================================================================
 #                     ПОИСК И ЧТЕНИЕ COOKIES
@@ -46,7 +48,7 @@ def close_firefox():
         try:
             subprocess.run(
                 ['taskkill', '/IM', 'firefox.exe'],
-                capture_output=True, text=True, timeout=10
+                **hidden_process_kwargs(capture_output=True, text=True, timeout=10),
             )
         except Exception as e:
             print(f"[browser_cookies] soft close error: {e}")
@@ -61,7 +63,7 @@ def close_firefox():
         try:
             subprocess.run(
                 ['taskkill', '/F', '/IM', 'firefox.exe'],
-                capture_output=True, text=True, timeout=10
+                **hidden_process_kwargs(capture_output=True, text=True, timeout=10),
             )
             time.sleep(1)
             return not _is_firefox_running()
@@ -89,7 +91,7 @@ def _is_firefox_running():
         try:
             r = subprocess.run(
                 ['tasklist', '/FI', 'IMAGENAME eq firefox.exe'],
-                capture_output=True, text=True, timeout=5
+                **hidden_process_kwargs(capture_output=True, text=True, timeout=5),
             )
             return 'firefox.exe' in (r.stdout or '').lower()
         except Exception:

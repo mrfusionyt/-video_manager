@@ -15,6 +15,7 @@ import subprocess
 import json
 import threading
 
+from helpers.subprocess_utils import hidden_process_kwargs
 from models import (
     get_libraries, add_video, get_db_connection, delete_video, get_video_by_id,
 )
@@ -106,11 +107,7 @@ def _cache_set_playable(path, playable, reason=''):
 #                     subprocess helpers
 # ===================================================================
 def _subprocess_kwargs():
-    return dict(
-        capture_output=True,
-        encoding='utf-8',
-        errors='replace',
-    )
+    return hidden_process_kwargs(capture_output=True)
 
 
 def is_scan_in_progress():
